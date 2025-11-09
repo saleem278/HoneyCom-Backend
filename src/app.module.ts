@@ -21,6 +21,7 @@ import { StoresModule } from './modules/stores/stores.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { SeedModule } from './modules/seed/seed.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { CouponsModule } from './modules/coupons/coupons.module';
     ]),
 
     // Feature Modules
+    HealthModule,
     AuthModule,
     UsersModule,
     ProductsModule,

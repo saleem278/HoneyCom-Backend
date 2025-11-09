@@ -47,9 +47,9 @@ async function bootstrap() {
     })
   );
 
-  // Global prefix - exclude Swagger paths
+  // Global prefix - exclude Swagger paths and health check
   app.setGlobalPrefix('api', {
-    exclude: ['api-docs', 'api-docs-json'],
+    exclude: ['api-docs', 'api-docs-json', 'health'],
   });
 
   // Swagger Documentation

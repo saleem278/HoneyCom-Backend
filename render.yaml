@@ -1,0 +1,26 @@
+# Render Blueprint Configuration
+# This file allows you to define your infrastructure as code
+# Deploy using: render.com/dashboard or via Render CLI
+
+services:
+  - type: web
+    name: honey-backend
+    env: node
+    region: oregon  # Change to your preferred region
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:prod
+    rootDir: backend
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      # Add these in Render dashboard:
+      # - MONGODB_URI
+      # - JWT_SECRET
+      # - FRONTEND_URL
+      # - CLOUDINARY_CLOUD_NAME
+      # - CLOUDINARY_API_KEY
+      # - CLOUDINARY_API_SECRET
+
