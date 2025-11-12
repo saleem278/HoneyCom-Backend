@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
@@ -10,6 +10,7 @@ import { AuthModule } from '../auth/auth.module';
 import { EmailService } from '../../services/email.service';
 import { PdfService } from '../../services/pdf.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ExchangeRateService } from '../../services/exchange-rate.service';
       { name: 'Address', schema: AddressSchema },
     ]),
     AuthModule,
+    forwardRef(() => PaymentsModule),
   ],
   controllers: [OrdersController],
   providers: [OrdersService, EmailService, PdfService, ExchangeRateService],

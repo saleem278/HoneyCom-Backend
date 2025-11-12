@@ -340,6 +340,7 @@ export class OrdersService {
     const order = await this.orderModel.findById(id)
       .populate('customer', 'name email phone')
       .populate('shippingAddress')
+      .populate('items.product', '_id')
       .lean();
 
     if (!order) {
@@ -347,13 +348,29 @@ export class OrdersService {
     }
 
     // Authorization check
-    if (userRole !== 'admin') {
+    if (userRole !== 'admin' && userRole !== 'seller') {
       const customerId = typeof order.customer === 'object' && order.customer !== null
         ? (order.customer as any)._id?.toString()
         : order.customer?.toString();
       
       if (customerId !== userId) {
         throw new BadRequestException('Not authorized');
+      }
+    }
+
+    // For sellers, verify they own products in this order
+    if (userRole === 'seller') {
+      const products = await this.productModel.find({ seller: userId }).select('_id').lean();
+      const productIds = products.map((p: any) => p._id.toString());
+      const orderHasSellerProducts = (order.items as any[]).some((item: any) => {
+        const itemProductId = typeof item.product === 'object' && item.product !== null
+          ? item.product._id?.toString()
+          : item.product?.toString();
+        return productIds.includes(itemProductId);
+      });
+
+      if (!orderHasSellerProducts) {
+        throw new BadRequestException('Not authorized to view this order');
       }
     }
 
@@ -429,6 +446,40 @@ export class OrdersService {
       pdfUrl,
       message: 'Shipping label generated successfully',
     };
+  }
+
+  /**
+   * Update order payment status by payment intent ID
+   * Used by webhook handlers
+   */
+  async updatePaymentStatusByIntentId(
+    paymentIntentId: string,
+    paymentStatus: 'paid' | 'failed' | 'refunded',
+    orderStatus?: 'processing' | 'cancelled' | 'refunded',
+  ) {
+    const order = await this.orderModel.findOne({ paymentIntentId });
+    
+    if (!order) {
+      throw new NotFoundException('Order not found for payment intent');
+    }
+
+    const updateData: any = { paymentStatus };
+    if (orderStatus) {
+      updateData.status = orderStatus;
+    }
+
+    // If payment succeeded, set status to processing
+    if (paymentStatus === 'paid' && !orderStatus) {
+      updateData.status = 'processing';
+    }
+
+    const updatedOrder = await this.orderModel.findByIdAndUpdate(
+      order._id,
+      updateData,
+      { new: true }
+    );
+
+    return { success: true, order: updatedOrder };
   }
 }
 

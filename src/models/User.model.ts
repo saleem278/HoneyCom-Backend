@@ -33,6 +33,7 @@ export interface IUser extends Document {
     approvalStatus?: 'pending' | 'approved' | 'rejected';
     submittedAt?: Date;
   };
+  lastLogin?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -130,6 +131,9 @@ const UserSchema: Schema = new Schema(
         default: 'pending',
       },
       submittedAt: Date,
+    },
+    lastLogin: {
+      type: Date,
     },
   },
   {

@@ -10,7 +10,7 @@ export class ExchangeRateService {
   // Base exchange rates relative to USD (reference currency)
   // These rates represent: 1 USD = rate * targetCurrency
   // We use USD as reference because most exchange rate APIs use USD as base
-  private readonly baseRatesToUSD: Record<Currency, number> = {
+  private baseRatesToUSD: Record<Currency, number> = {
     USD: 1.0,      // Reference currency
     EUR: 0.92,     // 1 USD = 0.92 EUR
     GBP: 0.79,     // 1 USD = 0.79 GBP
@@ -154,30 +154,34 @@ export class ExchangeRateService {
    */
   private async loadExchangeRates(): Promise<void> {
     try {
-      // TODO: Implement API call to fetch real-time exchange rates
-      // Example: Fetch rates with USD as base (most APIs use USD)
-      // const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-      // const data = await response.json();
-      // 
-      // Update baseRatesToUSD:
-      // this.baseRatesToUSD = {
-      //   USD: 1.0,
-      //   EUR: data.rates.EUR,
-      //   GBP: data.rates.GBP,
-      //   INR: data.rates.INR,
-      //   CAD: data.rates.CAD,
-      //   AUD: data.rates.AUD,
-      //   JPY: data.rates.JPY,
-      // };
-      //
-      // Then recalculate rates for current base currency:
-      // this.calculateExchangeRates();
+      // Fetch real-time exchange rates from exchangerate-api.com (free tier)
+      const apiUrl = process.env.EXCHANGE_RATE_API_URL || 'https://api.exchangerate-api.com/v4/latest/USD';
       
-      // For now, using static rates
-      // Exchange rates loaded
+      const response = await fetch(apiUrl);
+      if (!response.ok) {
+        throw new Error(`Exchange rate API returned ${response.status}`);
+      }
+      
+      const data = await response.json() as { rates?: Record<string, number> };
+      
+      // Update baseRatesToUSD with fetched rates
+      if (data.rates) {
+        this.baseRatesToUSD = {
+          USD: 1.0,
+          EUR: data.rates.EUR || this.baseRatesToUSD.EUR,
+          GBP: data.rates.GBP || this.baseRatesToUSD.GBP,
+          INR: data.rates.INR || this.baseRatesToUSD.INR,
+          CAD: data.rates.CAD || this.baseRatesToUSD.CAD,
+          AUD: data.rates.AUD || this.baseRatesToUSD.AUD,
+          JPY: data.rates.JPY || this.baseRatesToUSD.JPY,
+        };
+        
+        // Recalculate rates for current base currency
+        this.calculateExchangeRates();
+      }
     } catch (error) {
-      // Error loading exchange rates
-      // Continue with static rates if API fails
+      // Error loading exchange rates - continue with static rates if API fails
+      console.warn('Failed to fetch exchange rates from API, using static rates:', error);
     }
   }
 

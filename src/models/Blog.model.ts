@@ -9,11 +9,12 @@ export interface IBlog extends Document {
   category: mongoose.Types.ObjectId;
   tags: string[];
   author: mongoose.Types.ObjectId;
-  status: 'draft' | 'published';
+  status: 'draft' | 'published' | 'scheduled';
   metaTitle?: string;
   metaDescription?: string;
   keywords?: string[];
   publishedAt?: Date;
+  scheduledAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -61,7 +62,7 @@ const BlogSchema: Schema = new Schema(
     },
     status: {
       type: String,
-      enum: ['draft', 'published'],
+      enum: ['draft', 'published', 'scheduled'],
       default: 'draft',
     },
     metaTitle: {
@@ -77,6 +78,9 @@ const BlogSchema: Schema = new Schema(
       default: [],
     },
     publishedAt: {
+      type: Date,
+    },
+    scheduledAt: {
       type: Date,
     },
   },

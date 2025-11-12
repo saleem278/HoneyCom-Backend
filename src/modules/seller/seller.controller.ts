@@ -34,6 +34,13 @@ export class SellerController {
     return this.sellerService.getOrders(req.user.id);
   }
 
+  @Get('orders/:id')
+  @ApiOperation({ summary: 'Get seller order by ID' })
+  @ApiResponse({ status: 200, description: 'Order details' })
+  async getOrderById(@Param('id') id: string, @Request() req) {
+    return this.sellerService.getOrderById(id, req.user.id);
+  }
+
   @Put('orders/:id/status')
   @ApiOperation({ summary: 'Update order status' })
   @ApiResponse({ status: 200, description: 'Order status updated' })

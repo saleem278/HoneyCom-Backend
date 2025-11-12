@@ -266,7 +266,7 @@ export class AdminService {
       totalSpent: orders.reduce((sum, order) => sum + (order.total || 0), 0),
       lastOrderDate: orders[0]?.createdAt || null,
       accountCreated: user.createdAt,
-      lastLogin: user.updatedAt, // TODO: Track last login separately
+      lastLogin: user.lastLogin || user.updatedAt,
     };
 
     // If seller, get product count

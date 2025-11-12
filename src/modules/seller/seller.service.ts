@@ -61,11 +61,55 @@ export class SellerService {
     const orders = await this.orderModel
       .find({ 'items.product': { $in: productIds } })
       .populate('customer', 'name email')
+      .populate('shippingAddress', 'firstName lastName addressLine1 addressLine2 city state zipCode country phone')
       .sort({ createdAt: -1 });
     
     return {
       success: true,
       orders,
+    };
+  }
+
+  async getOrderById(orderId: string, sellerId: string) {
+    const order = await this.orderModel
+      .findById(orderId)
+      .populate('customer', 'name email')
+      .populate('shippingAddress', 'firstName lastName addressLine1 addressLine2 city state zipCode country phone')
+      .populate('items.product', 'name images price')
+      .lean();
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    // Verify seller owns products in this order
+    const products = await this.productModel.find({ seller: sellerId }).select('_id');
+    const productIds = products.map(p => p._id);
+    const orderHasSellerProducts = (order.items as any[]).some((item: any) => 
+      productIds.some(pid => pid.toString() === item.product?.toString() || pid.toString() === item.product?._id?.toString())
+    );
+
+    if (!orderHasSellerProducts) {
+      throw new BadRequestException('Not authorized to view this order');
+    }
+
+    // Transform items to match frontend expectations
+    const orderObj = order as any;
+    if (orderObj.items) {
+      orderObj.items = orderObj.items.map((item: any) => ({
+        ...item,
+        product: item.product || {
+          _id: item.product,
+          name: item.name,
+          images: item.image ? [item.image] : [],
+          price: item.price,
+        },
+      }));
+    }
+
+    return {
+      success: true,
+      order: orderObj,
     };
   }
 

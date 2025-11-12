@@ -52,9 +52,11 @@ export class AuthService {
     // Send verification email
     try {
       await this.emailService.sendVerificationEmail(email, verificationToken);
-    } catch (error) {
-      // Error sending verification email
-      // Don't fail registration if email fails
+      console.log(`Verification email sent to ${email}`);
+    } catch (error: any) {
+      // Log error for debugging
+      console.error('Failed to send verification email:', error.message || error);
+      // Don't fail registration if email fails, but log the error
     }
 
     return {
@@ -124,11 +126,46 @@ export class AuthService {
     // Send verification email
     try {
       await this.emailService.sendVerificationEmail(email, verificationToken);
-    } catch (error) {
-      // Error sending verification email
+      console.log(`✅ Verification email sent to ${email}`);
+    } catch (error: any) {
+      // Log error for debugging
+      console.error('❌ Failed to send verification email:', error.message || error);
+      // Don't fail registration if email fails, but log the error
     }
 
-    // TODO: Notify admin about new seller registration
+    // Notify admin about new seller registration
+    try {
+      const adminUsers = await this.userModel.find({ role: 'admin' }).select('email name');
+      const adminEmails = adminUsers.map(admin => admin.email).filter(Boolean);
+      
+      if (adminEmails.length > 0 && this.emailService) {
+        const adminNotificationHtml = `
+          <h1>New Seller Registration</h1>
+          <p>A new seller has registered and is pending approval:</p>
+          <ul>
+            <li><strong>Name:</strong> ${name}</li>
+            <li><strong>Email:</strong> ${email}</li>
+            <li><strong>Business Name:</strong> ${businessName || 'N/A'}</li>
+          </ul>
+          <p><a href="${process.env.FRONTEND_URL}/admin/sellers">Review Seller Applications</a></p>
+        `;
+        
+        // Send to all admins
+        await Promise.all(adminEmails.map(adminEmail => 
+          this.emailService.sendEmail({
+            to: adminEmail,
+            subject: 'New Seller Registration - Pending Approval',
+            html: adminNotificationHtml,
+          }).catch(err => {
+            // Log error but don't fail registration
+            console.error(`Failed to send notification to ${adminEmail}:`, err);
+          })
+        ));
+      }
+    } catch (error) {
+      // Don't fail registration if notification fails
+      console.error('Error sending admin notification:', error);
+    }
 
     return {
       success: true,

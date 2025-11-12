@@ -4,6 +4,7 @@ import { CmsService } from './cms.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 
 @ApiTags('CMS')
 @Controller('cms')
@@ -179,6 +180,118 @@ export class CmsController {
   @ApiOperation({ summary: 'Submit form data' })
   async submitForm(@Param('id') id: string, @Body() data: any) {
     return this.cmsService.submitForm(id, data);
+  }
+
+  // ========== BLOG CATEGORIES ==========
+  @Get('blog-categories')
+  @ApiOperation({ summary: 'Get all blog categories' })
+  async getBlogCategories() {
+    return this.cmsService.getBlogCategories();
+  }
+
+  @Get('blog-categories/:id')
+  @ApiOperation({ summary: 'Get blog category by ID' })
+  async getBlogCategory(@Param('id') id: string) {
+    return this.cmsService.getBlogCategory(id);
+  }
+
+  @Post('blog-categories')
+  @ApiOperation({ summary: 'Create blog category' })
+  async createBlogCategory(@Body() data: any) {
+    return this.cmsService.createBlogCategory(data);
+  }
+
+  @Put('blog-categories/:id')
+  @ApiOperation({ summary: 'Update blog category' })
+  async updateBlogCategory(@Param('id') id: string, @Body() data: any) {
+    return this.cmsService.updateBlogCategory(id, data);
+  }
+
+  @Delete('blog-categories/:id')
+  @ApiOperation({ summary: 'Delete blog category' })
+  async deleteBlogCategory(@Param('id') id: string) {
+    return this.cmsService.deleteBlogCategory(id);
+  }
+
+  // ========== SITEMAP ==========
+  @Get('sitemap')
+  @UseGuards(OptionalJwtAuthGuard) // Public endpoint for SEO
+  @ApiOperation({ summary: 'Generate sitemap.xml (public)' })
+  @ApiResponse({ status: 200, description: 'Sitemap XML' })
+  async generateSitemap() {
+    return this.cmsService.generateSitemap();
+  }
+
+  // ========== ROBOTS.TXT ==========
+  @Get('robots-txt')
+  @UseGuards(OptionalJwtAuthGuard) // Public endpoint for SEO
+  @ApiOperation({ summary: 'Get robots.txt content (public)' })
+  @ApiResponse({ status: 200, description: 'Robots.txt content' })
+  async getRobotsTxt() {
+    return this.cmsService.getRobotsTxt();
+  }
+
+  @Put('robots-txt')
+  @ApiOperation({ summary: 'Update robots.txt content' })
+  async updateRobotsTxt(@Body() body: { content: string }) {
+    return this.cmsService.updateRobotsTxt(body.content);
+  }
+
+  // ========== VERSION CONTROL ==========
+  @Post('versions/:contentType/:contentId')
+  @ApiOperation({ summary: 'Create version snapshot' })
+  async createVersion(
+    @Param('contentType') contentType: 'page' | 'blog',
+    @Param('contentId') contentId: string,
+    @Request() req,
+  ) {
+    return this.cmsService.createVersion(contentType, contentId, req.user.id);
+  }
+
+  @Get('versions/:contentType/:contentId')
+  @ApiOperation({ summary: 'Get all versions for content' })
+  async getVersions(
+    @Param('contentType') contentType: 'page' | 'blog',
+    @Param('contentId') contentId: string,
+  ) {
+    return this.cmsService.getVersions(contentType, contentId);
+  }
+
+  @Post('versions/:id/restore')
+  @ApiOperation({ summary: 'Restore a version' })
+  async restoreVersion(@Param('id') id: string, @Request() req) {
+    return this.cmsService.restoreVersion(id, req.user.id);
+  }
+
+  // ========== WIDGETS ==========
+  @Get('widgets')
+  @ApiOperation({ summary: 'Get all widgets' })
+  async getWidgets(@Query('location') location?: string) {
+    return this.cmsService.getWidgets(location);
+  }
+
+  @Get('widgets/:id')
+  @ApiOperation({ summary: 'Get widget by ID' })
+  async getWidget(@Param('id') id: string) {
+    return this.cmsService.getWidget(id);
+  }
+
+  @Post('widgets')
+  @ApiOperation({ summary: 'Create widget' })
+  async createWidget(@Body() data: any) {
+    return this.cmsService.createWidget(data);
+  }
+
+  @Put('widgets/:id')
+  @ApiOperation({ summary: 'Update widget' })
+  async updateWidget(@Param('id') id: string, @Body() data: any) {
+    return this.cmsService.updateWidget(id, data);
+  }
+
+  @Delete('widgets/:id')
+  @ApiOperation({ summary: 'Delete widget' })
+  async deleteWidget(@Param('id') id: string) {
+    return this.cmsService.deleteWidget(id);
   }
 }
 
