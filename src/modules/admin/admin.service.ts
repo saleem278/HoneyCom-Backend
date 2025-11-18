@@ -164,14 +164,19 @@ export class AdminService {
       throw new BadRequestException('Invalid status. Must be "active" or "suspended"');
     }
 
-    const user = await this.userModel.findByIdAndUpdate(
-      userId,
-      { status },
-      { new: true }
-    );
+    const user = await this.userModel.findById(userId);
     if (!user) {
       throw new NotFoundException('User not found');
     }
+
+    // Prevent suspending admin users
+    if (user.role === 'admin' && status === 'suspended') {
+      throw new BadRequestException('Admin users cannot be suspended');
+    }
+
+    user.status = status;
+    await user.save();
+
     return {
       success: true,
       user,
