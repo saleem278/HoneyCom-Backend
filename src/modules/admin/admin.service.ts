@@ -159,7 +159,7 @@ export class AdminService {
     };
   }
 
-  async updateUserStatus(userId: string, status: string) {
+  async updateUserStatus(userId: string, status: 'active' | 'inactive' | 'suspended') {
     if (!['active', 'suspended'].includes(status)) {
       throw new BadRequestException('Invalid status. Must be "active" or "suspended"');
     }
