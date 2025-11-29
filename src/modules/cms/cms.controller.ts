@@ -14,6 +14,13 @@ import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 export class CmsController {
   constructor(private readonly cmsService: CmsService) {}
 
+  // ========== DASHBOARD ==========
+  @Get('dashboard')
+  @ApiOperation({ summary: 'Get CMS dashboard statistics' })
+  async getDashboard() {
+    return this.cmsService.getDashboard();
+  }
+
   // ========== PAGES ==========
   @Get('pages')
   @ApiOperation({ summary: 'Get all pages' })

@@ -29,6 +29,54 @@ export class CmsService {
     private configService: ConfigService,
   ) {}
 
+  // ========== DASHBOARD ==========
+  async getDashboard() {
+    const [
+      totalPages,
+      publishedPages,
+      draftPages,
+      totalBlogPosts,
+      publishedBlogPosts,
+      draftBlogPosts,
+      totalMedia,
+      recentPages,
+      recentBlogPosts,
+    ] = await Promise.all([
+      this.pageModel.countDocuments(),
+      this.pageModel.countDocuments({ status: 'published' }),
+      this.pageModel.countDocuments({ status: 'draft' }),
+      this.blogModel.countDocuments(),
+      this.blogModel.countDocuments({ status: 'published' }),
+      this.blogModel.countDocuments({ status: 'draft' }),
+      this.mediaModel.countDocuments(),
+      this.pageModel
+        .find()
+        .sort({ updatedAt: -1 })
+        .limit(5)
+        .select('_id title status updatedAt')
+        .lean(),
+      this.blogModel
+        .find()
+        .sort({ updatedAt: -1 })
+        .limit(5)
+        .select('_id title status updatedAt')
+        .lean(),
+    ]);
+
+    return {
+      success: true,
+      totalPages,
+      publishedPages,
+      draftPages,
+      totalBlogPosts,
+      publishedBlogPosts,
+      draftBlogPosts,
+      totalMedia,
+      recentPages,
+      recentBlogPosts,
+    };
+  }
+
   // ========== PAGES ==========
   async getPages(status?: string, page: number = 1, limit: number = 20) {
     const filter: any = {};

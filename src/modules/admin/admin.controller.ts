@@ -46,7 +46,7 @@ export class AdminController {
   @Put('users/:id/status')
   @ApiOperation({ summary: 'Update user status (suspend/unsuspend)' })
   @ApiResponse({ status: 200, description: 'User status updated' })
-  async updateUserStatus(@Param('id') id: string, @Body() body: { status: string }) {
+  async updateUserStatus(@Param('id') id: string, @Body() body: { status: 'active' | 'inactive' | 'suspended' }) {
     return this.adminService.updateUserStatus(id, body.status);
   }
 

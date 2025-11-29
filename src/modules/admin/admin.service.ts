@@ -21,10 +21,38 @@ export class AdminService {
 
   async getDashboard() {
     const totalUsers = await this.userModel.countDocuments();
+    const totalSellers = await this.userModel.countDocuments({ role: 'seller' });
     const totalProducts = await this.productModel.countDocuments();
     const totalOrders = await this.orderModel.countDocuments();
+    
+    // Count pending sellers
+    const pendingSellers = await this.userModel.countDocuments({
+      role: 'seller',
+      'sellerInfo.approvalStatus': 'pending',
+    });
+    
+    // Count pending products
+    const pendingProducts = await this.productModel.countDocuments({
+      status: 'pending',
+    });
+    
+    // Calculate total revenue
     const totalRevenue = await this.orderModel.aggregate([
       { $match: { status: 'delivered' } },
+      { $group: { _id: null, total: { $sum: '$total' } } },
+    ]);
+
+    // Calculate monthly revenue (current month)
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+    const monthlyRevenue = await this.orderModel.aggregate([
+      { 
+        $match: { 
+          status: 'delivered',
+          createdAt: { $gte: startOfMonth }
+        } 
+      },
       { $group: { _id: null, total: { $sum: '$total' } } },
     ]);
 
@@ -36,13 +64,43 @@ export class AdminService {
       .populate('customer', 'name email')
       .lean();
 
+    // Get top products (by sales/revenue)
+    const topProducts = await this.orderModel.aggregate([
+      { $match: { status: 'delivered' } },
+      { $unwind: '$items' },
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'items.product',
+          foreignField: '_id',
+          as: 'product',
+        },
+      },
+      { $unwind: '$product' },
+      {
+        $group: {
+          _id: '$product._id',
+          name: { $first: '$product.name' },
+          image: { $first: '$product.images' },
+          totalSold: { $sum: '$items.quantity' },
+          revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+        },
+      },
+      { $sort: { revenue: -1 } },
+      { $limit: 5 },
+    ]);
+
     return {
       success: true,
       dashboard: {
         totalUsers,
+        totalSellers,
         totalProducts,
         totalOrders,
+        pendingSellers,
+        pendingProducts,
         totalRevenue: totalRevenue[0]?.total || 0,
+        monthlyRevenue: monthlyRevenue[0]?.total || 0,
         recentOrders: recentOrders.map((order: any) => ({
           _id: order._id,
           orderNumber: order.orderNumber,
@@ -50,6 +108,13 @@ export class AdminService {
           total: order.total,
           status: order.status,
           createdAt: order.createdAt,
+        })),
+        topProducts: topProducts.map((product: any) => ({
+          _id: product._id,
+          name: product.name,
+          image: Array.isArray(product.image) ? product.image[0] : product.image,
+          totalSold: product.totalSold,
+          revenue: product.revenue,
         })),
       },
     };
@@ -110,19 +175,24 @@ export class AdminService {
     };
   }
 
-  async updateUserStatus(userId: string, status: string) {
+  async updateUserStatus(userId: string, status: 'active' | 'inactive' | 'suspended') {
     if (!['active', 'suspended'].includes(status)) {
       throw new BadRequestException('Invalid status. Must be "active" or "suspended"');
     }
 
-    const user = await this.userModel.findByIdAndUpdate(
-      userId,
-      { status },
-      { new: true }
-    );
+    const user = await this.userModel.findById(userId);
     if (!user) {
       throw new NotFoundException('User not found');
     }
+
+    // Prevent suspending admin users
+    if (user.role === 'admin' && status === 'suspended') {
+      throw new BadRequestException('Admin users cannot be suspended');
+    }
+
+    user.status = status;
+    await user.save();
+
     return {
       success: true,
       user,
