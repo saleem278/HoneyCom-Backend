@@ -9,11 +9,16 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { FacebookStrategy } from './strategies/facebook.strategy';
 import { User, UserSchema } from '../../models/User.model';
+import { Session, SessionSchema } from '../../models/Session.model';
 import { EmailService } from '../../services/email.service';
+import { SmsService } from '../../services/sms.service';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: 'User', schema: UserSchema }]),
+    MongooseModule.forFeature([
+      { name: 'User', schema: UserSchema },
+      { name: 'Session', schema: SessionSchema },
+    ]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -27,7 +32,7 @@ import { EmailService } from '../../services/email.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, GoogleStrategy, FacebookStrategy, EmailService],
+  providers: [AuthService, JwtStrategy, GoogleStrategy, FacebookStrategy, EmailService, SmsService],
   exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

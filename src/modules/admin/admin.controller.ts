@@ -23,8 +23,10 @@ export class AdminController {
   @Get('users')
   @ApiOperation({ summary: 'Get all users' })
   @ApiResponse({ status: 200, description: 'List of users' })
-  async getUsers() {
-    return this.adminService.getUsers();
+  async getUsers(@Query('page') page?: string, @Query('limit') limit?: string) {
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    return this.adminService.getUsers(pageNum, limitNum);
   }
 
   @Put('products/:id/approve')

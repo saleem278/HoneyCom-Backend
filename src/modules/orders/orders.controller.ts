@@ -5,6 +5,7 @@ import {
   Put,
   Param,
   Body,
+  Query,
   UseGuards,
   Request,
 } from '@nestjs/common';
@@ -39,8 +40,10 @@ export class OrdersController {
   @Get()
   @ApiOperation({ summary: 'Get all orders' })
   @ApiResponse({ status: 200, description: 'List of orders' })
-  async findAll(@Request() req) {
-    return this.ordersService.findAll(req.user.id, req.user.role);
+  async findAll(@Request() req, @Query('page') page?: string, @Query('limit') limit?: string, @Query('status') status?: string) {
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    return this.ordersService.findAll(req.user.id, req.user.role, pageNum, limitNum, status);
   }
 
   @Get(':id')

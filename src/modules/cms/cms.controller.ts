@@ -17,8 +17,10 @@ export class CmsController {
   // ========== PAGES ==========
   @Get('pages')
   @ApiOperation({ summary: 'Get all pages' })
-  async getPages(@Query('status') status?: string) {
-    return this.cmsService.getPages(status);
+  async getPages(@Query('status') status?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    return this.cmsService.getPages(status, pageNum, limitNum);
   }
 
   @Get('pages/:id')
@@ -48,8 +50,10 @@ export class CmsController {
   // ========== BLOG ==========
   @Get('blog')
   @ApiOperation({ summary: 'Get all blog posts' })
-  async getBlogPosts(@Query('status') status?: string, @Query('category') category?: string) {
-    return this.cmsService.getBlogPosts(status, category);
+  async getBlogPosts(@Query('status') status?: string, @Query('category') category?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    return this.cmsService.getBlogPosts(status, category, pageNum, limitNum);
   }
 
   @Get('blog/:id')
@@ -79,8 +83,10 @@ export class CmsController {
   // ========== MEDIA ==========
   @Get('media')
   @ApiOperation({ summary: 'Get all media' })
-  async getMedia(@Query('type') type?: string, @Query('folder') folder?: string) {
-    return this.cmsService.getMedia(type, folder);
+  async getMedia(@Query('type') type?: string, @Query('folder') folder?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    return this.cmsService.getMedia(type, folder, pageNum, limitNum);
   }
 
   @Get('media/:id')

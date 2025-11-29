@@ -30,13 +30,32 @@ export class CmsService {
   ) {}
 
   // ========== PAGES ==========
-  async getPages(status?: string) {
+  async getPages(status?: string, page: number = 1, limit: number = 20) {
     const filter: any = {};
     if (status) {
       filter.status = status;
     }
-    const pages = await this.pageModel.find(filter).populate('author', 'name email').sort({ createdAt: -1 });
-    return { success: true, pages };
+    const skip = (page - 1) * limit;
+    const pages = await this.pageModel
+      .find(filter)
+      .populate('author', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    
+    const total = await this.pageModel.countDocuments(filter);
+    
+    return {
+      success: true,
+      pages,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async getPage(id: string) {
@@ -110,17 +129,33 @@ export class CmsService {
   }
 
   // ========== BLOG ==========
-  async getBlogPosts(status?: string, category?: string) {
+  async getBlogPosts(status?: string, category?: string, page: number = 1, limit: number = 20) {
     const filter: any = {};
     if (status) filter.status = status;
     if (category) filter.category = category;
     
+    const skip = (page - 1) * limit;
     const posts = await this.blogModel
       .find(filter)
       .populate('author', 'name email')
       .populate('category', 'name slug')
-      .sort({ createdAt: -1 });
-    return { success: true, posts };
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    
+    const total = await this.blogModel.countDocuments(filter);
+    
+    return {
+      success: true,
+      posts,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async getBlogPost(id: string) {
@@ -197,13 +232,32 @@ export class CmsService {
   }
 
   // ========== MEDIA ==========
-  async getMedia(type?: string, folder?: string) {
+  async getMedia(type?: string, folder?: string, page: number = 1, limit: number = 20) {
     const filter: any = {};
     if (type) filter.fileType = type;
     if (folder) filter.folderPath = folder;
     
-    const media = await this.mediaModel.find(filter).populate('uploadedBy', 'name email').sort({ createdAt: -1 });
-    return { success: true, media };
+    const skip = (page - 1) * limit;
+    const media = await this.mediaModel
+      .find(filter)
+      .populate('uploadedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    
+    const total = await this.mediaModel.countDocuments(filter);
+    
+    return {
+      success: true,
+      media,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async getMediaById(id: string) {

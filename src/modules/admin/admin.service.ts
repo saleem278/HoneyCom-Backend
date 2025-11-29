@@ -55,11 +55,27 @@ export class AdminService {
     };
   }
 
-  async getUsers() {
-    const users = await this.userModel.find();
+  async getUsers(page: number = 1, limit: number = 20) {
+    const skip = (page - 1) * limit;
+    const users = await this.userModel
+      .find()
+      .select('-password')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    
+    const total = await this.userModel.countDocuments();
+    
     return {
       success: true,
       users,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
     };
   }
 

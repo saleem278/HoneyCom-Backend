@@ -41,32 +41,57 @@ export class SellerService {
     };
   }
 
-  async getProducts(sellerId: string) {
+  async getProducts(sellerId: string, page: number = 1, limit: number = 20) {
+    const skip = (page - 1) * limit;
     const products = await this.productModel
       .find({ seller: sellerId })
       .populate('category', 'name slug')
       .populate('seller', 'name email')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    
+    const total = await this.productModel.countDocuments({ seller: sellerId });
+    
     return {
       success: true,
       products,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
     };
   }
 
-  async getOrders(sellerId: string) {
+  async getOrders(sellerId: string, page: number = 1, limit: number = 20) {
     // Get orders where seller's products are in the items
     const products = await this.productModel.find({ seller: sellerId }).select('_id');
     const productIds = products.map(p => p._id);
     
+    const skip = (page - 1) * limit;
     const orders = await this.orderModel
       .find({ 'items.product': { $in: productIds } })
       .populate('customer', 'name email')
       .populate('shippingAddress', 'firstName lastName addressLine1 addressLine2 city state zipCode country phone')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    
+    const total = await this.orderModel.countDocuments({ 'items.product': { $in: productIds } });
     
     return {
       success: true,
       orders,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
     };
   }
 

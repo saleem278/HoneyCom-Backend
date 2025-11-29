@@ -23,15 +23,19 @@ export class SellerController {
   @Get('products')
   @ApiOperation({ summary: 'Get seller products' })
   @ApiResponse({ status: 200, description: 'List of products' })
-  async getProducts(@Request() req) {
-    return this.sellerService.getProducts(req.user.id);
+  async getProducts(@Request() req, @Query('page') page?: string, @Query('limit') limit?: string) {
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    return this.sellerService.getProducts(req.user.id, pageNum, limitNum);
   }
 
   @Get('orders')
   @ApiOperation({ summary: 'Get seller orders' })
   @ApiResponse({ status: 200, description: 'List of orders' })
-  async getOrders(@Request() req) {
-    return this.sellerService.getOrders(req.user.id);
+  async getOrders(@Request() req, @Query('page') page?: string, @Query('limit') limit?: string) {
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 20;
+    return this.sellerService.getOrders(req.user.id, pageNum, limitNum);
   }
 
   @Get('orders/:id')

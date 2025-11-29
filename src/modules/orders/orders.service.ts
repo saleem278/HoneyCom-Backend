@@ -171,16 +171,35 @@ export class OrdersService {
     };
   }
 
-  async findAll(userId: string, userRole: string) {
+  async findAll(userId: string, userRole: string, page: number = 1, limit: number = 20, status?: string) {
     const filter: any = {};
     if (userRole !== 'admin') {
       filter.customer = userId;
     }
+    if (status) {
+      filter.status = status;
+    }
 
-    const orders = await this.orderModel.find(filter).sort({ createdAt: -1 });
+    const skip = (page - 1) * limit;
+    const orders = await this.orderModel
+      .find(filter)
+      .populate('customer', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+    
+    const total = await this.orderModel.countDocuments(filter);
+    
     return {
       success: true,
       orders,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
     };
   }
 

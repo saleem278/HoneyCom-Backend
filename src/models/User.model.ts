@@ -2,7 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IUser extends Document {
   name: string;
-  email: string;
+  email?: string;
   password: string;
   phone?: string;
   role: 'customer' | 'seller' | 'admin';
@@ -17,6 +17,8 @@ export interface IUser extends Document {
   emailVerificationExpire?: Date;
   resetPasswordToken?: string;
   resetPasswordExpire?: Date;
+  phoneLoginOtp?: string;
+  phoneLoginOtpExpire?: Date;
   socialLogin?: {
     provider: string;
     providerId: string;
@@ -42,14 +44,21 @@ const UserSchema: Schema = new Schema(
   {
     name: {
       type: String,
-      required: [true, 'Please provide a name'],
+      required: false, // Modern e-commerce: name is optional, progressive profiling
       trim: true,
-      minlength: [2, 'Name must be at least 2 characters'],
+      validate: {
+        validator: function(value: string | undefined) {
+          // Only validate if name is provided
+          if (!value || value.trim() === '') {
+            return true; // Empty name is allowed
+          }
+          return value.trim().length >= 2; // If provided, must be at least 2 characters
+        },
+        message: 'Name must be at least 2 characters if provided',
+      },
     },
     email: {
       type: String,
-      required: [true, 'Please provide an email'],
-      unique: true,
       lowercase: true,
       match: [
         /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/,
@@ -112,6 +121,8 @@ const UserSchema: Schema = new Schema(
     emailVerificationExpire: Date,
     resetPasswordToken: String,
     resetPasswordExpire: Date,
+    phoneLoginOtp: String,
+    phoneLoginOtpExpire: Date,
     socialLogin: {
       provider: String,
       providerId: String,
@@ -143,6 +154,11 @@ const UserSchema: Schema = new Schema(
     validateBeforeSave: true, // Only validate when saving, not when populating
   } as any
 );
+
+// Unique indexes for email and phone when present
+// Note: existing deployments should drop the old { email: 1 } unique index manually.
+UserSchema.index({ email: 1 }, { unique: true, sparse: true });
+UserSchema.index({ phone: 1 }, { unique: true, sparse: true });
 
 export const User = mongoose.model<IUser>('User', UserSchema);
 export { UserSchema };
