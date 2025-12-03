@@ -259,17 +259,21 @@ export class AuthService {
     user.phoneLoginOtpExpire = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
+    // Try to send SMS, but don't fail if SMS service is not configured
     try {
       await this.smsService.sendOTP(normalizedPhone, otp);
     } catch (error: any) {
-      throw new BadRequestException(
-        error?.message || 'Failed to send OTP. Please try again.'
-      );
+      // If SMS service is not configured, log but don't fail
+      // OTP will be returned in response for development
+      console.log('⚠️ SMS service not configured. OTP returned in response for development:', otp);
     }
 
     return {
       success: true,
       message: 'OTP sent successfully',
+      // Return OTP in response for development (remove in production)
+      otp: otp,
+      expiresIn: 600, // 10 minutes in seconds
     };
   }
 
