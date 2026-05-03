@@ -23,6 +23,7 @@ export interface IProduct extends Document {
     height: number;
   };
   status: 'pending' | 'approved' | 'rejected' | 'inactive';
+  rejectionReason?: string;
   featured: boolean;
   rating: number;
   numReviews: number;
@@ -110,6 +111,10 @@ const ProductSchema: Schema = new Schema(
       type: String,
       enum: ['pending', 'approved', 'rejected', 'inactive'],
       default: 'pending',
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
     },
     featured: {
       type: Boolean,

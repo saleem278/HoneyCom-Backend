@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { Product, IProduct } from '../../models/Product.model';
 import { Order, IOrder } from '../../models/Order.model';
 import { User, IUser } from '../../models/User.model';
+import { assertOrderTransition } from '../orders/order-status';
 
 @Injectable()
 export class SellerService {
@@ -15,20 +16,27 @@ export class SellerService {
 
   async getDashboard(sellerId: string) {
     const totalProducts = await this.productModel.countDocuments({ seller: sellerId });
-    
-    // Get seller's product IDs
+
     const products = await this.productModel.find({ seller: sellerId }).select('_id');
     const productIds = products.map(p => p._id);
-    
-    // Count orders where seller's products are in items
-    const totalOrders = await this.orderModel.countDocuments({ 
-      'items.product': { $in: productIds } 
+
+    const totalOrders = await this.orderModel.countDocuments({
+      'items.product': { $in: productIds },
     });
-    
-    // Calculate revenue from delivered orders with seller's products
+
+    // Revenue must only count *this seller's* line items, not the whole order.
+    // Multi-seller orders previously double-counted: a seller with 1 of 10 items
+    // saw the entire order total as their revenue.
     const totalRevenue = await this.orderModel.aggregate([
       { $match: { 'items.product': { $in: productIds }, status: 'delivered' } },
-      { $group: { _id: null, total: { $sum: '$total' } } },
+      { $unwind: '$items' },
+      { $match: { 'items.product': { $in: productIds } } },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+        },
+      },
     ]);
 
     return {
@@ -155,6 +163,9 @@ export class SellerService {
       throw new BadRequestException('Not authorized to update this order');
     }
 
+    // Reject illegal transitions (e.g. pending -> delivered, delivered -> processing).
+    assertOrderTransition(order.status, updateData.status);
+
     order.status = updateData.status as any;
     if (updateData.trackingNumber) {
       order.trackingNumber = updateData.trackingNumber;
@@ -181,42 +192,83 @@ export class SellerService {
       if (endDate) matchQuery.createdAt.$lte = endDate;
     }
 
-    // Daily sales data
-    const dailySales = await this.orderModel.aggregate([
+    // Common pipeline prefix: only delivered orders that include this seller's
+    // products, then $unwind so each line item becomes its own document, then
+    // re-filter to drop other sellers' line items. From here we can sum
+    // accurately on the seller's items only.
+    const sellerItemsPipeline = [
       { $match: { ...matchQuery, status: 'delivered' } },
+      { $unwind: '$items' },
+      { $match: { 'items.product': { $in: productIds } } },
+      {
+        $addFields: {
+          itemRevenue: { $multiply: ['$items.price', '$items.quantity'] },
+        },
+      },
+    ];
+
+    const dailySales = await this.orderModel.aggregate([
+      ...sellerItemsPipeline,
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-          revenue: { $sum: '$total' },
-          orders: { $sum: 1 },
-          items: { $sum: { $size: '$items' } },
+          revenue: { $sum: '$itemRevenue' },
+          // distinct orders (an order with 3 of this seller's items counts once)
+          orderIds: { $addToSet: '$_id' },
+          items: { $sum: '$items.quantity' },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          revenue: 1,
+          items: 1,
+          orders: { $size: '$orderIds' },
         },
       },
       { $sort: { _id: 1 } },
     ]);
 
-    // Monthly sales data
     const monthlySales = await this.orderModel.aggregate([
-      { $match: { ...matchQuery, status: 'delivered' } },
+      ...sellerItemsPipeline,
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
-          revenue: { $sum: '$total' },
-          orders: { $sum: 1 },
+          revenue: { $sum: '$itemRevenue' },
+          orderIds: { $addToSet: '$_id' },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          revenue: 1,
+          orders: { $size: '$orderIds' },
         },
       },
       { $sort: { _id: 1 } },
     ]);
 
-    // Total metrics
     const totals = await this.orderModel.aggregate([
-      { $match: { ...matchQuery, status: 'delivered' } },
+      ...sellerItemsPipeline,
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: '$total' },
-          totalOrders: { $sum: 1 },
-          averageOrderValue: { $avg: '$total' },
+          totalRevenue: { $sum: '$itemRevenue' },
+          orderIds: { $addToSet: '$_id' },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalRevenue: 1,
+          totalOrders: { $size: '$orderIds' },
+          averageOrderValue: {
+            $cond: [
+              { $eq: [{ $size: '$orderIds' }, 0] },
+              0,
+              { $divide: ['$totalRevenue', { $size: '$orderIds' }] },
+            ],
+          },
         },
       },
     ]);
@@ -283,14 +335,26 @@ export class SellerService {
     const products = await this.productModel.find({ seller: sellerId }).select('_id');
     const productIds = products.map(p => p._id);
 
+    // Per-customer totals must again only count *this seller's* line items.
+    // Previously this summed entire-order totals so a customer who bought 1 of
+    // this seller's items in a 10-item cart appeared as a top-spender.
     const customerData = await this.orderModel.aggregate([
       { $match: { 'items.product': { $in: productIds }, status: 'delivered' } },
+      { $unwind: '$items' },
+      { $match: { 'items.product': { $in: productIds } } },
       {
         $group: {
           _id: '$customer',
-          totalSpent: { $sum: '$total' },
-          orderCount: { $sum: 1 },
+          totalSpent: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          orderIds: { $addToSet: '$_id' },
           lastOrderDate: { $max: '$createdAt' },
+        },
+      },
+      {
+        $project: {
+          totalSpent: 1,
+          lastOrderDate: 1,
+          orderCount: { $size: '$orderIds' },
         },
       },
       { $sort: { totalSpent: -1 } },

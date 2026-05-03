@@ -123,4 +123,31 @@ export class EmailService {
       html: this.templatesService.getSellerRejectionEmail(sellerName, reason),
     });
   }
+
+  async sendProductApprovalEmail(email: string, productName: string): Promise<void> {
+    await this.sendEmail({
+      to: email,
+      subject: `Your product "${productName}" has been approved`,
+      html: `
+        <h2>Product approved</h2>
+        <p>Your product <strong>${productName}</strong> has been approved and is now live on Honey Store.</p>
+        <p>Customers can now find and purchase it.</p>
+      `,
+    });
+  }
+
+  async sendProductRejectionEmail(email: string, productName: string, reason?: string): Promise<void> {
+    const reasonBlock = reason
+      ? `<p><strong>Reason:</strong> ${reason}</p>`
+      : '<p>Please review the listing guidelines and contact support if you have questions.</p>';
+    await this.sendEmail({
+      to: email,
+      subject: `Your product "${productName}" was not approved`,
+      html: `
+        <h2>Product not approved</h2>
+        <p>Your product <strong>${productName}</strong> was not approved for listing.</p>
+        ${reasonBlock}
+      `,
+    });
+  }
 }

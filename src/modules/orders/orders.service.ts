@@ -1,21 +1,26 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Order, IOrder } from '../../models/Order.model';
 import { Cart, ICart } from '../../models/Cart.model';
 import { Product, IProduct } from '../../models/Product.model';
 import { Address, IAddress } from '../../models/Address.model';
+import { Coupon, ICoupon } from '../../models/Coupon.model';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
+import { assertOrderTransition } from './order-status';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectModel('Order') private orderModel: Model<IOrder>,
     @InjectModel('Cart') private cartModel: Model<ICart>,
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Address') private addressModel: Model<IAddress>,
+    @InjectModel('Coupon') private couponModel: Model<ICoupon>,
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
     private pdfService: PdfService,
@@ -46,119 +51,200 @@ export class OrdersService {
     }
 
     let subtotal = 0;
-    const items = [];
+    const items: Array<{
+      product: any;
+      name: string;
+      quantity: number;
+      price: number;
+      image: string;
+      variants: any;
+    }> = [];
 
-    for (const item of itemsToProcess) {
-      let product: any;
-      
-      if (item.productId) {
-        // If productId is provided, fetch the product
-        product = await this.productModel.findById(item.productId);
-      } else {
-        // Otherwise, use the populated product from cart
-        product = item.product as any;
+    // Reserve inventory atomically, item by item. Each `$inc` is conditional on
+    // sufficient stock, so concurrent orders cannot oversell. If any reservation
+    // fails (out of stock or product gone), we restore previously-reserved items
+    // so we don't leave stranded reservations behind.
+    const reserved: Array<{ productId: any; quantity: number }> = [];
+
+    try {
+      for (const item of itemsToProcess) {
+        const productId = item.productId || (item.product as any)?._id;
+        if (!productId) {
+          throw new BadRequestException('Product ID missing on order item');
+        }
+
+        // Conditional $inc: only succeeds if there's enough stock left and the
+        // product is approved. `findOneAndUpdate` returns null if the predicate
+        // doesn't match — we treat that as out-of-stock.
+        const product = await this.productModel.findOneAndUpdate(
+          {
+            _id: productId,
+            status: 'approved',
+            inventory: { $gte: item.quantity },
+          },
+          { $inc: { inventory: -item.quantity } },
+          { new: true },
+        );
+
+        if (!product) {
+          // Either product doesn't exist, isn't approved, or doesn't have stock.
+          // Read the row to give a precise error message.
+          const probe = await this.productModel.findById(productId).select('name inventory status');
+          if (!probe) {
+            throw new BadRequestException(`Product ${productId} not found`);
+          }
+          if (probe.status !== 'approved') {
+            throw new BadRequestException(`Product ${probe.name} is not available`);
+          }
+          throw new BadRequestException(
+            `Insufficient inventory for ${probe.name} (requested ${item.quantity}, available ${probe.inventory})`,
+          );
+        }
+
+        reserved.push({ productId: product._id, quantity: item.quantity });
+
+        const itemTotal = product.price * item.quantity;
+        subtotal += itemTotal;
+
+        items.push({
+          product: product._id,
+          name: product.name,
+          quantity: item.quantity,
+          price: product.price,
+          image: product.images?.[0] || '',
+          variants: item.variants || {},
+        });
       }
-
-      if (!product || product.status !== 'approved') {
-        throw new BadRequestException(`Product ${product?.name || 'Unknown'} is not available`);
-      }
-      if (product.inventory < item.quantity) {
-        throw new BadRequestException(`Insufficient inventory for ${product.name}`);
-      }
-
-      const itemTotal = product.price * item.quantity;
-      subtotal += itemTotal;
-
-      items.push({
-        product: product._id,
-        name: product.name,
-        quantity: item.quantity,
-        price: product.price,
-        image: product.images?.[0] || '',
-        variants: item.variants || {},
-      });
+    } catch (err) {
+      // Roll back any reservations we already made before the failure.
+      await Promise.all(
+        reserved.map((r) =>
+          this.productModel.updateOne(
+            { _id: r.productId },
+            { $inc: { inventory: r.quantity } },
+          ),
+        ),
+      );
+      throw err;
     }
+
+    // Helper: roll back any inventory reservations made above. Used in catches
+    // below so that downstream failures don't leave stranded reserved stock.
+    const restoreReservations = async () => {
+      await Promise.all(
+        reserved.map((r) =>
+          this.productModel.updateOne(
+            { _id: r.productId },
+            { $inc: { inventory: r.quantity } },
+          ),
+        ),
+      );
+    };
 
     const tax = subtotal * 0.1;
     const shipping = subtotal > 0 ? 10 : 0;
     const discount = cart?.couponDiscount || 0;
     const total = subtotal + tax + shipping - discount;
 
-    // Create shipping address document
-    const shippingAddressData = orderData.shippingAddress;
-    if (!shippingAddressData) {
-      throw new BadRequestException('Shipping address is required');
+    let order;
+    try {
+      // Create shipping address document
+      const shippingAddressData = orderData.shippingAddress;
+      if (!shippingAddressData) {
+        throw new BadRequestException('Shipping address is required');
+      }
+
+      // Parse fullName into firstName and lastName
+      const nameParts = (shippingAddressData.fullName || '').trim().split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || firstName;
+
+      // Create address document
+      const address = await this.addressModel.create({
+        user: userId,
+        type: 'shipping',
+        firstName,
+        lastName,
+        addressLine1: shippingAddressData.address || '',
+        addressLine2: shippingAddressData.addressLine2 || '',
+        city: shippingAddressData.city || '',
+        state: shippingAddressData.state || '',
+        zipCode: shippingAddressData.postalCode || shippingAddressData.zipCode || '',
+        country: shippingAddressData.country || 'United States',
+        phone: shippingAddressData.phone || '0000000000',
+        isDefault: false,
+      });
+
+      // Map payment method: 'card' -> 'stripe'
+      let paymentMethod = orderData.paymentMethod;
+      if (paymentMethod === 'card') {
+        paymentMethod = 'stripe';
+      }
+      if (!['stripe', 'paypal', 'cash_on_delivery'].includes(paymentMethod)) {
+        throw new BadRequestException(`Invalid payment method: ${paymentMethod}`);
+      }
+
+      // SECURITY: Reject exchangeRate if sent by client - must be calculated server-side
+      if (orderData.exchangeRate !== undefined) {
+        throw new BadRequestException(
+          'Exchange rate cannot be set by client. It is calculated server-side based on currency.',
+        );
+      }
+
+      const currency = (orderData.currency || 'INR').toUpperCase() as
+        | 'USD' | 'EUR' | 'GBP' | 'INR' | 'CAD' | 'AUD' | 'JPY';
+
+      const supportedCurrencies = this.exchangeRateService.getSupportedCurrencies();
+      if (!supportedCurrencies.includes(currency)) {
+        throw new BadRequestException(
+          `Unsupported currency: ${currency}. Supported currencies: ${supportedCurrencies.join(', ')}`,
+        );
+      }
+
+      const exchangeRate = this.exchangeRateService.getExchangeRate(currency);
+
+      const orderCount = await this.orderModel.countDocuments();
+      const orderNumber = `ORD-${String(Date.now()).slice(-8)}-${String(orderCount + 1).padStart(4, '0')}`;
+
+      order = await this.orderModel.create({
+        orderNumber,
+        customer: userId,
+        items,
+        shippingAddress: address._id,
+        paymentMethod,
+        currency,
+        exchangeRate,
+        subtotal,
+        tax,
+        shipping,
+        discount,
+        total,
+        // Carry the applied coupon onto the order so analytics/refunds can trace it.
+        couponCode: cart?.couponCode,
+        status: 'pending',
+        paymentStatus: 'pending',
+      });
+
+      // Atomically increment coupon usage so the limit is actually enforced.
+      // Done after order.create succeeds — if the increment itself fails,
+      // we log but don't fail the order (the order is the user's truth).
+      if (cart?.couponCode) {
+        try {
+          await this.couponModel.updateOne(
+            { code: cart.couponCode.toUpperCase() },
+            { $inc: { usedCount: 1 } },
+          );
+        } catch (couponErr: any) {
+          this.logger.warn(
+            `Failed to increment usage for coupon ${cart.couponCode}: ${couponErr?.message || couponErr}`,
+          );
+        }
+      }
+    } catch (err) {
+      // Order/address/etc failed after we reserved stock. Give it back.
+      await restoreReservations();
+      throw err;
     }
-
-    // Parse fullName into firstName and lastName
-    const nameParts = (shippingAddressData.fullName || '').trim().split(' ');
-    const firstName = nameParts[0] || '';
-    const lastName = nameParts.slice(1).join(' ') || firstName;
-
-    // Create address document
-    const address = await this.addressModel.create({
-      user: userId,
-      type: 'shipping',
-      firstName,
-      lastName,
-      addressLine1: shippingAddressData.address || '',
-      addressLine2: shippingAddressData.addressLine2 || '',
-      city: shippingAddressData.city || '',
-      state: shippingAddressData.state || '',
-      zipCode: shippingAddressData.postalCode || shippingAddressData.zipCode || '',
-      country: shippingAddressData.country || 'United States',
-      phone: shippingAddressData.phone || '0000000000', // Default phone if not provided
-      isDefault: false,
-    });
-
-    // Map payment method: 'card' -> 'stripe'
-    let paymentMethod = orderData.paymentMethod;
-    if (paymentMethod === 'card') {
-      paymentMethod = 'stripe';
-    }
-    if (!['stripe', 'paypal', 'cash_on_delivery'].includes(paymentMethod)) {
-      throw new BadRequestException(`Invalid payment method: ${paymentMethod}`);
-    }
-
-    // SECURITY: Reject exchangeRate if sent by client - it must be calculated server-side
-    if (orderData.exchangeRate !== undefined) {
-      throw new BadRequestException('Exchange rate cannot be set by client. It is calculated server-side based on currency.');
-    }
-
-    // Get currency from orderData or default to INR
-    const currency = (orderData.currency || 'INR').toUpperCase() as 'USD' | 'EUR' | 'GBP' | 'INR' | 'CAD' | 'AUD' | 'JPY';
-    
-    // Validate currency
-    const supportedCurrencies = this.exchangeRateService.getSupportedCurrencies();
-    if (!supportedCurrencies.includes(currency)) {
-      throw new BadRequestException(`Unsupported currency: ${currency}. Supported currencies: ${supportedCurrencies.join(', ')}`);
-    }
-
-    // Calculate exchange rate server-side based on currency
-    // Exchange rate represents: 1 INR (base) = exchangeRate * targetCurrency
-    // For INR, exchangeRate = 1.0 (no conversion)
-    const exchangeRate = this.exchangeRateService.getExchangeRate(currency);
-
-    // Generate order number
-    const orderCount = await this.orderModel.countDocuments();
-    const orderNumber = `ORD-${String(Date.now()).slice(-8)}-${String(orderCount + 1).padStart(4, '0')}`;
-
-    const order = await this.orderModel.create({
-      orderNumber,
-      customer: userId,
-      items,
-      shippingAddress: address._id,
-      paymentMethod,
-      currency,
-      exchangeRate,
-      subtotal,
-      tax,
-      shipping,
-      discount,
-      total,
-      status: 'pending',
-      paymentStatus: 'pending',
-    });
 
     // Clear cart if it exists
     if (cart) {
@@ -259,12 +345,24 @@ export class OrdersService {
       throw new BadRequestException('Not authorized');
     }
 
-    if (['delivered', 'cancelled'].includes(order.status)) {
-      throw new BadRequestException('Cannot cancel this order');
-    }
+    // Validate transition (covers both terminal-state and skip-state attempts).
+    assertOrderTransition(order.status, 'cancelled');
 
+    // Persist the cancellation first, then restore inventory. If a downstream
+    // worker double-cancels, the assertion above short-circuits (idempotent).
     order.status = 'cancelled';
     await order.save();
+
+    // Return reserved stock to the catalog. We use $inc rather than recompute
+    // so concurrent updates to inventory aren't clobbered.
+    await Promise.all(
+      order.items.map((item: any) =>
+        this.productModel.updateOne(
+          { _id: item.product },
+          { $inc: { inventory: item.quantity } },
+        ),
+      ),
+    );
 
     return {
       success: true,
@@ -286,8 +384,9 @@ export class OrdersService {
       throw new BadRequestException('Order is not eligible for return');
     }
 
-    // For now, just update order status to 'refunded'
-    // In a full implementation, you'd create a ReturnRequest document
+    // For now, just update order status to 'refunded'.
+    // (In a full implementation, you'd create a ReturnRequest document.)
+    assertOrderTransition(order.status, 'refunded');
     order.status = 'refunded';
     await order.save();
 

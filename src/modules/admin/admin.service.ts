@@ -7,6 +7,7 @@ import { Order, IOrder } from '../../models/Order.model';
 import { Category, ICategory } from '../../models/Category.model';
 import { PaymentsService } from '../payments/payments.service';
 import { EmailService } from '../../services/email.service';
+import { assertOrderTransition } from '../orders/order-status';
 
 @Injectable()
 export class AdminService {
@@ -145,14 +146,26 @@ export class AdminService {
   }
 
   async approveProduct(productId: string) {
+    // Clear any prior rejectionReason on approval — the product is live now.
     const product = await this.productModel.findByIdAndUpdate(
       productId,
-      { status: 'approved' },
-      { new: true }
+      { status: 'approved', $unset: { rejectionReason: '' } },
+      { new: true },
     );
     if (!product) {
       throw new NotFoundException('Product not found');
     }
+
+    // Notify the seller. We don't fail the approval if email fails.
+    const seller = await this.userModel.findById(product.seller).select('email');
+    if (seller?.email) {
+      try {
+        await this.emailService.sendProductApprovalEmail(seller.email, product.name);
+      } catch {
+        // Approval state is the source of truth; email is best-effort.
+      }
+    }
+
     return {
       success: true,
       product,
@@ -160,14 +173,26 @@ export class AdminService {
   }
 
   async rejectProduct(productId: string, reason?: string) {
+    // Persist the reason on the product so the seller can see *why* later, not
+    // only when the email arrives.
     const product = await this.productModel.findByIdAndUpdate(
       productId,
-      { status: 'rejected' },
-      { new: true }
+      { status: 'rejected', rejectionReason: reason },
+      { new: true },
     );
     if (!product) {
       throw new NotFoundException('Product not found');
     }
+
+    const seller = await this.userModel.findById(product.seller).select('email');
+    if (seller?.email) {
+      try {
+        await this.emailService.sendProductRejectionEmail(seller.email, product.name, reason);
+      } catch {
+        // Rejection state is already saved; email is best-effort.
+      }
+    }
+
     return {
       success: true,
       product,
@@ -205,12 +230,11 @@ export class AdminService {
       throw new NotFoundException('Order not found');
     }
 
-    if (!['delivered', 'shipped', 'processing'].includes(order.status)) {
-      throw new BadRequestException('Order cannot be refunded in current status');
-    }
+    // Validate the transition (also rejects refund-of-already-refunded etc.).
+    assertOrderTransition(order.status, 'refunded');
 
     const refundAmount = amount || order.total;
-    
+
     if (refundAmount > order.total) {
       throw new BadRequestException('Refund amount cannot exceed order total');
     }
