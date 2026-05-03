@@ -25,6 +25,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { SocialLoginDto } from './dto/social-login.dto';
 import { RequestPhoneOtpDto, VerifyPhoneOtpDto } from './dto/phone-login.dto';
 import type { Request as ExpressRequest } from 'express';
@@ -130,6 +131,21 @@ export class AuthController {
       resetPasswordDto.token,
       resetPasswordDto.password
     );
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Change password (authenticated)' })
+  @ApiBody({ type: ChangePasswordDto })
+  @ApiResponse({ status: 200, description: 'Password changed successfully' })
+  @ApiResponse({ status: 401, description: 'Current password is incorrect' })
+  async changePassword(@Request() req: AuthedRequest, @Body() dto: ChangePasswordDto) {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '');
+    return this.authService.changePassword(req.user.id, dto.currentPassword, dto.newPassword, token);
   }
 
   @Get('me')

@@ -592,6 +592,63 @@ export class AuthService {
     };
   }
 
+  /**
+   * Change password for an authenticated user. Requires the current
+   * password as a possession check — distinct from forgot/reset which
+   * relies on email-based one-time tokens. Revokes all *other* sessions
+   * after success so a leaked token loses access elsewhere, but keeps
+   * the current session alive (otherwise the user would be logged out
+   * immediately after changing their own password, which is hostile).
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string, currentToken?: string) {
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('New password must be different from the current password');
+    }
+
+    const user = await this.userModel.findById(userId).select('+password');
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // Social-login accounts may not have a password set. Refuse the
+    // change rather than letting the user clobber an empty hash with a
+    // mystery one — the right next step for them is "set a password" via
+    // the reset flow, not change.
+    if (!user.password) {
+      throw new BadRequestException(
+        'No password is set on this account. Use forgot password to create one.',
+      );
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+    await user.save();
+
+    // Revoke every other session — keep the requester's current session
+    // alive so they don't have to log in again on the same device.
+    try {
+      const filter: any = { user: user._id, isActive: true };
+      if (currentToken) {
+        filter.token = { $ne: this.hashToken(currentToken) };
+      }
+      await this.sessionModel.updateMany(filter, { isActive: false });
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to revoke other sessions for user ${user._id} after password change: ${err?.message || err}`,
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Password changed successfully',
+    };
+  }
+
   async validateUser(userId: string) {
     const user = await this.userModel.findById(userId).select('-password');
     if (!user || user.status !== 'active') {
