@@ -1,4 +1,16 @@
-import { Controller, Post, Body, UseGuards, Headers, RawBodyRequest, Req, Inject, forwardRef } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Headers,
+  RawBodyRequest,
+  Req,
+  Res,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -59,32 +71,43 @@ export class PaymentsController {
   @ApiResponse({ status: 200, description: 'Webhook processed' })
   async handleWebhook(
     @Req() req: RawBodyRequest<Request>,
+    @Res({ passthrough: false }) res: Response,
     @Headers('stripe-signature') signature: string,
   ) {
+    // Stripe signs the *raw bytes* of the body. If rawBody is unavailable
+    // (e.g. someone disabled rawBody on the Nest factory), signature
+    // verification will silently pass against the parsed JSON because the
+    // bytes differ. Fail fast instead.
+    const rawBody = req.rawBody;
+    if (!rawBody) {
+      res.status(500).json({
+        success: false,
+        message: 'Server misconfigured: rawBody is required for Stripe webhook verification',
+      });
+      return;
+    }
+
+    if (!signature) {
+      // 4xx so Stripe knows we didn't process — the dashboard surfaces these.
+      res.status(400).json({
+        success: false,
+        message: 'Missing stripe-signature header',
+      });
+      return;
+    }
+
     try {
-      // Get raw body for signature verification
-      // NestJS with rawBody: true provides rawBody as Buffer
-      const payload = (req as any).rawBody || req.body;
-      
-      if (!signature) {
-        return {
-          success: false,
-          message: 'Missing stripe-signature header',
-        };
-      }
-      
-      // Verify and parse webhook event
-      const event = await this.paymentsService.handleWebhook(payload, signature);
-      
-      // Process the event (this will update order status automatically)
+      const event = await this.paymentsService.handleWebhook(rawBody, signature);
       const result = await this.paymentsService.processWebhookEvent(event);
-      
-      return result;
+      res.status(200).json(result);
     } catch (error: any) {
-      return {
+      // Verification or processing failure — return 4xx so Stripe retries.
+      // Previously this returned 200 with `{ success: false }`, which Stripe
+      // treats as a successful delivery and never retries.
+      res.status(400).json({
         success: false,
         message: error.message || 'Webhook processing failed',
-      };
+      });
     }
   }
 }

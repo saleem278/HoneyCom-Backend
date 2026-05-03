@@ -175,6 +175,9 @@ OrderSchema.pre('save', async function (next) {
 OrderSchema.index({ customer: 1, createdAt: -1 });
 OrderSchema.index({ orderNumber: 1 });
 OrderSchema.index({ status: 1 });
+// Sparse so non-Stripe orders (cash on delivery / paypal) don't bloat the index.
+// The webhook handler does findOne({ paymentIntentId }), which gets indexed lookups.
+OrderSchema.index({ paymentIntentId: 1 }, { sparse: true });
 
 export const Order = mongoose.model<IOrder>('Order', OrderSchema);
 export { OrderSchema };

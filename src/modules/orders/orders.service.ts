@@ -221,6 +221,11 @@ export class OrdersService {
         total,
         // Carry the applied coupon onto the order so analytics/refunds can trace it.
         couponCode: cart?.couponCode,
+        // Persist the Stripe paymentIntentId if the client created one before
+        // calling /orders. The webhook handler uses this to mark paymentStatus
+        // when payment_intent.succeeded fires. Without it, webhooks have no
+        // way to find the order that a payment refers to.
+        paymentIntentId: orderData.paymentIntentId,
         status: 'pending',
         paymentStatus: 'pending',
       });
@@ -246,8 +251,21 @@ export class OrdersService {
       throw err;
     }
 
-    // Clear cart if it exists
-    if (cart) {
+    // Cart-clear policy:
+    //  - cash_on_delivery: no async confirmation, safe to clear now.
+    //  - stripe with paymentIntentId: defer until the webhook fires
+    //    payment_intent.succeeded so the user doesn't lose their cart if
+    //    payment fails. updatePaymentStatusByIntentId() clears the cart on
+    //    'paid' and restores inventory on 'failed'.
+    //  - stripe without paymentIntentId (older clients that haven't migrated
+    //    yet): clear immediately to preserve previous behavior. These orders
+    //    won't get webhook updates, so the cart stays in sync with what the
+    //    user expects.
+    //  - paypal: same as the no-intent path — clear now until PayPal sync
+    //    confirmation is wired up.
+    const deferCartClear =
+      order.paymentMethod === 'stripe' && !!orderData.paymentIntentId;
+    if (cart && !deferCartClear) {
       cart.items = [];
       cart.couponCode = undefined;
       cart.couponDiscount = undefined;
@@ -581,17 +599,22 @@ export class OrdersService {
     orderStatus?: 'processing' | 'cancelled' | 'refunded',
   ) {
     const order = await this.orderModel.findOne({ paymentIntentId });
-    
+
     if (!order) {
       throw new NotFoundException('Order not found for payment intent');
+    }
+
+    // Idempotency: webhooks can fire more than once. Skip if we've already
+    // applied the same paymentStatus, otherwise we'd e.g. re-clear the cart or
+    // re-restore inventory on the second delivery of payment_intent.succeeded.
+    if (order.paymentStatus === paymentStatus) {
+      return { success: true, order };
     }
 
     const updateData: any = { paymentStatus };
     if (orderStatus) {
       updateData.status = orderStatus;
     }
-
-    // If payment succeeded, set status to processing
     if (paymentStatus === 'paid' && !orderStatus) {
       updateData.status = 'processing';
     }
@@ -599,8 +622,46 @@ export class OrdersService {
     const updatedOrder = await this.orderModel.findByIdAndUpdate(
       order._id,
       updateData,
-      { new: true }
+      { new: true },
     );
+
+    if (paymentStatus === 'paid') {
+      // Now that payment is confirmed, clear the user's cart.
+      try {
+        const cart = await this.cartModel.findOne({ user: order.customer });
+        if (cart) {
+          cart.items = [];
+          cart.couponCode = undefined;
+          cart.couponDiscount = undefined;
+          await cart.save();
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to clear cart for order ${order._id} after payment success: ${err?.message || err}`,
+        );
+      }
+    } else if (paymentStatus === 'failed') {
+      // Payment failed — release the inventory we reserved at order-create time
+      // and mark the order cancelled so it doesn't sit as a zombie.
+      try {
+        await Promise.all(
+          order.items.map((item: any) =>
+            this.productModel.updateOne(
+              { _id: item.product },
+              { $inc: { inventory: item.quantity } },
+            ),
+          ),
+        );
+        await this.orderModel.updateOne(
+          { _id: order._id },
+          { status: 'cancelled' },
+        );
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to release inventory for failed payment on order ${order._id}: ${err?.message || err}`,
+        );
+      }
+    }
 
     return { success: true, order: updatedOrder };
   }
