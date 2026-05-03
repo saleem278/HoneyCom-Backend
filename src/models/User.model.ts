@@ -28,6 +28,18 @@ export interface IUser extends Document {
   phoneLoginOtpExpire?: Date;
   phoneLoginOtpAttempts?: number;
   phoneLoginOtpLockedUntil?: Date;
+  // TOTP-based 2FA. `pendingSecret` is the secret created during setup but
+  // not yet activated — it only flips into `secret` (and `enabled` -> true)
+  // when the user successfully verifies a code, proving they actually
+  // scanned the QR. Recovery codes are hashed so they can't be read from
+  // a stolen DB dump.
+  twoFactor?: {
+    enabled?: boolean;
+    secret?: string;
+    pendingSecret?: string;
+    recoveryCodes?: string[];
+    activatedAt?: Date;
+  };
   socialLogin?: {
     provider: string;
     providerId: string;
@@ -134,6 +146,18 @@ const UserSchema: Schema = new Schema(
     phoneLoginOtpExpire: Date,
     phoneLoginOtpAttempts: { type: Number, default: 0 },
     phoneLoginOtpLockedUntil: Date,
+    twoFactor: {
+      enabled: { type: Boolean, default: false },
+      // The active secret is `select: false` so it doesn't leak into
+      // ordinary `findById(...)` calls — must be explicitly selected by
+      // the verify path.
+      secret: { type: String, select: false },
+      pendingSecret: { type: String, select: false },
+      // Recovery codes stored as bcrypt hashes; they get cleared as the
+      // user consumes them.
+      recoveryCodes: { type: [String], select: false, default: undefined },
+      activatedAt: Date,
+    },
     socialLogin: {
       provider: String,
       providerId: String,

@@ -26,6 +26,7 @@ import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { Verify2FADto, Disable2FADto, Login2FADto } from './dto/two-factor.dto';
 import { SocialLoginDto } from './dto/social-login.dto';
 import { RequestPhoneOtpDto, VerifyPhoneOtpDto } from './dto/phone-login.dto';
 import type { Request as ExpressRequest } from 'express';
@@ -146,6 +147,58 @@ export class AuthController {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.replace('Bearer ', '');
     return this.authService.changePassword(req.user.id, dto.currentPassword, dto.newPassword, token);
+  }
+
+  // -------- TOTP 2FA --------
+
+  @Post('2fa/setup')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Begin 2FA enrolment — returns secret + otpauth URL for QR' })
+  @ApiResponse({ status: 200, description: 'Pending secret generated' })
+  async setup2FA(@Request() req: AuthedRequest) {
+    return this.authService.setup2FA(req.user.id);
+  }
+
+  @Post('2fa/verify')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Confirm 2FA enrolment with a TOTP code; returns recovery codes' })
+  @ApiBody({ type: Verify2FADto })
+  @ApiResponse({ status: 200, description: '2FA enabled, recovery codes returned (once)' })
+  @ApiResponse({ status: 401, description: 'Invalid 2FA code' })
+  async verify2FA(@Request() req: AuthedRequest, @Body() dto: Verify2FADto) {
+    return this.authService.verifyAndEnable2FA(req.user.id, dto.code);
+  }
+
+  @Post('2fa/disable')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Disable 2FA (requires current password)' })
+  @ApiBody({ type: Disable2FADto })
+  @ApiResponse({ status: 200, description: '2FA disabled' })
+  @ApiResponse({ status: 401, description: 'Current password is incorrect' })
+  async disable2FA(@Request() req: AuthedRequest, @Body() dto: Disable2FADto) {
+    return this.authService.disable2FA(req.user.id, dto.currentPassword);
+  }
+
+  @Post('2fa/login-verify')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Exchange 2FA challenge + code for a real session token' })
+  @ApiBody({ type: Login2FADto })
+  @ApiResponse({ status: 200, description: 'Login complete, token issued' })
+  @ApiResponse({ status: 401, description: 'Invalid challenge or code' })
+  async login2FA(@Body() dto: Login2FADto, @Request() req: ExpressRequest) {
+    const userAgent = req.headers['user-agent'] || '';
+    const ip = req.ip || req.socket?.remoteAddress || '';
+    return this.authService.loginVerify2FA(dto.twoFactorChallenge, dto.code, { userAgent }, ip);
   }
 
   @Get('me')

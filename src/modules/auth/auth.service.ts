@@ -10,6 +10,12 @@ import { Session, ISession } from '../../models/Session.model';
 import { EmailService } from '../../services/email.service';
 import { SmsService } from '../../services/sms.service';
 import { parseDeviceInfo } from '../../utils/deviceParser';
+import {
+  generateTotpSecret,
+  buildOtpauthUrl,
+  verifyTotp,
+  generateRecoveryCodes,
+} from '../../common/utils/totp';
 
 @Injectable()
 export class AuthService {
@@ -214,15 +220,41 @@ export class AuthService {
       );
     }
 
+    // 2FA gate. If the user has TOTP enabled, we don't issue the session
+    // token yet — instead we sign a short-lived "challenge" JWT that
+    // identifies the user and proves they passed password auth. They
+    // exchange it (plus a TOTP code or recovery code) at /auth/2fa/login-verify
+    // for the real session token. Stashing only the user id in the
+    // challenge means the real `id` claim shape stays unchanged for the
+    // happy path.
+    if (user.twoFactor?.enabled) {
+      const challengeToken = this.jwtService.sign(
+        { id: user._id.toString(), twoFactorChallenge: true },
+        { expiresIn: '5m' },
+      );
+      return {
+        success: true,
+        requires2FA: true,
+        twoFactorChallenge: challengeToken,
+      };
+    }
+
+    return this.issueSession(user, deviceInfo, ip);
+  }
+
+  /**
+   * Issue a session token + persist the session row. Extracted so the
+   * 2FA login-verify path can call it after the user satisfies their
+   * second factor.
+   */
+  private async issueSession(user: any, deviceInfo?: any, ip?: string) {
     const payload = { id: user._id.toString() };
     const token = this.jwtService.sign(payload);
     const expiresIn = process.env.JWT_EXPIRE || '30d';
     const expiresAt = this.calculateExpiry(expiresIn);
 
-    // Create session
     await this.createSession(user._id, token, deviceInfo, ip, expiresAt);
 
-    // Update last login
     user.lastLogin = new Date();
     await user.save();
 
@@ -647,6 +679,183 @@ export class AuthService {
       success: true,
       message: 'Password changed successfully',
     };
+  }
+
+  /**
+   * Step 1 of 2FA enrolment. Generates a fresh TOTP secret, stashes it
+   * as `pendingSecret` (NOT `secret` — until the user proves they
+   * scanned it by submitting a valid code, we don't trust the binding),
+   * and returns the secret + the otpauth URL the client renders as a
+   * QR code.
+   *
+   * Calling setup again before verifying just regenerates the pending
+   * secret — that way a user who closed the app mid-flow can restart
+   * cleanly without leaving stale secrets behind.
+   */
+  async setup2FA(userId: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new UnauthorizedException('User not found');
+
+    if (user.twoFactor?.enabled) {
+      throw new BadRequestException('Two-factor authentication is already enabled. Disable it first to re-enrol.');
+    }
+
+    const secret = generateTotpSecret();
+    user.twoFactor = {
+      ...(user.twoFactor || {}),
+      enabled: false,
+      pendingSecret: secret,
+    };
+    await user.save();
+
+    const accountName = user.email || (user.phone ? user.phone : `user-${user._id}`);
+    const issuer = process.env.TOTP_ISSUER || 'HoneyCom';
+    const otpauthUrl = buildOtpauthUrl({ secret, accountName, issuer });
+
+    return {
+      success: true,
+      secret,
+      otpauthUrl,
+    };
+  }
+
+  /**
+   * Step 2 of enrolment. The user submits a code generated from the
+   * pending secret; on success we promote `pendingSecret` to `secret`,
+   * flip `enabled`, and mint a fresh batch of recovery codes (returned
+   * once and once only — they're hashed before storage).
+   */
+  async verifyAndEnable2FA(userId: string, code: string) {
+    const user = await this.userModel
+      .findById(userId)
+      .select('+twoFactor.pendingSecret +twoFactor.secret');
+    if (!user) throw new UnauthorizedException('User not found');
+
+    const pending = user.twoFactor?.pendingSecret;
+    if (!pending) {
+      throw new BadRequestException('No pending 2FA setup. Call /auth/2fa/setup first.');
+    }
+    if (!verifyTotp(pending, code)) {
+      throw new UnauthorizedException('Invalid 2FA code. Please try again.');
+    }
+
+    // Generate recovery codes — show them to the user once, store
+    // bcrypt hashes only. If the DB leaks, the codes still aren't
+    // usable without bcrypt-cracking each one.
+    const plainRecoveryCodes = generateRecoveryCodes(8);
+    const hashedRecoveryCodes = await Promise.all(
+      plainRecoveryCodes.map(async (c) => bcrypt.hash(c, 10)),
+    );
+
+    user.twoFactor = {
+      enabled: true,
+      secret: pending,
+      pendingSecret: undefined,
+      recoveryCodes: hashedRecoveryCodes,
+      activatedAt: new Date(),
+    };
+    await user.save();
+
+    return {
+      success: true,
+      message: 'Two-factor authentication enabled.',
+      // The plaintext codes are returned exactly once. The frontend MUST
+      // make the user save them before continuing.
+      recoveryCodes: plainRecoveryCodes,
+    };
+  }
+
+  /**
+   * Disable 2FA for an authenticated user. Requires their current
+   * password as a re-auth check — the same standard the change-password
+   * flow uses — so a stolen session can't trivially turn off 2FA.
+   */
+  async disable2FA(userId: string, currentPassword: string) {
+    const user = await this.userModel.findById(userId).select('+password');
+    if (!user) throw new UnauthorizedException('User not found');
+
+    if (!user.password) {
+      throw new BadRequestException(
+        'No password set on this account. Use forgot password to set one first.',
+      );
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    user.twoFactor = {
+      enabled: false,
+      secret: undefined,
+      pendingSecret: undefined,
+      recoveryCodes: undefined,
+      activatedAt: undefined,
+    };
+    await user.save();
+
+    return { success: true, message: 'Two-factor authentication disabled.' };
+  }
+
+  /**
+   * Step 2 of login when 2FA is enabled. Takes the short-lived
+   * twoFactorChallenge token issued by `login`, plus either a TOTP
+   * code or a recovery code, and exchanges them for a real session.
+   *
+   * Recovery codes are single-use — the matching hash is removed from
+   * the user's array on successful redemption. Once exhausted, the user
+   * has to disable + re-enrol to get a fresh batch.
+   */
+  async loginVerify2FA(challengeToken: string, code: string, deviceInfo?: any, ip?: string) {
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(challengeToken);
+    } catch {
+      throw new UnauthorizedException('Two-factor challenge expired. Please log in again.');
+    }
+    if (!payload?.twoFactorChallenge || !payload.id) {
+      throw new UnauthorizedException('Invalid two-factor challenge.');
+    }
+
+    const user = await this.userModel
+      .findById(payload.id)
+      .select('+twoFactor.secret +twoFactor.recoveryCodes');
+    if (!user || !user.twoFactor?.enabled || !user.twoFactor.secret) {
+      throw new UnauthorizedException('Two-factor authentication is not active for this account.');
+    }
+
+    const trimmed = code.trim();
+    const isTotp = /^\d{6}$/.test(trimmed);
+
+    if (isTotp) {
+      if (!verifyTotp(user.twoFactor.secret, trimmed)) {
+        throw new UnauthorizedException('Invalid 2FA code.');
+      }
+    } else {
+      // Recovery code path. Strip whitespace and hyphens for input
+      // tolerance, then linear-scan the hashes. The list is small
+      // (8 codes by default) so an O(n) bcrypt-compare is fine.
+      const normalized = trimmed.replace(/[-\s]/g, '').toUpperCase();
+      const stored = user.twoFactor.recoveryCodes || [];
+      let matchedIdx = -1;
+      for (let i = 0; i < stored.length; i++) {
+        // Hashed codes were stored with hyphens; re-add to compare.
+        const candidate = `${normalized.slice(0, 4)}-${normalized.slice(4, 8)}-${normalized.slice(8, 12)}-${normalized.slice(12, 16)}`;
+        // eslint-disable-next-line no-await-in-loop
+        if (await bcrypt.compare(candidate, stored[i])) {
+          matchedIdx = i;
+          break;
+        }
+      }
+      if (matchedIdx === -1) {
+        throw new UnauthorizedException('Invalid 2FA code or recovery code.');
+      }
+      // Burn the used code so it can't be replayed.
+      user.twoFactor.recoveryCodes = stored.filter((_, i) => i !== matchedIdx);
+      user.markModified('twoFactor');
+    }
+
+    return this.issueSession(user, deviceInfo, ip);
   }
 
   async validateUser(userId: string) {
