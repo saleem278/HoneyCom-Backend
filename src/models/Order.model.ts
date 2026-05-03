@@ -7,6 +7,20 @@ export interface IOrderItem {
   price: number;
   image: string;
   variants?: Record<string, string>;
+  // Per-line-item status — optional. When unset, the consumer should fall
+  // back to the order-level `status` field. Will be populated once the
+  // per-line-item migration ships and the seller dashboard learns to
+  // update individual items (e.g. partial shipments where one item ships
+  // and another is still being prepared). Until then, all items inherit
+  // the parent order status.
+  status?: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+  // Free-text note from the seller about this specific item — e.g.
+  // "Backordered, expect 2 weeks". Surfaced in the customer's order
+  // detail next to the line.
+  statusNote?: string;
+  // When the line-item status last changed. Used to render relative
+  // "Updated 2 days ago" copy. Optional — pre-existing orders won't have it.
+  statusUpdatedAt?: Date;
 }
 
 export interface IOrder extends Document {
@@ -74,6 +88,20 @@ const OrderSchema: Schema = new Schema(
         variants: {
           type: Map,
           of: String,
+        },
+        // Optional per-line-item status. See IOrderItem comment — when
+        // omitted, callers fall back to the parent order's status. Mongoose
+        // doesn't add a default so saved documents keep their existing shape.
+        status: {
+          type: String,
+          enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'],
+        },
+        statusNote: {
+          type: String,
+          maxlength: 500,
+        },
+        statusUpdatedAt: {
+          type: Date,
         },
       },
     ],
