@@ -26,6 +26,8 @@ export interface IUser extends Document {
   resetPasswordExpire?: Date;
   phoneLoginOtp?: string;
   phoneLoginOtpExpire?: Date;
+  phoneLoginOtpAttempts?: number;
+  phoneLoginOtpLockedUntil?: Date;
   socialLogin?: {
     provider: string;
     providerId: string;
@@ -130,6 +132,8 @@ const UserSchema: Schema = new Schema(
     resetPasswordExpire: Date,
     phoneLoginOtp: String,
     phoneLoginOtpExpire: Date,
+    phoneLoginOtpAttempts: { type: Number, default: 0 },
+    phoneLoginOtpLockedUntil: Date,
     socialLogin: {
       provider: String,
       providerId: String,

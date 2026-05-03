@@ -185,19 +185,35 @@ export class AuthService {
   }
 
   async login(email: string, password: string, deviceInfo?: any, ip?: string) {
-    // Check if user exists
     const user = await this.userModel.findOne({ email }).select('+password');
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Check if password matches
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Generate token
+    // Block login for accounts that haven't passed admin or email gates.
+    // - status='inactive' is set on seller self-registration pending admin approval.
+    // - status='suspended' is an explicit admin action.
+    // - emailVerified=false blocks login when the account has an email; phone-only
+    //   accounts bypass this check (they verify via OTP).
+    if (user.status === 'suspended') {
+      throw new UnauthorizedException('Your account has been suspended. Contact support.');
+    }
+    if (user.status === 'inactive') {
+      throw new UnauthorizedException(
+        'Your account is pending approval. You will be notified once it has been reviewed.',
+      );
+    }
+    if (user.email && !user.emailVerified) {
+      throw new UnauthorizedException(
+        'Please verify your email address before signing in. Check your inbox for the verification link.',
+      );
+    }
+
     const payload = { id: user._id.toString() };
     const token = this.jwtService.sign(payload);
     const expiresIn = process.env.JWT_EXPIRE || '30d';
@@ -255,6 +271,11 @@ export class AuthService {
     const otp = (Math.floor(100000 + Math.random() * 900000)).toString();
     user.phoneLoginOtp = otp;
     user.phoneLoginOtpExpire = new Date(Date.now() + 10 * 60 * 1000);
+    // Issuing a fresh OTP resets attempt counter and any prior lockout. The
+    // legitimate user may have triggered lockout themselves by mistyping; a
+    // resend should give them a clean slate.
+    user.phoneLoginOtpAttempts = 0;
+    user.phoneLoginOtpLockedUntil = undefined;
     await user.save();
 
     // Try to send SMS, but don't fail if SMS service is not configured
@@ -290,18 +311,61 @@ export class AuthService {
 
     const normalizedPhone = phone.trim();
 
-    const user = await this.userModel.findOne({
-      phone: normalizedPhone,
-      phoneLoginOtp: otp,
-      phoneLoginOtpExpire: { $gt: new Date() },
-    });
-
-    if (!user) {
+    // Look up the account by phone *only*, so wrong-OTP attempts can be counted
+    // per account. Previously the query filtered by OTP value, which made
+    // miss-counted attempts invisible — an attacker rotating through OTPs from
+    // many IPs could brute-force a 6-digit code without ever hitting a counter.
+    const candidate = await this.userModel.findOne({ phone: normalizedPhone });
+    if (!candidate) {
+      // Don't reveal whether the phone exists.
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
+    // Per-account lockout: if locked, refuse all OTP attempts until the lock
+    // expires. The lock window is set below when attempts cross the threshold.
+    const now = new Date();
+    if (candidate.phoneLoginOtpLockedUntil && candidate.phoneLoginOtpLockedUntil > now) {
+      throw new UnauthorizedException(
+        'Too many failed OTP attempts. Please request a new code in a few minutes.',
+      );
+    }
+
+    const otpMatches =
+      candidate.phoneLoginOtp === otp &&
+      !!candidate.phoneLoginOtpExpire &&
+      candidate.phoneLoginOtpExpire > now;
+
+    if (!otpMatches) {
+      // Increment attempts atomically so concurrent requests can't race past
+      // the limit. After 5 failures, lock the account for 15 minutes.
+      const MAX_ATTEMPTS = 5;
+      const LOCK_MINUTES = 15;
+      const updated = await this.userModel.findOneAndUpdate(
+        { _id: candidate._id },
+        { $inc: { phoneLoginOtpAttempts: 1 } },
+        { new: true },
+      );
+      if (updated && (updated.phoneLoginOtpAttempts || 0) >= MAX_ATTEMPTS) {
+        await this.userModel.updateOne(
+          { _id: candidate._id },
+          {
+            phoneLoginOtpLockedUntil: new Date(Date.now() + LOCK_MINUTES * 60 * 1000),
+            // Burn the OTP so even if the attacker guesses the right value
+            // during the lock window, it's already invalid.
+            phoneLoginOtp: undefined,
+            phoneLoginOtpExpire: undefined,
+          },
+        );
+      }
+      throw new UnauthorizedException('Invalid or expired OTP');
+    }
+
+    // Successful login — clear the OTP, the attempt counter, and any lock.
+    const user = candidate;
     user.phoneLoginOtp = undefined;
     user.phoneLoginOtpExpire = undefined;
+    user.phoneLoginOtpAttempts = 0;
+    user.phoneLoginOtpLockedUntil = undefined;
     user.phoneVerified = true;
     user.lastLogin = new Date();
     await user.save();
@@ -458,24 +522,28 @@ export class AuthService {
   async forgotPassword(email: string) {
     const user = await this.userModel.findOne({ email });
     if (!user) {
-      // Don't reveal if user exists
+      // Don't reveal whether the email is registered.
       return {
         success: true,
         message: 'If email exists, password reset link has been sent',
       };
     }
 
-    // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    user.resetPasswordToken = resetToken;
+    // Email gets the raw token (so the user can click the link); the database
+    // stores only its SHA-256 hash. A DB read leak therefore can't be used to
+    // hijack accounts — the attacker would still need to brute-force the
+    // 256-bit token from its hash. This mirrors the standard pattern used by
+    // password-reset implementations in mature frameworks.
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    user.resetPasswordToken = hashedToken;
     user.resetPasswordExpire = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     await user.save();
 
-    // Send reset email
     try {
-      await this.emailService.sendPasswordResetEmail(email, resetToken);
+      await this.emailService.sendPasswordResetEmail(email, rawToken);
     } catch (error) {
-      // Error sending reset email
       throw new BadRequestException('Error sending email');
     }
 
@@ -486,8 +554,10 @@ export class AuthService {
   }
 
   async resetPassword(token: string, password: string) {
+    // The link contains the raw token; we hash it and look up by the hash.
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
     const user = await this.userModel.findOne({
-      resetPasswordToken: token,
+      resetPasswordToken: hashedToken,
       resetPasswordExpire: { $gt: Date.now() },
     });
 
@@ -495,7 +565,6 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired reset token');
     }
 
-    // Hash new password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
@@ -503,6 +572,19 @@ export class AuthService {
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
     await user.save();
+
+    // Revoke all existing sessions so an attacker who already had access loses
+    // it on password reset. The user will need to log in again on every device.
+    try {
+      await this.sessionModel.updateMany(
+        { user: user._id, isActive: true },
+        { isActive: false },
+      );
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to revoke sessions for user ${user._id} after password reset: ${err?.message || err}`,
+      );
+    }
 
     return {
       success: true,

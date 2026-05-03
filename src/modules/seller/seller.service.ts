@@ -152,18 +152,39 @@ export class SellerService {
       throw new NotFoundException('Order not found');
     }
 
-    // Verify seller owns products in this order
-    const products = await this.productModel.find({ seller: sellerId }).select('_id');
-    const productIds = products.map(p => p._id);
-    const orderHasSellerProducts = order.items.some((item: any) => 
-      productIds.some(pid => pid.toString() === item.product.toString())
-    );
+    // Verify the seller owns *all* the products in this order. Previously a
+    // seller with one item in a 10-item multi-seller order could mark the
+    // entire order delivered, including other sellers' line items.
+    //
+    // The clean fix is per-line-item status, but that's a schema redesign.
+    // For now, refuse seller updates on multi-seller orders — admin can still
+    // take action via the admin panel.
+    const sellerProducts = await this.productModel.find({ seller: sellerId }).select('_id');
+    const sellerProductIds = new Set(sellerProducts.map(p => p._id.toString()));
 
-    if (!orderHasSellerProducts) {
+    const orderProductIds = order.items.map((item: any) => item.product.toString());
+    const allItemsBelongToSeller = orderProductIds.every((pid) => sellerProductIds.has(pid));
+    const someItemsBelongToSeller = orderProductIds.some((pid) => sellerProductIds.has(pid));
+
+    if (!someItemsBelongToSeller) {
       throw new BadRequestException('Not authorized to update this order');
     }
+    if (!allItemsBelongToSeller) {
+      throw new BadRequestException(
+        'This order contains items from other sellers. Per-item fulfillment is not yet supported; please contact admin.',
+      );
+    }
 
-    // Reject illegal transitions (e.g. pending -> delivered, delivered -> processing).
+    // Sellers can only advance the order through fulfillment states. Cancellation
+    // and refunds are admin/customer actions — refuse them here regardless of
+    // what the state machine would otherwise allow.
+    const allowedSellerStatuses = new Set(['processing', 'shipped', 'delivered']);
+    if (!allowedSellerStatuses.has(updateData.status)) {
+      throw new BadRequestException(
+        `Sellers can only set status to: ${[...allowedSellerStatuses].join(', ')}`,
+      );
+    }
+
     assertOrderTransition(order.status, updateData.status);
 
     order.status = updateData.status as any;
