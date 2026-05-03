@@ -1,11 +1,18 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+// Single source of truth for the user role string. Both the Mongoose enum and
+// the IUser type reference this so they cannot drift. Clients (mobile + web)
+// must use these exact strings — note that the CMS role is 'contentEditor'
+// (camelCase), not 'content_editor' or 'cms'.
+export const USER_ROLES = ['customer', 'seller', 'admin', 'contentEditor'] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
 export interface IUser extends Document {
   name: string;
   email?: string;
   password: string;
   phone?: string;
-  role: 'customer' | 'seller' | 'admin';
+  role: UserRole;
   status: 'active' | 'inactive' | 'suspended';
   avatar?: string;
   addresses: mongoose.Types.ObjectId[];
@@ -80,7 +87,7 @@ const UserSchema: Schema = new Schema(
     },
     role: {
       type: String,
-      enum: ['customer', 'seller', 'admin', 'contentEditor'],
+      enum: USER_ROLES,
       default: 'customer',
     },
     status: {

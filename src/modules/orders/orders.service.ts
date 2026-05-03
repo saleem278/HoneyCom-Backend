@@ -21,6 +21,17 @@ export class OrdersService {
     private pdfService: PdfService,
   ) {}
 
+  /**
+   * Extract the customer ID string from an order, regardless of whether
+   * the `customer` field has been populated to a User object or remains an ObjectId.
+   */
+  private extractCustomerId(customer: unknown): string {
+    if (customer && typeof customer === 'object' && '_id' in customer) {
+      return String((customer as { _id: { toString(): string } })._id);
+    }
+    return String(customer);
+  }
+
   async create(userId: string, orderData: any) {
     // Use cart items from orderData if provided, otherwise get from cart
     let itemsToProcess = orderData.items;
@@ -295,9 +306,7 @@ export class OrdersService {
 
     // Authorization check: admin can access any order, users can only access their own
     if (userRole !== 'admin') {
-      const customerId = typeof order.customer === 'object' && order.customer !== null
-        ? (order.customer as any)._id?.toString()
-        : order.customer?.toString();
+      const customerId = this.extractCustomerId(order.customer);
       
       if (customerId !== userId) {
         throw new BadRequestException('Not authorized');
@@ -368,9 +377,7 @@ export class OrdersService {
 
     // Authorization check
     if (userRole !== 'admin' && userRole !== 'seller') {
-      const customerId = typeof order.customer === 'object' && order.customer !== null
-        ? (order.customer as any)._id?.toString()
-        : order.customer?.toString();
+      const customerId = this.extractCustomerId(order.customer);
       
       if (customerId !== userId) {
         throw new BadRequestException('Not authorized');
@@ -442,9 +449,7 @@ export class OrdersService {
 
     // Authorization check
     if (userRole !== 'admin' && userRole !== 'seller') {
-      const customerId = typeof order.customer === 'object' && order.customer !== null
-        ? (order.customer as any)._id?.toString()
-        : order.customer?.toString();
+      const customerId = this.extractCustomerId(order.customer);
       
       if (customerId !== userId) {
         throw new BadRequestException('Not authorized');

@@ -18,6 +18,7 @@ import {
 } from '@nestjs/swagger';
 import { ReviewsService } from './reviews.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('Reviews')
 @Controller('reviews')
@@ -43,7 +44,7 @@ export class ReviewsController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Create review' })
   @ApiResponse({ status: 201, description: 'Review created' })
-  async create(@Request() req, @Body() body: { productId: string; rating: number; comment: string }) {
+  async create(@Request() req: AuthedRequest, @Body() body: { productId: string; rating: number; comment: string }) {
     return this.reviewsService.create(req.user.id, body.productId, body);
   }
 
@@ -54,7 +55,7 @@ export class ReviewsController {
   @ApiResponse({ status: 201, description: 'Review created' })
   async createForProduct(
     @Param('productId') productId: string,
-    @Request() req,
+    @Request() req: AuthedRequest,
     @Body() body: { rating: number; comment: string; images?: string[] }
   ) {
     return this.reviewsService.create(req.user.id, productId, body);
@@ -65,7 +66,7 @@ export class ReviewsController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Update review' })
   @ApiResponse({ status: 200, description: 'Review updated' })
-  async update(@Param('id') id: string, @Request() req, @Body() updateData: any) {
+  async update(@Param('id') id: string, @Request() req: AuthedRequest, @Body() updateData: any) {
     return this.reviewsService.update(id, req.user.id, updateData);
   }
 
@@ -74,7 +75,7 @@ export class ReviewsController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Delete review' })
   @ApiResponse({ status: 200, description: 'Review deleted' })
-  async remove(@Param('id') id: string, @Request() req) {
+  async remove(@Param('id') id: string, @Request() req: AuthedRequest) {
     return this.reviewsService.remove(id, req.user.id);
   }
 
@@ -83,7 +84,7 @@ export class ReviewsController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Mark review as helpful' })
   @ApiResponse({ status: 200, description: 'Review marked as helpful' })
-  async markHelpful(@Param('id') id: string, @Request() req) {
+  async markHelpful(@Param('id') id: string, @Request() req: AuthedRequest) {
     return this.reviewsService.markHelpful(id, req.user.id);
   }
 }

@@ -23,10 +23,13 @@ export class DisputesService {
       throw new NotFoundException('Order not found');
     }
 
-    // Verify user owns the order
-    const customerId = typeof order.customer === 'object' && order.customer !== null
-      ? (order.customer as any)._id?.toString()
-      : order.customer?.toString();
+    // Verify user owns the order. `customer` is typed as ObjectId, but after
+    // `.populate('customer')` it may arrive as a User-like object — handle both.
+    const rawCustomer: unknown = order.customer;
+    const customerId =
+      rawCustomer && typeof rawCustomer === 'object' && '_id' in rawCustomer
+        ? String((rawCustomer as { _id: { toString(): string } })._id)
+        : String(rawCustomer);
     
     if (customerId !== userId) {
       throw new ForbiddenException('You can only create disputes for your own orders');

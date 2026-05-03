@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as mongoose from 'mongoose';
@@ -13,6 +13,8 @@ import { parseDeviceInfo } from '../../utils/deviceParser';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectModel('User') private userModel: Model<IUser>,
     @InjectModel('Session') private sessionModel: Model<ISession>,
@@ -55,14 +57,12 @@ export class AuthService {
     user.emailVerificationExpire = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
     await user.save();
 
-    // Send verification email
     try {
       await this.emailService.sendVerificationEmail(email, verificationToken);
-      console.log(`Verification email sent to ${email}`);
+      this.logger.log(`Verification email sent to ${email}`);
     } catch (error: any) {
-      // Log error for debugging
-      console.error('Failed to send verification email:', error.message || error);
-      // Don't fail registration if email fails, but log the error
+      // Don't fail registration if email fails — but record it.
+      this.logger.error(`Failed to send verification email to ${email}: ${error.message || error}`);
     }
 
     return {
@@ -129,20 +129,20 @@ export class AuthService {
     user.emailVerificationExpire = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await user.save();
 
-    // Send verification email
     try {
       await this.emailService.sendVerificationEmail(email, verificationToken);
-      console.log(`✅ Verification email sent to ${email}`);
+      this.logger.log(`Verification email sent to ${email}`);
     } catch (error: any) {
-      // Log error for debugging
-      console.error('❌ Failed to send verification email:', error.message || error);
-      // Don't fail registration if email fails, but log the error
+      this.logger.error(`Failed to send verification email to ${email}: ${error.message || error}`);
     }
 
     // Notify admin about new seller registration
     try {
       const adminUsers = await this.userModel.find({ role: 'admin' }).select('email name');
-      const adminEmails = adminUsers.map(admin => admin.email).filter(Boolean);
+      // The .filter narrows string|undefined to string for the type checker.
+      const adminEmails: string[] = adminUsers
+        .map(admin => admin.email)
+        .filter((email): email is string => typeof email === 'string' && email.length > 0);
       
       if (adminEmails.length > 0 && this.emailService) {
         const adminNotificationHtml = `
@@ -162,15 +162,13 @@ export class AuthService {
             to: adminEmail,
             subject: 'New Seller Registration - Pending Approval',
             html: adminNotificationHtml,
-          }).catch(err => {
-            // Log error but don't fail registration
-            console.error(`Failed to send notification to ${adminEmail}:`, err);
+          }).catch((err) => {
+            this.logger.error(`Failed to send notification to ${adminEmail}: ${err?.message || err}`);
           })
         ));
       }
-    } catch (error) {
-      // Don't fail registration if notification fails
-      console.error('Error sending admin notification:', error);
+    } catch (error: any) {
+      this.logger.error(`Error sending admin notification: ${error?.message || error}`);
     }
 
     return {
@@ -260,20 +258,28 @@ export class AuthService {
     await user.save();
 
     // Try to send SMS, but don't fail if SMS service is not configured
+    let smsDelivered = true;
     try {
       await this.smsService.sendOTP(normalizedPhone, otp);
     } catch (error: any) {
-      // If SMS service is not configured, log but don't fail
-      // OTP will be returned in response for development
-      console.log('⚠️ SMS service not configured. OTP returned in response for development:', otp);
+      smsDelivered = false;
+      this.logger.error(`SMS OTP send failed for ${normalizedPhone}: ${error?.message || error}`);
+    }
+
+    // Only ever expose the raw OTP outside production *and* only when SMS is unavailable
+    // (so the dev workflow still works without Twilio). Never in production.
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const exposeOtp = !isProd && !smsDelivered;
+
+    if (exposeOtp) {
+      this.logger.warn(`SMS unavailable in non-prod — exposing OTP in response for ${normalizedPhone}`);
     }
 
     return {
       success: true,
       message: 'OTP sent successfully',
-      // Return OTP in response for development (remove in production)
-      otp: otp,
-      expiresIn: 600, // 10 minutes in seconds
+      ...(exposeOtp ? { otp } : {}),
+      expiresIn: 600,
     };
   }
 

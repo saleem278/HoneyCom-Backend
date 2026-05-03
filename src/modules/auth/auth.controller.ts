@@ -27,6 +27,8 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SocialLoginDto } from './dto/social-login.dto';
 import { RequestPhoneOtpDto, VerifyPhoneOtpDto } from './dto/phone-login.dto';
+import type { Request as ExpressRequest } from 'express';
+import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -59,9 +61,9 @@ export class AuthController {
   @ApiBody({ type: LoginDto })
   @ApiResponse({ status: 200, description: 'Login successful' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
-  async login(@Body() loginDto: LoginDto, @Request() req) {
+  async login(@Body() loginDto: LoginDto, @Request() req: ExpressRequest) {
     const userAgent = req.headers['user-agent'] || '';
-    const ip = req.ip || req.connection?.remoteAddress || '';
+    const ip = req.ip || req.socket?.remoteAddress || '';
     const deviceInfo = { userAgent };
     return this.authService.login(loginDto.email, loginDto.password, deviceInfo, ip);
   }
@@ -85,9 +87,9 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Login successful' })
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 401, description: 'Invalid or expired OTP' })
-  async verifyPhoneOtp(@Body() body: VerifyPhoneOtpDto, @Request() req) {
+  async verifyPhoneOtp(@Body() body: VerifyPhoneOtpDto, @Request() req: ExpressRequest) {
     const userAgent = req.headers['user-agent'] || '';
-    const ip = req.ip || req.connection?.remoteAddress || '';
+    const ip = req.ip || req.socket?.remoteAddress || '';
     const deviceInfo = { userAgent };
     return this.authService.loginWithPhone(body.phone, body.otp, deviceInfo, ip);
   }
@@ -136,10 +138,11 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current user' })
   @ApiResponse({ status: 200, description: 'Current user information' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async getMe(@Request() req) {
+  async getMe(@Request() req: AuthedRequest) {
     const user = await this.authService.validateUser(req.user.id);
     // Update session activity
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '');
     if (token) {
       await this.authService.updateSessionActivity(token);
     }
@@ -160,9 +163,9 @@ export class AuthController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Logout user' })
   @ApiResponse({ status: 200, description: 'Logged out successfully' })
-  async logout(@Request() req) {
-    // Revoke current session
-    const token = req.headers.authorization?.replace('Bearer ', '');
+  async logout(@Request() req: AuthedRequest) {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '');
     if (token) {
       await this.authService.updateSessionActivity(token);
     }
@@ -177,10 +180,11 @@ export class AuthController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Get all active sessions for current user' })
   @ApiResponse({ status: 200, description: 'Sessions retrieved successfully' })
-  async getSessions(@Request() req) {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+  async getSessions(@Request() req: AuthedRequest) {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '');
     const sessions = await this.authService.getUserSessions(req.user.id);
-    
+
     // Mark current session by comparing hashed tokens
     const hashedCurrentToken = this.authService.hashToken(token);
     // We need to get sessions with tokens to compare
@@ -206,7 +210,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke a specific session' })
   @ApiResponse({ status: 200, description: 'Session revoked successfully' })
   @ApiResponse({ status: 400, description: 'Session not found' })
-  async revokeSession(@Request() req, @Param('sessionId') sessionId: string) {
+  async revokeSession(@Request() req: AuthedRequest, @Param('sessionId') sessionId: string) {
     return this.authService.revokeSession(req.user.id, sessionId);
   }
 
@@ -215,8 +219,9 @@ export class AuthController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Revoke all sessions except current' })
   @ApiResponse({ status: 200, description: 'All other sessions revoked successfully' })
-  async revokeAllSessions(@Request() req) {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+  async revokeAllSessions(@Request() req: AuthedRequest) {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace('Bearer ', '');
     return this.authService.revokeAllOtherSessions(req.user.id, token);
   }
 }

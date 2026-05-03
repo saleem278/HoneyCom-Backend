@@ -16,11 +16,17 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     @InjectModel('User') private userModel: Model<IUser>,
     @InjectModel('Session') private sessionModel: Model<ISession>,
   ) {
+    const secret = configService.get<string>('JWT_SECRET');
+    if (!secret || secret.length < 32) {
+      throw new Error(
+        'JWT_SECRET must be set and at least 32 characters. Refusing to boot with a weak or default secret.',
+      );
+    }
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET') || 'your-secret-key',
-      passReqToCallback: true, // Allow access to request object
+      secretOrKey: secret,
+      passReqToCallback: true,
     });
   }
 

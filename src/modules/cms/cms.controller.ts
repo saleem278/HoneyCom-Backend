@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('CMS')
 @Controller('cms')
@@ -25,8 +26,8 @@ export class CmsController {
   @Get('pages')
   @ApiOperation({ summary: 'Get all pages' })
   async getPages(@Query('status') status?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
-    const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 20;
+    const pageNum = parseInt(page || '', 10) || 1;
+    const limitNum = parseInt(limit || '', 10) || 20;
     return this.cmsService.getPages(status, pageNum, limitNum);
   }
 
@@ -38,7 +39,7 @@ export class CmsController {
 
   @Post('pages')
   @ApiOperation({ summary: 'Create page' })
-  async createPage(@Body() data: any, @Request() req) {
+  async createPage(@Body() data: any, @Request() req: AuthedRequest) {
     return this.cmsService.createPage(data, req.user.id);
   }
 
@@ -58,8 +59,8 @@ export class CmsController {
   @Get('blog')
   @ApiOperation({ summary: 'Get all blog posts' })
   async getBlogPosts(@Query('status') status?: string, @Query('category') category?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
-    const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 20;
+    const pageNum = parseInt(page || '', 10) || 1;
+    const limitNum = parseInt(limit || '', 10) || 20;
     return this.cmsService.getBlogPosts(status, category, pageNum, limitNum);
   }
 
@@ -71,7 +72,7 @@ export class CmsController {
 
   @Post('blog')
   @ApiOperation({ summary: 'Create blog post' })
-  async createBlogPost(@Body() data: any, @Request() req) {
+  async createBlogPost(@Body() data: any, @Request() req: AuthedRequest) {
     return this.cmsService.createBlogPost(data, req.user.id);
   }
 
@@ -91,8 +92,8 @@ export class CmsController {
   @Get('media')
   @ApiOperation({ summary: 'Get all media' })
   async getMedia(@Query('type') type?: string, @Query('folder') folder?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
-    const pageNum = parseInt(page) || 1;
-    const limitNum = parseInt(limit) || 20;
+    const pageNum = parseInt(page || '', 10) || 1;
+    const limitNum = parseInt(limit || '', 10) || 20;
     return this.cmsService.getMedia(type, folder, pageNum, limitNum);
   }
 
@@ -104,7 +105,7 @@ export class CmsController {
 
   @Post('media')
   @ApiOperation({ summary: 'Upload media' })
-  async uploadMedia(@Body() data: any, @Request() req) {
+  async uploadMedia(@Body() data: any, @Request() req: AuthedRequest) {
     return this.cmsService.uploadMedia(data, req.user.id);
   }
 
@@ -256,7 +257,7 @@ export class CmsController {
   async createVersion(
     @Param('contentType') contentType: 'page' | 'blog',
     @Param('contentId') contentId: string,
-    @Request() req,
+    @Request() req: AuthedRequest,
   ) {
     return this.cmsService.createVersion(contentType, contentId, req.user.id);
   }
@@ -272,7 +273,7 @@ export class CmsController {
 
   @Post('versions/:id/restore')
   @ApiOperation({ summary: 'Restore a version' })
-  async restoreVersion(@Param('id') id: string, @Request() req) {
+  async restoreVersion(@Param('id') id: string, @Request() req: AuthedRequest) {
     return this.cmsService.restoreVersion(id, req.user.id);
   }
 

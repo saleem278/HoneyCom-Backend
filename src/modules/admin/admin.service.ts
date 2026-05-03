@@ -273,12 +273,13 @@ export class AdminService {
     seller.sellerInfo.approvalStatus = 'approved';
     await seller.save();
 
-    // Send approval email to seller
-    try {
-      await this.emailService.sendSellerApprovalEmail(seller.email, seller.name);
-    } catch (error) {
-      // Error sending approval email
-      // Continue even if email fails
+    // Send approval email to seller (skip if seller has no email — phone-only account)
+    if (seller.email) {
+      try {
+        await this.emailService.sendSellerApprovalEmail(seller.email, seller.name || '');
+      } catch (error) {
+        // Continue even if email fails — approval state is already saved.
+      }
     }
 
     return {
@@ -311,12 +312,13 @@ export class AdminService {
     seller.sellerInfo.approvalStatus = 'rejected';
     await seller.save();
 
-    // Send rejection email to seller with reason
-    try {
-      await this.emailService.sendSellerRejectionEmail(seller.email, seller.name, reason);
-    } catch (error) {
-      // Error sending rejection email
-      // Continue even if email fails
+    // Send rejection email to seller (skip if seller has no email)
+    if (seller.email) {
+      try {
+        await this.emailService.sendSellerRejectionEmail(seller.email, seller.name || '', reason);
+      } catch (error) {
+        // Continue even if email fails — rejection state is already saved.
+      }
     }
 
     return {

@@ -1,44 +1,42 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { EmailTemplatesService } from './email-templates.service';
 
 @Injectable()
 export class EmailService {
+  private readonly logger = new Logger(EmailService.name);
   private transporter: nodemailer.Transporter;
   private templatesService: EmailTemplatesService;
 
   constructor(private configService: ConfigService) {
     this.templatesService = new EmailTemplatesService(configService);
-    
+
     const smtpHost = configService.get<string>('SMTP_HOST') || 'smtp.gmail.com';
     const smtpPort = parseInt(configService.get<string>('SMTP_PORT') || '587');
     const smtpUser = configService.get<string>('SMTP_USER');
     const smtpPassword = configService.get<string>('SMTP_PASSWORD');
 
-    // Only create transporter if credentials are provided
     if (smtpUser && smtpPassword) {
       this.transporter = nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
-        secure: smtpPort === 465, // true for 465, false for other ports
+        secure: smtpPort === 465,
         auth: {
           user: smtpUser,
           pass: smtpPassword,
         },
       });
-      
-      // Verify connection
-      this.transporter.verify((error, success) => {
+
+      this.transporter.verify((error) => {
         if (error) {
-          console.error('SMTP connection failed:', error.message);
+          this.logger.error(`SMTP connection failed: ${error.message}`);
         } else {
-          console.log('SMTP server is ready to send emails');
+          this.logger.log('SMTP server is ready to send emails');
         }
       });
     } else {
-      console.warn('⚠️  SMTP not configured. Email functionality will not work.');
-      console.warn('   Please set SMTP_USER and SMTP_PASSWORD in your .env file');
+      this.logger.warn('SMTP not configured. Email functionality will not work. Set SMTP_USER and SMTP_PASSWORD.');
     }
   }
 
@@ -67,14 +65,11 @@ export class EmailService {
         text: options.text,
       });
       
-      console.log(`Email sent successfully to ${options.to}. Message ID: ${info.messageId}`);
+      this.logger.log(`Email sent to ${options.to} (messageId=${info.messageId})`);
     } catch (error: any) {
-      console.error('Email sending failed:', {
-        to: options.to,
-        subject: options.subject,
-        error: error.message || error,
-        code: error.code,
-      });
+      this.logger.error(
+        `Email sending failed (to=${options.to}, subject=${options.subject}, code=${error.code}): ${error.message || error}`,
+      );
       throw error;
     }
   }

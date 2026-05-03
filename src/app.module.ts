@@ -31,8 +31,8 @@ import { HealthModule } from './modules/health/health.module';
       envFilePath: '.env',
     }),
     
-    // Database
-    MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb://localhost:27017/honey-ecommerce', {
+    // Database — bootstrap.ts asserts MONGODB_URI is set before this module loads.
+    MongooseModule.forRoot(process.env.MONGODB_URI as string, {
       connectionFactory: (connection) => {
         connection.on('connected', () => {
           // MongoDB Connected

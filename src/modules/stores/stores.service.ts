@@ -20,7 +20,10 @@ export class StoresService {
         throw new NotFoundException('Seller not found');
       }
 
-      const slug = (seller.name || seller.email.split('@')[0])
+      // email may be undefined for phone-only accounts; fall back to a stable
+      // identifier rather than crashing during default store creation.
+      const slugSource = seller.name || seller.email?.split('@')[0] || sellerId.toString();
+      const slug = slugSource
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '');

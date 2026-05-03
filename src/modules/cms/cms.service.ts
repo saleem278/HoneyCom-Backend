@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Page, IPage } from '../../models/Page.model';
@@ -15,6 +15,8 @@ import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class CmsService {
+  private readonly logger = new Logger(CmsService.name);
+
   constructor(
     @InjectModel('Page') private pageModel: Model<IPage>,
     @InjectModel('Blog') private blogModel: Model<IBlog>,
@@ -497,13 +499,12 @@ export class CmsService {
             to: email,
             subject: `New Form Submission: ${form.name}`,
             html: emailHtml,
-          }).catch(err => {
-            console.error(`Failed to send form notification to ${email}:`, err);
+          }).catch((err) => {
+            this.logger.error(`Failed to send form notification to ${email}: ${err?.message || err}`);
           })
         ));
-      } catch (error) {
-        // Don't fail submission if email fails
-        console.error('Error sending form submission email:', error);
+      } catch (error: any) {
+        this.logger.error(`Error sending form submission email: ${error?.message || error}`);
       }
     }
 

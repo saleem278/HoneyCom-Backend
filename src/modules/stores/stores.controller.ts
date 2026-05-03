@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('Stores')
 @Controller('stores')
@@ -25,7 +26,7 @@ export class StoresController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Get my store (seller)' })
   @ApiResponse({ status: 200, description: 'Store details' })
-  async getMyStore(@Request() req) {
+  async getMyStore(@Request() req: AuthedRequest) {
     return this.storesService.getStoreBySeller(req.user.id);
   }
 
@@ -35,7 +36,7 @@ export class StoresController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Update my store profile' })
   @ApiResponse({ status: 200, description: 'Store updated' })
-  async updateMyStore(@Request() req, @Body() updateData: any) {
+  async updateMyStore(@Request() req: AuthedRequest, @Body() updateData: any) {
     return this.storesService.updateStore(req.user.id, updateData);
   }
 
@@ -45,7 +46,7 @@ export class StoresController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Update store settings' })
   @ApiResponse({ status: 200, description: 'Settings updated' })
-  async updateStoreSettings(@Request() req, @Body() settings: any) {
+  async updateStoreSettings(@Request() req: AuthedRequest, @Body() settings: any) {
     return this.storesService.updateStoreSettings(req.user.id, settings);
   }
 }

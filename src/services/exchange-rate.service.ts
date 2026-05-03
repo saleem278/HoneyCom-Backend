@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export type Currency = 'USD' | 'EUR' | 'GBP' | 'INR' | 'CAD' | 'AUD' | 'JPY';
 
 @Injectable()
 export class ExchangeRateService {
+  private readonly logger = new Logger(ExchangeRateService.name);
   private baseCurrency: Currency;
   
   // Base exchange rates relative to USD (reference currency)
@@ -179,9 +180,8 @@ export class ExchangeRateService {
         // Recalculate rates for current base currency
         this.calculateExchangeRates();
       }
-    } catch (error) {
-      // Error loading exchange rates - continue with static rates if API fails
-      console.warn('Failed to fetch exchange rates from API, using static rates:', error);
+    } catch (error: any) {
+      this.logger.warn(`Failed to fetch exchange rates from API, using static rates: ${error?.message || error}`);
     }
   }
 

@@ -22,12 +22,20 @@ import { SmsService } from '../../services/sms.service';
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        secret: configService.get<string>('JWT_SECRET') || 'your-secret-key',
-        signOptions: {
-          expiresIn: (configService.get<string>('JWT_EXPIRE') || '30d') as any,
-        },
-      }),
+      useFactory: (configService: ConfigService) => {
+        const secret = configService.get<string>('JWT_SECRET');
+        if (!secret || secret.length < 32) {
+          throw new Error(
+            'JWT_SECRET must be set and at least 32 characters. Refusing to boot with a weak or default secret.',
+          );
+        }
+        return {
+          secret,
+          signOptions: {
+            expiresIn: (configService.get<string>('JWT_EXPIRE') || '30d') as any,
+          },
+        };
+      },
       inject: [ConfigService],
     }),
   ],

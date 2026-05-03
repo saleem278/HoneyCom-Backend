@@ -27,6 +27,7 @@ import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Currency } from '../../common/decorators/currency.decorator';
+import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('Products')
 @Controller('products')
@@ -63,7 +64,7 @@ export class ProductsController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Create product' })
   @ApiResponse({ status: 201, description: 'Product created' })
-  async create(@Request() req, @Body() createProductDto: any) {
+  async create(@Request() req: AuthedRequest, @Body() createProductDto: any) {
     return this.productsService.create(createProductDto, req.user.id);
   }
 
@@ -75,7 +76,7 @@ export class ProductsController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Bulk upload products from CSV' })
   @ApiResponse({ status: 201, description: 'Products uploaded' })
-  async bulkUpload(@Request() req, @UploadedFile() file: Express.Multer.File) {
+  async bulkUpload(@Request() req: AuthedRequest, @UploadedFile() file: Express.Multer.File) {
     return this.productsService.bulkUpload(file, req.user.id);
   }
 
@@ -85,7 +86,7 @@ export class ProductsController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Update product' })
   @ApiResponse({ status: 200, description: 'Product updated' })
-  async update(@Param('id') id: string, @Request() req, @Body() updateProductDto: any) {
+  async update(@Param('id') id: string, @Request() req: AuthedRequest, @Body() updateProductDto: any) {
     return this.productsService.update(id, updateProductDto, req.user.id, req.user.role);
   }
 
@@ -95,7 +96,7 @@ export class ProductsController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Update product inventory' })
   @ApiResponse({ status: 200, description: 'Inventory updated' })
-  async updateInventory(@Param('id') id: string, @Request() req, @Body() body: { inventory: number }) {
+  async updateInventory(@Param('id') id: string, @Request() req: AuthedRequest, @Body() body: { inventory: number }) {
     return this.productsService.updateInventory(id, body.inventory, req.user.id, req.user.role);
   }
 
@@ -105,7 +106,7 @@ export class ProductsController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Delete product' })
   @ApiResponse({ status: 200, description: 'Product deleted' })
-  async remove(@Param('id') id: string, @Request() req) {
+  async remove(@Param('id') id: string, @Request() req: AuthedRequest) {
     return this.productsService.remove(id, req.user.id, req.user.role);
   }
 }
