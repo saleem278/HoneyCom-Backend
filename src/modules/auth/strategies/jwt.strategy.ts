@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
+import { ExtractJwt, Strategy, JwtFromRequestFunction } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -8,6 +8,18 @@ import { Request } from 'express';
 import * as crypto from 'crypto';
 import { User, IUser } from '../../../models/User.model';
 import { Session, ISession } from '../../../models/Session.model';
+
+export const SESSION_COOKIE_NAME = 'honeycom_session';
+
+/**
+ * Reads the JWT from the session cookie. Returns null when missing so
+ * passport-jwt's chained extractor falls through to the next one.
+ */
+const cookieExtractor: JwtFromRequestFunction = (req: Request) => {
+  if (!req?.cookies) return null;
+  const value = req.cookies[SESSION_COOKIE_NAME];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+};
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -23,7 +35,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       );
     }
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      // Cookie path first, Authorization header second. During the
+      // migration both work simultaneously; once the cookie path is
+      // observed working in prod for a release cycle the header path
+      // can be retired (along with the JSON `token` field on responses).
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        cookieExtractor,
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ]),
       ignoreExpiration: false,
       secretOrKey: secret,
       passReqToCallback: true,
@@ -31,9 +50,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(req: Request, payload: any) {
-    // Get the token from the request
-    const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
-    
+    // Read the token using the same extractor chain as jwtFromRequest
+    // so `validate` can hash it for the session lookup. We can't reuse
+    // the chain object literal because passport-jwt invoked it before
+    // calling validate — easier to re-derive.
+    const token =
+      cookieExtractor(req) || ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+
     if (!token) {
       throw new UnauthorizedException('Token not found');
     }

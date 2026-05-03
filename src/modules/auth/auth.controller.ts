@@ -7,6 +7,7 @@ import {
   Param,
   UseGuards,
   Request,
+  Res,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -29,8 +30,47 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { Verify2FADto, Disable2FADto, Login2FADto } from './dto/two-factor.dto';
 import { SocialLoginDto } from './dto/social-login.dto';
 import { RequestPhoneOtpDto, VerifyPhoneOtpDto } from './dto/phone-login.dto';
-import type { Request as ExpressRequest } from 'express';
+import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { AuthedRequest } from '../../common/types/request.types';
+import { SESSION_COOKIE_NAME } from './strategies/jwt.strategy';
+
+/**
+ * Set the session cookie on the outgoing response. HttpOnly so JS can't
+ * read it (defence vs XSS-token-exfil), Secure in production so it only
+ * travels over HTTPS, SameSite=Lax so it follows top-level navigation
+ * but not cross-site form posts. maxAge mirrors JWT_EXPIRE.
+ *
+ * Returns the same payload it was given so callers can write
+ * `return setSessionCookie(res, payload)` for terseness.
+ */
+function setSessionCookie<T extends { token?: string }>(res: ExpressResponse, payload: T): T {
+  if (payload?.token) {
+    const isProd = process.env.NODE_ENV === 'production';
+    const expireRaw = process.env.JWT_EXPIRE || '30d';
+    // Convert "30d", "12h", "60m" into milliseconds. Anything else
+    // (including raw seconds) falls back to 30 days so the cookie
+    // doesn't end up persistently invalid.
+    const match = /^(\d+)\s*([dhms])$/.exec(expireRaw.trim());
+    let maxAgeMs = 30 * 24 * 60 * 60 * 1000;
+    if (match) {
+      const n = parseInt(match[1], 10);
+      const unit = match[2];
+      maxAgeMs =
+        unit === 'd' ? n * 86_400_000 :
+        unit === 'h' ? n * 3_600_000 :
+        unit === 'm' ? n * 60_000 :
+        n * 1000;
+    }
+    res.cookie(SESSION_COOKIE_NAME, payload.token, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'lax',
+      maxAge: maxAgeMs,
+      path: '/',
+    });
+  }
+  return payload;
+}
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -63,11 +103,16 @@ export class AuthController {
   @ApiBody({ type: LoginDto })
   @ApiResponse({ status: 200, description: 'Login successful' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
-  async login(@Body() loginDto: LoginDto, @Request() req: ExpressRequest) {
+  async login(
+    @Body() loginDto: LoginDto,
+    @Request() req: ExpressRequest,
+    @Res({ passthrough: true }) res: ExpressResponse,
+  ) {
     const userAgent = req.headers['user-agent'] || '';
     const ip = req.ip || req.socket?.remoteAddress || '';
     const deviceInfo = { userAgent };
-    return this.authService.login(loginDto.email, loginDto.password, deviceInfo, ip);
+    const result = await this.authService.login(loginDto.email, loginDto.password, deviceInfo, ip);
+    return setSessionCookie(res, result as any);
   }
 
   @Post('login/phone/request-otp')
@@ -89,11 +134,16 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Login successful' })
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 401, description: 'Invalid or expired OTP' })
-  async verifyPhoneOtp(@Body() body: VerifyPhoneOtpDto, @Request() req: ExpressRequest) {
+  async verifyPhoneOtp(
+    @Body() body: VerifyPhoneOtpDto,
+    @Request() req: ExpressRequest,
+    @Res({ passthrough: true }) res: ExpressResponse,
+  ) {
     const userAgent = req.headers['user-agent'] || '';
     const ip = req.ip || req.socket?.remoteAddress || '';
     const deviceInfo = { userAgent };
-    return this.authService.loginWithPhone(body.phone, body.otp, deviceInfo, ip);
+    const result = await this.authService.loginWithPhone(body.phone, body.otp, deviceInfo, ip);
+    return setSessionCookie(res, result as any);
   }
 
   @Post('social-login')
@@ -101,8 +151,12 @@ export class AuthController {
   @ApiBody({ type: SocialLoginDto })
   @ApiResponse({ status: 200, description: 'Social login successful' })
   @ApiResponse({ status: 400, description: 'Invalid provider or code' })
-  async socialLogin(@Body() socialLoginDto: SocialLoginDto) {
-    return this.authService.socialLogin(socialLoginDto.provider, socialLoginDto.code);
+  async socialLogin(
+    @Body() socialLoginDto: SocialLoginDto,
+    @Res({ passthrough: true }) res: ExpressResponse,
+  ) {
+    const result = await this.authService.socialLogin(socialLoginDto.provider, socialLoginDto.code);
+    return setSessionCookie(res, result as any);
   }
 
   @Get('verify-email')
@@ -195,10 +249,15 @@ export class AuthController {
   @ApiBody({ type: Login2FADto })
   @ApiResponse({ status: 200, description: 'Login complete, token issued' })
   @ApiResponse({ status: 401, description: 'Invalid challenge or code' })
-  async login2FA(@Body() dto: Login2FADto, @Request() req: ExpressRequest) {
+  async login2FA(
+    @Body() dto: Login2FADto,
+    @Request() req: ExpressRequest,
+    @Res({ passthrough: true }) res: ExpressResponse,
+  ) {
     const userAgent = req.headers['user-agent'] || '';
     const ip = req.ip || req.socket?.remoteAddress || '';
-    return this.authService.loginVerify2FA(dto.twoFactorChallenge, dto.code, { userAgent }, ip);
+    const result = await this.authService.loginVerify2FA(dto.twoFactorChallenge, dto.code, { userAgent }, ip);
+    return setSessionCookie(res, result as any);
   }
 
   @Get('me')
@@ -232,12 +291,18 @@ export class AuthController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Logout user' })
   @ApiResponse({ status: 200, description: 'Logged out successfully' })
-  async logout(@Request() req: AuthedRequest) {
+  async logout(
+    @Request() req: AuthedRequest,
+    @Res({ passthrough: true }) res: ExpressResponse,
+  ) {
     const authHeader = req.headers.authorization || '';
     const token = authHeader.replace('Bearer ', '');
     if (token) {
       await this.authService.updateSessionActivity(token);
     }
+    // Clear the session cookie. clearCookie must mirror the path the
+    // cookie was set on or the browser will keep the original around.
+    res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
     return {
       success: true,
       message: 'Logged out successfully',

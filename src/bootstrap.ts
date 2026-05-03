@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import compression from 'compression';
+import cookieParser from 'cookie-parser';
 
 export interface BootstrapOptions {
   /**
@@ -20,6 +21,13 @@ function parseAllowedOrigins(): string[] {
 
 export function applySecurity(app: INestApplication, opts: BootstrapOptions = {}): void {
   const { swaggerWithCdn = false } = opts;
+
+  // cookie-parser is required so the JWT strategy's cookieExtractor can
+  // read the session cookie. Without it, req.cookies is undefined and
+  // every cookie-based auth request falls through to the bearer header
+  // (or fails). Mounted before security middleware so cookies are
+  // available throughout the rest of the chain.
+  app.use(cookieParser());
 
   app.use(
     helmet({
