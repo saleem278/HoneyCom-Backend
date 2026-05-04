@@ -1,10 +1,15 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { JwtService } from '@nestjs/jwt';
 import { User, IUser } from '../../models/User.model';
 import { Product, IProduct } from '../../models/Product.model';
 import { Order, IOrder } from '../../models/Order.model';
 import { Category, ICategory } from '../../models/Category.model';
+import {
+  ImpersonationEvent,
+  IImpersonationEvent,
+} from '../../models/ImpersonationEvent.model';
 import { PaymentsService } from '../payments/payments.service';
 import { EmailService } from '../../services/email.service';
 import { assertOrderTransition } from '../orders/order-status';
@@ -16,9 +21,128 @@ export class AdminService {
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Order') private orderModel: Model<IOrder>,
     @InjectModel('Category') private categoryModel: Model<ICategory>,
+    @InjectModel('ImpersonationEvent') private impersonationModel: Model<IImpersonationEvent>,
     private paymentsService: PaymentsService,
     private emailService: EmailService,
+    private jwtService: JwtService,
   ) {}
+
+  /**
+   * Mint an impersonation session. Returns a JWT carrying the target
+   * user's id (so downstream APIs scope by that user) plus the
+   * admin's id under `impersonator` (so audit code can attribute the
+   * action to the real actor).
+   *
+   * Refuses to impersonate another admin — there's no support reason
+   * for it, and it would create an audit ambiguity worth avoiding.
+   * Forces a short expiry (1h) and a required reason string so the
+   * audit log has actual signal.
+   */
+  async startImpersonation(
+    adminId: string,
+    targetUserId: string,
+    reason: string,
+    ip?: string,
+    userAgent?: string,
+  ) {
+    if (adminId === targetUserId) {
+      throw new BadRequestException('Cannot impersonate yourself');
+    }
+
+    const trimmedReason = (reason || '').trim();
+    if (trimmedReason.length < 5) {
+      throw new BadRequestException(
+        'A reason of at least 5 characters is required to impersonate a user',
+      );
+    }
+
+    const target = await this.userModel.findById(targetUserId).select('_id role name email');
+    if (!target) {
+      throw new NotFoundException('Target user not found');
+    }
+
+    if (target.role === 'admin') {
+      throw new ForbiddenException('Cannot impersonate another admin');
+    }
+
+    // Audit log row first so a failed JWT mint can't leave a session
+    // un-recorded. The endedAt is set when the admin explicitly ends
+    // the session via /admin/impersonate/end; sessions whose tokens
+    // expire silently leave endedAt unset (with the token's own exp
+    // serving as the implicit upper bound).
+    const event = await this.impersonationModel.create({
+      impersonator: adminId,
+      target: target._id,
+      startedAt: new Date(),
+      ip,
+      userAgent,
+      reason: trimmedReason,
+    });
+
+    // 1h expiry. Long enough for genuine support work, short enough
+    // that a leaked token has limited blast radius.
+    const token = this.jwtService.sign(
+      { id: target._id.toString(), impersonator: adminId, eventId: event._id.toString() },
+      { expiresIn: '1h' },
+    );
+
+    return {
+      success: true,
+      token,
+      target: {
+        id: target._id,
+        role: target.role,
+        name: target.name,
+        email: target.email,
+      },
+      event: {
+        id: event._id,
+        startedAt: event.startedAt,
+      },
+    };
+  }
+
+  /**
+   * End an active impersonation session. The frontend just discards
+   * the impersonation token and reverts to the admin's original
+   * session token (which it kept locally), so this endpoint exists
+   * primarily to close the audit row's `endedAt`.
+   */
+  async endImpersonation(eventId: string, callerImpersonatorId: string) {
+    const event = await this.impersonationModel.findById(eventId);
+    if (!event) {
+      throw new NotFoundException('Impersonation session not found');
+    }
+    // Only the admin who started it can end it via this endpoint.
+    // Anyone else hitting this path with a stolen eventId would just
+    // bump someone else's audit row, which we want to refuse.
+    if (event.impersonator.toString() !== callerImpersonatorId) {
+      throw new ForbiddenException('You did not start this impersonation session');
+    }
+    if (event.endedAt) {
+      // Idempotent — return the existing record rather than failing.
+      return { success: true, event };
+    }
+    event.endedAt = new Date();
+    await event.save();
+    return { success: true, event };
+  }
+
+  /**
+   * Recent impersonation activity. Both directions: admins by default
+   * see their own sessions; pass viewAll=true (admin-only at the
+   * controller level) to see everyone's. Used by the audit screen.
+   */
+  async listImpersonations(adminId: string, viewAll = false, limit = 50) {
+    const filter: any = viewAll ? {} : { impersonator: adminId };
+    const events = await this.impersonationModel
+      .find(filter)
+      .sort({ startedAt: -1 })
+      .limit(Math.min(limit, 200))
+      .populate('impersonator', 'name email role')
+      .populate('target', 'name email role');
+    return { success: true, events };
+  }
 
   async getDashboard() {
     const totalUsers = await this.userModel.countDocuments();

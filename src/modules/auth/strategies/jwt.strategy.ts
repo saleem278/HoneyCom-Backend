@@ -94,6 +94,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       id: user._id.toString(),
       email: user.email,
       role: user.role,
+      // Pass-through the impersonator id when present in the JWT.
+      // Downstream code (audit trail, banner rendering) uses it to
+      // distinguish "admin acting as themselves" from "admin acting
+      // through a target user". Plain logins set this to undefined,
+      // so the field is harmless when absent.
+      impersonator: payload.impersonator,
     };
   }
 }

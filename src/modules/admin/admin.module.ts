@@ -7,6 +7,7 @@ import { User, UserSchema } from '../../models/User.model';
 import { Product, ProductSchema } from '../../models/Product.model';
 import { Order, OrderSchema } from '../../models/Order.model';
 import { Category, CategorySchema } from '../../models/Category.model';
+import { ImpersonationEventSchema } from '../../models/ImpersonationEvent.model';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { EmailService } from '../../services/email.service';
@@ -18,6 +19,7 @@ import { EmailService } from '../../services/email.service';
       { name: 'Product', schema: ProductSchema },
       { name: 'Order', schema: OrderSchema },
       { name: 'Category', schema: CategorySchema },
+      { name: 'ImpersonationEvent', schema: ImpersonationEventSchema },
     ]),
     ConfigModule,
     AuthModule,
