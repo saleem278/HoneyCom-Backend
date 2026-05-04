@@ -7,13 +7,10 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { AuthedRequest } from '../../common/types/request.types';
 import { SESSION_COOKIE_NAME, ADMIN_STASH_COOKIE_NAME } from '../auth/strategies/jwt.strategy';
-
-const COOKIE_BASE_OPTIONS = {
-  httpOnly: true as const,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  path: '/',
-};
+import {
+  sessionCookieOptions,
+  clearSessionCookieOptions,
+} from '../../common/utils/cookie-options';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -158,15 +155,10 @@ export class AdminController {
     // then overwrite the active session cookie with the impersonation
     // token. Both cookies are HttpOnly so JS can't see either; the
     // backend reads the stash on /impersonate/end to restore.
-    res.cookie(ADMIN_STASH_COOKIE_NAME, adminCookie, {
-      ...COOKIE_BASE_OPTIONS,
-      // Match the admin's original cookie expiry conservatively.
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
-    res.cookie(SESSION_COOKIE_NAME, result.token, {
-      ...COOKIE_BASE_OPTIONS,
-      maxAge: 60 * 60 * 1000, // 1h, matches the impersonation JWT's exp
-    });
+    // Match the admin's original cookie expiry conservatively.
+    res.cookie(ADMIN_STASH_COOKIE_NAME, adminCookie, sessionCookieOptions(30 * 24 * 60 * 60 * 1000));
+    // 1h, matches the impersonation JWT's exp
+    res.cookie(SESSION_COOKIE_NAME, result.token, sessionCookieOptions(60 * 60 * 1000));
 
     return result;
   }
@@ -194,11 +186,10 @@ export class AdminController {
     const result = await this.adminService.endImpersonation(body.eventId, req.user.impersonator);
 
     // Restore the admin's original session cookie and clear the stash.
-    res.cookie(SESSION_COOKIE_NAME, stashed, {
-      ...COOKIE_BASE_OPTIONS,
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
-    res.clearCookie(ADMIN_STASH_COOKIE_NAME, { path: '/' });
+    res.cookie(SESSION_COOKIE_NAME, stashed, sessionCookieOptions(30 * 24 * 60 * 60 * 1000));
+    // clearCookie must mirror the same SameSite/Secure as the original
+    // Set-Cookie or the browser keeps the original around in prod.
+    res.clearCookie(ADMIN_STASH_COOKIE_NAME, clearSessionCookieOptions());
 
     return result;
   }

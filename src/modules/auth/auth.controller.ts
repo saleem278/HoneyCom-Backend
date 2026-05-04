@@ -33,41 +33,28 @@ import { RequestPhoneOtpDto, VerifyPhoneOtpDto } from './dto/phone-login.dto';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { AuthedRequest } from '../../common/types/request.types';
 import { SESSION_COOKIE_NAME } from './strategies/jwt.strategy';
+import {
+  sessionCookieOptions,
+  clearSessionCookieOptions,
+  parseExpiryToMs,
+} from '../../common/utils/cookie-options';
 
 /**
  * Set the session cookie on the outgoing response. HttpOnly so JS can't
- * read it (defence vs XSS-token-exfil), Secure in production so it only
- * travels over HTTPS, SameSite=Lax so it follows top-level navigation
- * but not cross-site form posts. maxAge mirrors JWT_EXPIRE.
+ * read it (defence vs XSS token exfiltration). SameSite/Secure config
+ * lives in `cookie-options.ts` so every cookie call site stays in
+ * lock-step — drift is what produced the cross-site 401 loop after
+ * the cookie-only migration shipped (frontend on Vercel, backend on
+ * Render → cross-site → SameSite=Lax silently drops the cookie on
+ * XHR, so /admin/dashboard saw no auth right after login succeeded).
  *
  * Returns the same payload it was given so callers can write
  * `return setSessionCookie(res, payload)` for terseness.
  */
 function setSessionCookie<T extends { token?: string }>(res: ExpressResponse, payload: T): T {
   if (payload?.token) {
-    const isProd = process.env.NODE_ENV === 'production';
-    const expireRaw = process.env.JWT_EXPIRE || '30d';
-    // Convert "30d", "12h", "60m" into milliseconds. Anything else
-    // (including raw seconds) falls back to 30 days so the cookie
-    // doesn't end up persistently invalid.
-    const match = /^(\d+)\s*([dhms])$/.exec(expireRaw.trim());
-    let maxAgeMs = 30 * 24 * 60 * 60 * 1000;
-    if (match) {
-      const n = parseInt(match[1], 10);
-      const unit = match[2];
-      maxAgeMs =
-        unit === 'd' ? n * 86_400_000 :
-        unit === 'h' ? n * 3_600_000 :
-        unit === 'm' ? n * 60_000 :
-        n * 1000;
-    }
-    res.cookie(SESSION_COOKIE_NAME, payload.token, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
-      maxAge: maxAgeMs,
-      path: '/',
-    });
+    const maxAgeMs = parseExpiryToMs(process.env.JWT_EXPIRE);
+    res.cookie(SESSION_COOKIE_NAME, payload.token, sessionCookieOptions(maxAgeMs));
   }
   return payload;
 }
@@ -300,9 +287,11 @@ export class AuthController {
     if (token) {
       await this.authService.updateSessionActivity(token);
     }
-    // Clear the session cookie. clearCookie must mirror the path the
-    // cookie was set on or the browser will keep the original around.
-    res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+    // Clear the session cookie. clearCookie's options must mirror
+    // *all* of the original Set-Cookie attributes (path, sameSite,
+    // secure) — passing only `path: '/'` leaves the browser's
+    // SameSite=None cookie alone in production.
+    res.clearCookie(SESSION_COOKIE_NAME, clearSessionCookieOptions());
     return {
       success: true,
       message: 'Logged out successfully',
