@@ -1,11 +1,19 @@
-import { Controller, Get, Put, Param, Body, UseGuards, Request, Post, Query, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Put, Param, Body, UseGuards, Request, Post, Query, Res, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import type { Request as ExpressRequest } from 'express';
+import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { AuthedRequest } from '../../common/types/request.types';
+import { SESSION_COOKIE_NAME, ADMIN_STASH_COOKIE_NAME } from '../auth/strategies/jwt.strategy';
+
+const COOKIE_BASE_OPTIONS = {
+  httpOnly: true as const,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/',
+};
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -123,6 +131,7 @@ export class AdminController {
     @Request() req: AuthedRequest,
     @Param('userId') userId: string,
     @Body() body: { reason: string },
+    @Res({ passthrough: true }) res: ExpressResponse,
   ) {
     // Reject if the caller is themselves already in an impersonation
     // session — nesting would make the audit trail ambiguous and serves
@@ -130,22 +139,68 @@ export class AdminController {
     if (req.user.impersonator) {
       throw new ForbiddenException('End the current impersonation session before starting a new one');
     }
-    const ip = (req as unknown as ExpressRequest).ip || (req as unknown as ExpressRequest).socket?.remoteAddress;
+    const expressReq = req as unknown as ExpressRequest;
+    const adminCookie = expressReq.cookies?.[SESSION_COOKIE_NAME];
+    if (!adminCookie) {
+      // Defensive: cookie auth must already be in place for impersonation
+      // to work, since the round-trip relies on the backend swapping
+      // cookies on start/end. Fall back to header-only flow would leave
+      // the admin's cookie pointing at themselves and the JwtStrategy's
+      // cookie-first extractor would override the impersonation bearer.
+      throw new BadRequestException('Cookie auth required for impersonation');
+    }
+
+    const ip = expressReq.ip || expressReq.socket?.remoteAddress;
     const userAgent = req.headers['user-agent'];
-    return this.adminService.startImpersonation(req.user.id, userId, body.reason, ip, userAgent);
+    const result = await this.adminService.startImpersonation(req.user.id, userId, body.reason, ip, userAgent);
+
+    // Stash the admin's existing session cookie under a separate name,
+    // then overwrite the active session cookie with the impersonation
+    // token. Both cookies are HttpOnly so JS can't see either; the
+    // backend reads the stash on /impersonate/end to restore.
+    res.cookie(ADMIN_STASH_COOKIE_NAME, adminCookie, {
+      ...COOKIE_BASE_OPTIONS,
+      // Match the admin's original cookie expiry conservatively.
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+    res.cookie(SESSION_COOKIE_NAME, result.token, {
+      ...COOKIE_BASE_OPTIONS,
+      maxAge: 60 * 60 * 1000, // 1h, matches the impersonation JWT's exp
+    });
+
+    return result;
   }
 
   @Post('impersonate/end')
   @ApiOperation({ summary: 'End the current impersonation session' })
   @ApiResponse({ status: 200, description: 'Session closed' })
-  async endImpersonation(@Request() req: AuthedRequest, @Body() body: { eventId: string }) {
+  async endImpersonation(
+    @Request() req: AuthedRequest,
+    @Body() body: { eventId: string },
+    @Res({ passthrough: true }) res: ExpressResponse,
+  ) {
     // Caller must currently be impersonating, AND the session being
     // closed must belong to *their* impersonator id (the JWT's
     // impersonator claim). The service double-checks the latter.
     if (!req.user.impersonator) {
       throw new ForbiddenException('No active impersonation session');
     }
-    return this.adminService.endImpersonation(body.eventId, req.user.impersonator);
+    const expressReq = req as unknown as ExpressRequest;
+    const stashed = expressReq.cookies?.[ADMIN_STASH_COOKIE_NAME];
+    if (!stashed) {
+      throw new BadRequestException('No stashed admin session — cannot restore. Sign in again.');
+    }
+
+    const result = await this.adminService.endImpersonation(body.eventId, req.user.impersonator);
+
+    // Restore the admin's original session cookie and clear the stash.
+    res.cookie(SESSION_COOKIE_NAME, stashed, {
+      ...COOKIE_BASE_OPTIONS,
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+    res.clearCookie(ADMIN_STASH_COOKIE_NAME, { path: '/' });
+
+    return result;
   }
 
   @Get('impersonate/audit')
