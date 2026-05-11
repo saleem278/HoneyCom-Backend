@@ -75,22 +75,37 @@ export class SellerService {
   }
 
   async getOrders(sellerId: string, page: number = 1, limit: number = 20) {
-    // Get orders where seller's products are in the items
+    // Orders with at least one line item owned by this seller. Uses
+    // the multikey index on `items.seller` (Order.model.ts) so this
+    // is an O(matching-orders) lookup rather than the previous
+    // O(orders × seller-products) scan that first fetched every
+    // product id and built a giant $in array.
+    //
+    // Fallback for legacy orders: rows that predate the items.seller
+    // backfill won't have the field. We OR-match `items.product` for
+    // those to avoid hiding pre-migration orders from the seller view
+    // — drop the fallback once a backfill migration has run.
     const products = await this.productModel.find({ seller: sellerId }).select('_id');
-    const productIds = products.map(p => p._id);
-    
+    const productIds = products.map((p) => p._id);
+    const filter = {
+      $or: [
+        { 'items.seller': sellerId },
+        { 'items.product': { $in: productIds }, 'items.seller': { $exists: false } },
+      ],
+    };
+
     const skip = (page - 1) * limit;
     const orders = await this.orderModel
-      .find({ 'items.product': { $in: productIds } })
+      .find(filter)
       .populate('customer', 'name email')
       .populate('shippingAddress', 'firstName lastName addressLine1 addressLine2 city state zipCode country phone')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
-    
-    const total = await this.orderModel.countDocuments({ 'items.product': { $in: productIds } });
-    
+
+    const total = await this.orderModel.countDocuments(filter);
+
     return {
       success: true,
       orders,

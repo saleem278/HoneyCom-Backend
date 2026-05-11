@@ -2,6 +2,14 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IOrderItem {
   product: mongoose.Types.ObjectId;
+  /**
+   * Seller who owns this line item. Snapshotted at order-creation time
+   * from product.seller so seller-side queries don't need to join
+   * through Product, and so reassignment of a product's seller later
+   * doesn't rewrite history. Optional on the type for legacy rows that
+   * predate this field; new orders always populate it.
+   */
+  seller?: mongoose.Types.ObjectId;
   name: string;
   quantity: number;
   price: number;
@@ -67,6 +75,15 @@ const OrderSchema: Schema = new Schema(
           type: Schema.Types.ObjectId,
           ref: 'Product',
           required: true,
+        },
+        seller: {
+          type: Schema.Types.ObjectId,
+          ref: 'User',
+          // Not strictly required at the schema layer — legacy orders
+          // predate this field and Mongoose would otherwise refuse to
+          // save them. The order create path always sets it; we index
+          // it for the seller-orders query and tolerate null on reads.
+          index: true,
         },
         name: {
           type: String,
@@ -206,6 +223,9 @@ OrderSchema.index({ status: 1 });
 // Sparse so non-Stripe orders (cash on delivery / paypal) don't bloat the index.
 // The webhook handler does findOne({ paymentIntentId }), which gets indexed lookups.
 OrderSchema.index({ paymentIntentId: 1 }, { sparse: true });
+// Seller-orders query: find every order containing a line item this
+// seller owns. Mongo can use a multikey index on `items.seller`.
+OrderSchema.index({ 'items.seller': 1, createdAt: -1 });
 
 export const Order = mongoose.model<IOrder>('Order', OrderSchema);
 export { OrderSchema };

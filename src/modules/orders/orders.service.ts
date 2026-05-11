@@ -53,6 +53,7 @@ export class OrdersService {
     let subtotal = 0;
     const items: Array<{
       product: any;
+      seller: any;
       name: string;
       quantity: number;
       price: number;
@@ -108,6 +109,11 @@ export class OrdersService {
 
         items.push({
           product: product._id,
+          // Snapshot the seller onto the line item so seller-side
+          // queries don't need to join through Product (and so future
+          // reassignment of a product's seller doesn't rewrite past
+          // order history).
+          seller: (product as any).seller,
           name: product.name,
           quantity: item.quantity,
           price: product.price,
