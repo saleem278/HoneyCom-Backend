@@ -23,6 +23,7 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RegisterDto } from './dto/register.dto';
+import { RegisterSellerDto } from './dto/register-seller.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -77,9 +78,10 @@ export class AuthController {
   @Post('register/seller')
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @ApiOperation({ summary: 'Register as a seller with business information' })
+  @ApiBody({ type: RegisterSellerDto })
   @ApiResponse({ status: 201, description: 'Seller registration submitted for approval' })
   @ApiResponse({ status: 400, description: 'Validation error' })
-  async registerSeller(@Body() sellerData: any) {
+  async registerSeller(@Body() sellerData: RegisterSellerDto) {
     return this.authService.registerSeller(sellerData);
   }
 
