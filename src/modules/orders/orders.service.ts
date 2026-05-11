@@ -203,6 +203,41 @@ export class OrdersService {
 
       const exchangeRate = this.exchangeRateService.getExchangeRate(currency);
 
+      // Conditionally redeem the coupon BEFORE creating the order.
+      // The previous flow `$inc`-ed usedCount after order create which
+      // had two bugs:
+      //   1. Race condition — two concurrent orders both passed the
+      //      `usedCount < usageLimit` check in applyCoupon, then both
+      //      incremented, blowing past the limit.
+      //   2. If the increment failed (Mongo write error) we logged and
+      //      moved on, meaning the order had a coupon discount that was
+      //      never counted against the limit.
+      //
+      // The conditional `findOneAndUpdate` below either redeems atomically
+      // OR returns null. If null, the coupon hit its cap *during* this
+      // request — refuse the order so the user can retry without the
+      // expired coupon. Reservation rollback happens in the outer catch.
+      if (cart?.couponCode) {
+        const redeemed = await this.couponModel.findOneAndUpdate(
+          {
+            code: cart.couponCode.toUpperCase(),
+            // Either no limit, OR current usage strictly below limit.
+            $or: [
+              { usageLimit: { $exists: false } },
+              { usageLimit: null },
+              { $expr: { $lt: ['$usedCount', '$usageLimit'] } },
+            ],
+          },
+          { $inc: { usedCount: 1 } },
+          { new: true },
+        );
+        if (!redeemed) {
+          throw new BadRequestException(
+            'Coupon usage limit reached. Please remove the coupon and try again.',
+          );
+        }
+      }
+
       const orderCount = await this.orderModel.countDocuments();
       const orderNumber = `ORD-${String(Date.now()).slice(-8)}-${String(orderCount + 1).padStart(4, '0')}`;
 
@@ -229,25 +264,26 @@ export class OrdersService {
         status: 'pending',
         paymentStatus: 'pending',
       });
-
-      // Atomically increment coupon usage so the limit is actually enforced.
-      // Done after order.create succeeds — if the increment itself fails,
-      // we log but don't fail the order (the order is the user's truth).
-      if (cart?.couponCode) {
-        try {
-          await this.couponModel.updateOne(
-            { code: cart.couponCode.toUpperCase() },
-            { $inc: { usedCount: 1 } },
-          );
-        } catch (couponErr: any) {
-          this.logger.warn(
-            `Failed to increment usage for coupon ${cart.couponCode}: ${couponErr?.message || couponErr}`,
-          );
-        }
-      }
     } catch (err) {
       // Order/address/etc failed after we reserved stock. Give it back.
       await restoreReservations();
+      // If the coupon was conditionally redeemed above but order creation
+      // then failed, decrement usedCount so the slot returns to the pool
+      // instead of being silently consumed by a non-existent order.
+      if (cart?.couponCode) {
+        try {
+          await this.couponModel.updateOne(
+            { code: cart.couponCode.toUpperCase(), usedCount: { $gt: 0 } },
+            { $inc: { usedCount: -1 } },
+          );
+        } catch (decErr) {
+          this.logger.warn(
+            `Failed to roll back coupon ${cart.couponCode} after order create failed: ${
+              decErr instanceof Error ? decErr.message : String(decErr)
+            }`,
+          );
+        }
+      }
       throw err;
     }
 

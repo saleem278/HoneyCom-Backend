@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { JwtService } from '@nestjs/jwt';
@@ -16,6 +16,8 @@ import { assertOrderTransition } from '../orders/order-status';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     @InjectModel('User') private userModel: Model<IUser>,
     @InjectModel('Product') private productModel: Model<IProduct>,
@@ -363,21 +365,36 @@ export class AdminService {
       throw new BadRequestException('Refund amount cannot exceed order total');
     }
 
-    // Update order status
-    order.status = 'refunded';
-    order.paymentStatus = 'refunded';
-    await order.save();
-
-    // Process refund through payment gateway if paymentIntentId exists
+    // Stripe (or whichever gateway) MUST succeed before we mark the
+    // order refunded. Previously we flipped status first and swallowed
+    // gateway failures — that produced "DB says refunded, Stripe never
+    // refunded the customer" support tickets that the admin had no
+    // way to detect from the dashboard.
+    //
+    // For paymentIntentId-less orders (cash-on-delivery, manual
+    // settlement, etc.) we skip the gateway leg but still flip status;
+    // those don't have an external system that could disagree with us.
     if (order.paymentIntentId) {
       try {
         await this.paymentsService.processRefund(order.paymentIntentId, refundAmount, reason);
-      } catch (error: any) {
-        // Refund processing error
-        // Continue with order status update even if payment gateway refund fails
-        // Admin can manually process refund later
+      } catch (error) {
+        // Surface the underlying failure to the caller so the admin
+        // sees what went wrong (card declined, refund window passed,
+        // already refunded, etc.) instead of getting a generic 500 or
+        // a misleading "refund processed" message.
+        const message = error instanceof Error ? error.message : 'Payment gateway refund failed';
+        this.logger.error(
+          `Refund failed for order ${order._id} (paymentIntentId=${order.paymentIntentId}): ${message}`,
+        );
+        throw new BadRequestException(`Refund failed: ${message}`);
       }
     }
+
+    // Gateway refund succeeded (or wasn't applicable) — safe to mark
+    // the order refunded.
+    order.status = 'refunded';
+    order.paymentStatus = 'refunded';
+    await order.save();
 
     return {
       success: true,
