@@ -137,14 +137,25 @@ export class AdminController {
       throw new ForbiddenException('End the current impersonation session before starting a new one');
     }
     const expressReq = req as unknown as ExpressRequest;
-    const adminCookie = expressReq.cookies?.[SESSION_COOKIE_NAME];
+    // Prefer the existing session cookie (the common case). Fall back to
+    // the Authorization bearer token when the admin authenticated
+    // header-only — incognito windows in production block third-party
+    // cookies, so the admin portal frequently runs in bearer-only mode.
+    // Either way, the admin's token gets stashed under
+    // ADMIN_STASH_COOKIE_NAME and restored on /impersonate/end. The new
+    // session cookie we set below will take over on subsequent requests
+    // because the JwtStrategy reads cookie before Authorization.
+    const adminCookie =
+      expressReq.cookies?.[SESSION_COOKIE_NAME] ||
+      (() => {
+        const authHeader = req.headers['authorization'];
+        if (typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
+          return authHeader.slice(7).trim();
+        }
+        return undefined;
+      })();
     if (!adminCookie) {
-      // Defensive: cookie auth must already be in place for impersonation
-      // to work, since the round-trip relies on the backend swapping
-      // cookies on start/end. Fall back to header-only flow would leave
-      // the admin's cookie pointing at themselves and the JwtStrategy's
-      // cookie-first extractor would override the impersonation bearer.
-      throw new BadRequestException('Cookie auth required for impersonation');
+      throw new BadRequestException('Admin session not found — sign in again');
     }
 
     const ip = expressReq.ip || expressReq.socket?.remoteAddress;
