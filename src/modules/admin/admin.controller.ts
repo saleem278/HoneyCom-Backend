@@ -120,6 +120,44 @@ export class AdminController {
   // All three endpoints inherit the class-level @Roles('admin'). Plus
   // the service-level guard refuses to impersonate other admins, so a
   // chain-of-trust violation can't be forged from the controller layer.
+  //
+  // ROUTE ORDER MATTERS: the literal `impersonate/end` route must be
+  // declared before the dynamic `impersonate/:userId` route, otherwise
+  // Nest matches /impersonate/end as userId="end" and the "End session"
+  // call lands in startImpersonation (which then 400s on the missing
+  // reason). Same reason `impersonate/audit` is declared above the
+  // dynamic route.
+
+  @Post('impersonate/end')
+  @ApiOperation({ summary: 'End the current impersonation session' })
+  @ApiResponse({ status: 200, description: 'Session closed' })
+  async endImpersonation(
+    @Request() req: AuthedRequest,
+    @Body() body: { eventId: string },
+    @Res({ passthrough: true }) res: ExpressResponse,
+  ) {
+    // Caller must currently be impersonating, AND the session being
+    // closed must belong to *their* impersonator id (the JWT's
+    // impersonator claim). The service double-checks the latter.
+    if (!req.user.impersonator) {
+      throw new ForbiddenException('No active impersonation session');
+    }
+    const expressReq = req as unknown as ExpressRequest;
+    const stashed = expressReq.cookies?.[ADMIN_STASH_COOKIE_NAME];
+    if (!stashed) {
+      throw new BadRequestException('No stashed admin session — cannot restore. Sign in again.');
+    }
+
+    const result = await this.adminService.endImpersonation(body.eventId, req.user.impersonator);
+
+    // Restore the admin's original session cookie and clear the stash.
+    res.cookie(SESSION_COOKIE_NAME, stashed, sessionCookieOptions(30 * 24 * 60 * 60 * 1000));
+    // clearCookie must mirror the same SameSite/Secure as the original
+    // Set-Cookie or the browser keeps the original around in prod.
+    res.clearCookie(ADMIN_STASH_COOKIE_NAME, clearSessionCookieOptions());
+
+    return result;
+  }
 
   @Post('impersonate/:userId')
   @ApiOperation({ summary: 'Start impersonating a user (audit logged)' })
@@ -170,37 +208,6 @@ export class AdminController {
     res.cookie(ADMIN_STASH_COOKIE_NAME, adminCookie, sessionCookieOptions(30 * 24 * 60 * 60 * 1000));
     // 1h, matches the impersonation JWT's exp
     res.cookie(SESSION_COOKIE_NAME, result.token, sessionCookieOptions(60 * 60 * 1000));
-
-    return result;
-  }
-
-  @Post('impersonate/end')
-  @ApiOperation({ summary: 'End the current impersonation session' })
-  @ApiResponse({ status: 200, description: 'Session closed' })
-  async endImpersonation(
-    @Request() req: AuthedRequest,
-    @Body() body: { eventId: string },
-    @Res({ passthrough: true }) res: ExpressResponse,
-  ) {
-    // Caller must currently be impersonating, AND the session being
-    // closed must belong to *their* impersonator id (the JWT's
-    // impersonator claim). The service double-checks the latter.
-    if (!req.user.impersonator) {
-      throw new ForbiddenException('No active impersonation session');
-    }
-    const expressReq = req as unknown as ExpressRequest;
-    const stashed = expressReq.cookies?.[ADMIN_STASH_COOKIE_NAME];
-    if (!stashed) {
-      throw new BadRequestException('No stashed admin session — cannot restore. Sign in again.');
-    }
-
-    const result = await this.adminService.endImpersonation(body.eventId, req.user.impersonator);
-
-    // Restore the admin's original session cookie and clear the stash.
-    res.cookie(SESSION_COOKIE_NAME, stashed, sessionCookieOptions(30 * 24 * 60 * 60 * 1000));
-    // clearCookie must mirror the same SameSite/Secure as the original
-    // Set-Cookie or the browser keeps the original around in prod.
-    res.clearCookie(ADMIN_STASH_COOKIE_NAME, clearSessionCookieOptions());
 
     return result;
   }
