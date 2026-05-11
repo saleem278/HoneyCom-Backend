@@ -319,13 +319,26 @@ export class AuthService {
       this.logger.error(`SMS OTP send failed for ${normalizedPhone}: ${error?.message || error}`);
     }
 
-    // Only ever expose the raw OTP outside production *and* only when SMS is unavailable
-    // (so the dev workflow still works without Twilio). Never in production.
+    // TEMPORARY (pre-launch QA): expose the OTP in the response so the
+    // deployed app can be exercised end-to-end without Twilio wired up.
+    // Two ways to enable in production:
+    //   - non-production NODE_ENV with SMS delivery failure (the original
+    //     dev-only path), OR
+    //   - EXPOSE_OTP_IN_RESPONSE=true env var (the explicit override).
+    //
+    // SECURITY: when enabled, anyone who can read the API response — or
+    // shoulder-surf the phone screen — can complete login as the owner
+    // of the phone number. Remove this override + the matching client
+    // __DEV__ guard in LoginScreen.tsx BEFORE going live. Tracked as a
+    // launch-blocker.
     const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
-    const exposeOtp = !isProd && !smsDelivered;
+    const overrideExpose = (process.env.EXPOSE_OTP_IN_RESPONSE || '').toLowerCase() === 'true';
+    const exposeOtp = overrideExpose || (!isProd && !smsDelivered);
 
     if (exposeOtp) {
-      this.logger.warn(`SMS unavailable in non-prod — exposing OTP in response for ${normalizedPhone}`);
+      this.logger.warn(
+        `Exposing OTP in response for ${normalizedPhone} (override=${overrideExpose}, prod=${isProd}, smsDelivered=${smsDelivered}). Remove EXPOSE_OTP_IN_RESPONSE before launch.`,
+      );
     }
 
     return {
