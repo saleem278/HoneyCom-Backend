@@ -68,6 +68,27 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Token not found');
     }
 
+    // Reject any token that isn't a session-grade purpose. Only
+    // `session` (normal logins, including social + phone) and
+    // `impersonation` (admin acting as another user) authenticate API
+    // requests. `2fa-challenge` tokens are minted by /auth/login when
+    // 2FA is active — they identify the user but must be exchanged at
+    // /auth/2fa/login-verify before granting access. Any other claim
+    // (or a token without `purpose` minted after this rollout) is
+    // refused.
+    //
+    // During rollover we accept tokens with NO purpose claim so
+    // legacy in-flight sessions don't all 401 at once. Remove the
+    // `purpose === undefined` branch after the JWT_EXPIRE window
+    // (default 30 days) elapses.
+    if (
+      payload.purpose !== undefined &&
+      payload.purpose !== 'session' &&
+      payload.purpose !== 'impersonation'
+    ) {
+      throw new UnauthorizedException('Token cannot authenticate API requests');
+    }
+
     // Hash the token to check against stored sessions
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 

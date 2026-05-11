@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import mongoose, { Model } from 'mongoose';
 import { JwtService } from '@nestjs/jwt';
 import { User, IUser } from '../../models/User.model';
 import { Product, IProduct } from '../../models/Product.model';
@@ -12,6 +12,7 @@ import {
 } from '../../models/ImpersonationEvent.model';
 import { PaymentsService } from '../payments/payments.service';
 import { EmailService } from '../../services/email.service';
+import { AuthService } from '../auth/auth.service';
 import { assertOrderTransition } from '../orders/order-status';
 
 @Injectable()
@@ -27,6 +28,7 @@ export class AdminService {
     private paymentsService: PaymentsService,
     private emailService: EmailService,
     private jwtService: JwtService,
+    private authService: AuthService,
   ) {}
 
   /**
@@ -83,9 +85,36 @@ export class AdminService {
 
     // 1h expiry. Long enough for genuine support work, short enough
     // that a leaked token has limited blast radius.
+    //
+    // `purpose: 'impersonation'` is required by JwtStrategy to accept
+    // this token. Previously the token was signed without a purpose
+    // claim AND without a Session row — strategy rejected it, so
+    // impersonation was actually broken once strict checks landed.
+    // Now we mint the token AND record a Session row tagged with
+    // purpose='impersonation' + impersonator=adminId, so the strategy
+    // accepts it via the same path as a normal login.
     const token = this.jwtService.sign(
-      { id: target._id.toString(), impersonator: adminId, eventId: event._id.toString() },
+      {
+        id: target._id.toString(),
+        impersonator: adminId,
+        eventId: event._id.toString(),
+        purpose: 'impersonation',
+      },
       { expiresIn: '1h' },
+    );
+
+    // Session row: 1h expiry to match the JWT; deviceInfo+ip lifted
+    // from the request so the audit page shows where the impersonation
+    // originated.
+    const sessionExpiresAt = new Date(Date.now() + 60 * 60 * 1000);
+    await this.authService.createSession(
+      target._id as mongoose.Types.ObjectId,
+      token,
+      userAgent ? { userAgent } : undefined,
+      ip,
+      sessionExpiresAt,
+      'impersonation',
+      new mongoose.Types.ObjectId(adminId),
     );
 
     return {

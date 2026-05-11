@@ -142,9 +142,17 @@ export class AuthController {
   @ApiResponse({ status: 400, description: 'Invalid provider or code' })
   async socialLogin(
     @Body() socialLoginDto: SocialLoginDto,
+    @Request() req: ExpressRequest,
     @Res({ passthrough: true }) res: ExpressResponse,
   ) {
-    const result = await this.authService.socialLogin(socialLoginDto.provider, socialLoginDto.code);
+    const userAgent = req.headers['user-agent'] || '';
+    const ip = req.ip || req.socket?.remoteAddress || '';
+    const result = await this.authService.socialLogin(
+      socialLoginDto.provider,
+      socialLoginDto.code,
+      { userAgent },
+      ip,
+    );
     return setSessionCookie(res, result as any);
   }
 

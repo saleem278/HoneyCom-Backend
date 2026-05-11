@@ -228,8 +228,12 @@ export class AuthService {
     // challenge means the real `id` claim shape stays unchanged for the
     // happy path.
     if (user.twoFactor?.enabled) {
+      // purpose: '2fa-challenge' is rejected by JwtStrategy (only
+      // 'session' and 'impersonation' authenticate API requests). The
+      // /auth/2fa/login-verify endpoint verifies this token directly
+      // via jwtService.verify and checks the purpose claim.
       const challengeToken = this.jwtService.sign(
-        { id: user._id.toString(), twoFactorChallenge: true },
+        { id: user._id.toString(), purpose: '2fa-challenge', twoFactorChallenge: true },
         { expiresIn: '5m' },
       );
       return {
@@ -248,7 +252,10 @@ export class AuthService {
    * second factor.
    */
   private async issueSession(user: any, deviceInfo?: any, ip?: string) {
-    const payload = { id: user._id.toString() };
+    // `purpose: 'session'` makes the claim explicit so JwtStrategy can
+    // refuse tokens minted for other purposes (e.g. a stray
+    // twoFactorChallenge token that somehow made it onto a request).
+    const payload = { id: user._id.toString(), purpose: 'session' };
     const token = this.jwtService.sign(payload);
     const expiresIn = process.env.JWT_EXPIRE || '30d';
     const expiresAt = this.calculateExpiry(expiresIn);
@@ -415,7 +422,7 @@ export class AuthService {
     user.lastLogin = new Date();
     await user.save();
 
-    const payload = { id: user._id.toString() };
+    const payload = { id: user._id.toString(), purpose: 'session' };
     const token = this.jwtService.sign(payload);
     const expiresIn = process.env.JWT_EXPIRE || '30d';
     const expiresAt = this.calculateExpiry(expiresIn);
@@ -437,7 +444,7 @@ export class AuthService {
     };
   }
 
-  async socialLogin(provider: string, code: string) {
+  async socialLogin(provider: string, code: string, deviceInfo?: any, ip?: string) {
     let userData: any;
     let accessToken: string;
 
@@ -527,8 +534,14 @@ export class AuthService {
       await user.save();
     }
 
-    const payload = { id: user._id.toString() };
+    const payload = { id: user._id.toString(), purpose: 'session' };
     const token = this.jwtService.sign(payload);
+    // Record the Session row so JwtStrategy can find it on subsequent
+    // requests. Previously social login signed a token but never
+    // created a Session, which made the token unusable.
+    const expiresIn = process.env.JWT_EXPIRE || '30d';
+    const expiresAt = this.calculateExpiry(expiresIn);
+    await this.createSession(user._id, token, deviceInfo, ip, expiresAt);
 
     return {
       success: true,
@@ -826,7 +839,13 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException('Two-factor challenge expired. Please log in again.');
     }
-    if (!payload?.twoFactorChallenge || !payload.id) {
+    // Accept either the new `purpose: '2fa-challenge'` claim (preferred)
+    // or the legacy `twoFactorChallenge: true` flag during rollover. The
+    // legacy flag will be removed once tokens minted before the rollout
+    // have expired (they're 5-min lifetime).
+    const isChallenge =
+      payload?.purpose === '2fa-challenge' || payload?.twoFactorChallenge === true;
+    if (!isChallenge || !payload.id) {
       throw new UnauthorizedException('Invalid two-factor challenge.');
     }
 
@@ -880,14 +899,24 @@ export class AuthService {
   }
 
   /**
-   * Create a new session
+   * Create a new session row. Public so admin/impersonation can record
+   * its short-lived session through the same path as a normal login —
+   * keeps JwtStrategy's "must have a Session row" invariant true for
+   * every token shape (was previously false for impersonation + social
+   * login, which silently broke the strategy or relied on a bypass).
+   *
+   * `purpose` distinguishes normal sessions from admin-impersonation
+   * sessions so audit views can scope; `impersonator` records who the
+   * admin was when purpose === 'impersonation'.
    */
-  private async createSession(
+  async createSession(
     userId: mongoose.Types.ObjectId,
     token: string,
     deviceInfo?: any,
     ip?: string,
     expiresAt?: Date,
+    purpose: 'session' | 'impersonation' = 'session',
+    impersonator?: mongoose.Types.ObjectId,
   ) {
     const expiresIn = process.env.JWT_EXPIRE || '30d';
     const sessionExpiresAt = expiresAt || this.calculateExpiry(expiresIn);
@@ -906,6 +935,8 @@ export class AuthService {
       expiresAt: sessionExpiresAt,
       lastActivity: new Date(),
       isActive: true,
+      purpose,
+      impersonator,
     });
   }
 
