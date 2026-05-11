@@ -7,6 +7,22 @@ import { join } from 'path';
 export class PdfService {
   private readonly uploadsPath = join(process.cwd(), 'uploads', 'pdfs');
 
+  /**
+   * Resolve `/uploads/pdfs/<file>` to an absolute URL pointing at this
+   * API server. Without this, the frontend (different origin) would
+   * resolve the relative path against its own host and 404 — which is
+   * what the user hit at honeycom.vercel.app/uploads/pdfs/...
+   *
+   * Reads PUBLIC_API_URL first (preferred — covers prod), then
+   * FRONTEND_URL is intentionally NOT used (wrong host). Falls back to
+   * the relative path so local dev keeps working since Vite/Next dev
+   * proxy the upload prefix.
+   */
+  private toPublicUrl(relativePath: string): string {
+    const base = (process.env.PUBLIC_API_URL || process.env.API_BASE_URL || '').replace(/\/$/, '');
+    return base ? `${base}${relativePath}` : relativePath;
+  }
+
   async generateInvoice(invoiceData: any): Promise<string> {
     const fileName = `invoice-${invoiceData.invoiceNumber || Date.now()}.pdf`;
     const filePath = join(this.uploadsPath, fileName);
@@ -120,7 +136,7 @@ export class PdfService {
       stream.on('finish', () => resolve());
     });
 
-    return `/uploads/pdfs/${fileName}`;
+    return this.toPublicUrl(`/uploads/pdfs/${fileName}`);
   }
 
   async generateShippingLabel(orderData: any, trackingNumber?: string): Promise<string> {
@@ -177,7 +193,7 @@ export class PdfService {
       stream.on('finish', () => resolve());
     });
 
-    return `/uploads/pdfs/${fileName}`;
+    return this.toPublicUrl(`/uploads/pdfs/${fileName}`);
   }
 }
 
