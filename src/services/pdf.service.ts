@@ -1,41 +1,42 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
-import { createWriteStream } from 'fs';
-import { join } from 'path';
+import { uploadBufferToCloudinary } from './fileUpload.service';
 
+/**
+ * PDF generation (invoices, shipping labels).
+ *
+ * Files are streamed to a Buffer in memory and uploaded to Cloudinary
+ * rather than written to local disk. The earlier disk-write version
+ * broke on Render — the filesystem there is ephemeral, so PDFs
+ * vanished on every deploy/restart, and frontend links 404'd against
+ * honeycom.vercel.app/uploads/pdfs/... because the relative URL was
+ * resolved against the frontend origin.
+ *
+ * Cloudinary URLs are fully-qualified HTTPS, cached by their CDN, and
+ * survive backend redeploys. The `resource_type: 'raw'` upload (set
+ * in fileUpload.service.uploadBufferToCloudinary) is required for
+ * non-image binaries.
+ */
 @Injectable()
 export class PdfService {
-  private readonly uploadsPath = join(process.cwd(), 'uploads', 'pdfs');
+  private readonly logger = new Logger(PdfService.name);
 
   /**
-   * Resolve `/uploads/pdfs/<file>` to an absolute URL pointing at this
-   * API server. Without this, the frontend (different origin) would
-   * resolve the relative path against its own host and 404 — which is
-   * what the user hit at honeycom.vercel.app/uploads/pdfs/...
-   *
-   * Reads PUBLIC_API_URL first (preferred — covers prod), then
-   * FRONTEND_URL is intentionally NOT used (wrong host). Falls back to
-   * the relative path so local dev keeps working since Vite/Next dev
-   * proxy the upload prefix.
+   * Render the PDFKit document into a Buffer. Resolves once the doc
+   * end event fires. Errors during write surface as rejections.
    */
-  private toPublicUrl(relativePath: string): string {
-    const base = (process.env.PUBLIC_API_URL || process.env.API_BASE_URL || '').replace(/\/$/, '');
-    return base ? `${base}${relativePath}` : relativePath;
+  private renderToBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+    });
   }
 
   async generateInvoice(invoiceData: any): Promise<string> {
-    const fileName = `invoice-${invoiceData.invoiceNumber || Date.now()}.pdf`;
-    const filePath = join(this.uploadsPath, fileName);
-
-    // Ensure directory exists
-    const fs = require('fs');
-    if (!fs.existsSync(this.uploadsPath)) {
-      fs.mkdirSync(this.uploadsPath, { recursive: true });
-    }
-
     const doc = new PDFDocument({ margin: 50 });
-    const stream = createWriteStream(filePath);
-    doc.pipe(stream);
+    const bufferPromise = this.renderToBuffer(doc);
 
     // Header
     doc.fontSize(20).text('INVOICE', { align: 'center' });
@@ -75,7 +76,6 @@ export class PdfService {
     doc.fontSize(14).text('Items:', { underline: true });
     doc.moveDown(0.5);
 
-    // Table Header
     const tableTop = doc.y;
     doc.fontSize(10);
     doc.text('Item', 50, tableTop);
@@ -85,16 +85,17 @@ export class PdfService {
 
     let yPos = tableTop + 20;
 
-    // Items
     invoiceData.items?.forEach((item: any) => {
       doc.text(item.name || 'N/A', 50, yPos, { width: 200 });
       doc.text(String(item.quantity || 0), 250, yPos);
       doc.text(`$${(item.price || 0).toFixed(2)}`, 350, yPos, { width: 100, align: 'right' });
-      doc.text(`$${((item.price || 0) * (item.quantity || 0)).toFixed(2)}`, 450, yPos, { width: 100, align: 'right' });
+      doc.text(`$${((item.price || 0) * (item.quantity || 0)).toFixed(2)}`, 450, yPos, {
+        width: 100,
+        align: 'right',
+      });
       yPos += 20;
     });
 
-    // Totals
     yPos += 10;
     doc.moveTo(50, yPos).lineTo(550, yPos).stroke();
     yPos += 10;
@@ -124,7 +125,6 @@ export class PdfService {
     doc.text('Total:', 350, yPos, { width: 100, align: 'right' });
     doc.text(`$${(invoiceData.total || 0).toFixed(2)}`, 450, yPos, { width: 100, align: 'right' });
 
-    // Payment Info
     yPos += 40;
     doc.font('Helvetica').fontSize(10);
     doc.text(`Payment Method: ${invoiceData.paymentMethod || 'N/A'}`, 50, yPos);
@@ -132,42 +132,40 @@ export class PdfService {
 
     doc.end();
 
-    await new Promise<void>((resolve) => {
-      stream.on('finish', () => resolve());
-    });
-
-    return this.toPublicUrl(`/uploads/pdfs/${fileName}`);
+    const buffer = await bufferPromise;
+    const publicId = `invoice-${invoiceData.invoiceNumber || invoiceData.orderNumber || Date.now()}`;
+    try {
+      const { url } = await uploadBufferToCloudinary(buffer, {
+        folder: 'honey-ecommerce/invoices',
+        publicId,
+      });
+      return url;
+    } catch (err) {
+      this.logger.error(
+        `Invoice PDF upload failed for ${publicId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      throw err;
+    }
   }
 
   async generateShippingLabel(orderData: any, trackingNumber?: string): Promise<string> {
-    const fileName = `shipping-label-${orderData.orderNumber || Date.now()}.pdf`;
-    const filePath = join(this.uploadsPath, fileName);
-
-    const fs = require('fs');
-    if (!fs.existsSync(this.uploadsPath)) {
-      fs.mkdirSync(this.uploadsPath, { recursive: true });
-    }
-
     const doc = new PDFDocument({ size: [400, 600], margin: 20 });
-    const stream = createWriteStream(filePath);
-    doc.pipe(stream);
+    const bufferPromise = this.renderToBuffer(doc);
 
-    // Header
     doc.fontSize(16).text('SHIPPING LABEL', { align: 'center' });
     doc.moveDown();
 
-    // Tracking Number
     if (trackingNumber) {
       doc.fontSize(12).text(`Tracking: ${trackingNumber}`, { align: 'center' });
       doc.moveDown();
     }
 
-    // Order Info
     doc.fontSize(10);
     doc.text(`Order: ${orderData.orderNumber || 'N/A'}`);
     doc.moveDown();
 
-    // Ship To
     doc.fontSize(12).text('SHIP TO:', { underline: true });
     doc.fontSize(10);
     const addr = orderData.shippingAddress;
@@ -181,7 +179,6 @@ export class PdfService {
     }
     doc.moveDown();
 
-    // Items
     doc.fontSize(12).text('ITEMS:', { underline: true });
     doc.fontSize(10);
     orderData.items?.forEach((item: any, index: number) => {
@@ -189,11 +186,22 @@ export class PdfService {
     });
 
     doc.end();
-    await new Promise<void>((resolve) => {
-      stream.on('finish', () => resolve());
-    });
 
-    return this.toPublicUrl(`/uploads/pdfs/${fileName}`);
+    const buffer = await bufferPromise;
+    const publicId = `shipping-label-${orderData.orderNumber || Date.now()}`;
+    try {
+      const { url } = await uploadBufferToCloudinary(buffer, {
+        folder: 'honey-ecommerce/shipping-labels',
+        publicId,
+      });
+      return url;
+    } catch (err) {
+      this.logger.error(
+        `Shipping label PDF upload failed for ${publicId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      throw err;
+    }
   }
 }
-

@@ -91,3 +91,43 @@ export const getFileUrl = (publicId: string): string => {
   return cloudinary.url(publicId);
 };
 
+/**
+ * Upload an in-memory buffer to Cloudinary. Used by the PDF service
+ * for generated invoices/labels that don't exist on disk — Render's
+ * filesystem is ephemeral so we cannot write the file out and serve
+ * it back via /uploads/* the way `pdf.service.ts` originally did.
+ *
+ * `resource_type: 'raw'` is required for non-image binaries (PDFs).
+ * `folder` defaults to honey-ecommerce/pdfs so they're isolated from
+ * product image uploads. Returns the secure HTTPS URL.
+ */
+export const uploadBufferToCloudinary = (
+  buffer: Buffer,
+  options: { folder?: string; publicId?: string; resourceType?: 'raw' | 'image' | 'auto' } = {},
+): Promise<{ url: string; publicId: string }> => {
+  const folder = options.folder ?? 'honey-ecommerce/pdfs';
+  const resourceType = options.resourceType ?? 'raw';
+
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: resourceType,
+        public_id: options.publicId,
+        // public_id controls the file path; overwrite lets a regenerated
+        // invoice replace the previous version for the same order.
+        use_filename: false,
+        overwrite: true,
+      },
+      (err, result) => {
+        if (err || !result) {
+          reject(err || new Error('Cloudinary upload returned no result'));
+          return;
+        }
+        resolve({ url: result.secure_url, publicId: result.public_id });
+      },
+    );
+    stream.end(buffer);
+  });
+};
+
