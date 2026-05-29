@@ -90,7 +90,7 @@ export class CartService {
     };
   }
 
-  async addToCart(userId: string, productId: string, quantity: number, variants?: any) {
+  async addToCart(userId: string, productId: string, quantity: number, variants?: any, currency: string = 'INR') {
     const product = await this.productModel.findById(productId);
     if (!product || product.status !== 'approved') {
       throw new BadRequestException('Product not available');
@@ -127,48 +127,10 @@ export class CartService {
     }
 
     await cart.save();
-    await cart.populate('items.product');
-
-    // Calculate cart totals
-    const subtotal = cart.items.reduce((total, item) => {
-      const product = item.product as any;
-      if (!product) return total;
-      return total + product.price * item.quantity;
-    }, 0);
-
-    const tax = subtotal * 0.1;
-    const shipping = subtotal > 0 ? 10 : 0;
-    const discount = cart.couponDiscount || 0;
-    const total = subtotal + tax + shipping - discount;
-
-    const cartObj = cart.toObject() as any;
-    cartObj.subtotal = subtotal;
-    cartObj.tax = tax;
-    cartObj.shipping = shipping;
-    cartObj.total = total;
-    
-    // Ensure items have _id fields
-    if (cartObj.items) {
-      cartObj.items = cartObj.items.map((item: any, index: number) => ({
-        ...item,
-        _id: item._id || cart.items[index]._id?.toString(),
-      }));
-    }
-    
-    if (cart.couponCode && cart.couponDiscount) {
-      cartObj.coupon = {
-        code: cart.couponCode,
-        discount: cart.couponDiscount,
-      };
-    }
-
-    return {
-      success: true,
-      cart: cartObj,
-    };
+    return this.getCart(userId, currency);
   }
 
-  async updateCartItem(userId: string, itemId: string, quantity: number) {
+  async updateCartItem(userId: string, itemId: string, quantity: number, currency: string = 'INR') {
     const cart = await this.cartModel.findOne({ user: userId });
     if (!cart) {
       throw new NotFoundException('Cart not found');
@@ -186,48 +148,10 @@ export class CartService {
     }
 
     await cart.save();
-    await cart.populate('items.product');
-
-    // Calculate cart totals
-    const subtotal = cart.items.reduce((total, item) => {
-      const product = item.product as any;
-      if (!product) return total;
-      return total + product.price * item.quantity;
-    }, 0);
-
-    const tax = subtotal * 0.1;
-    const shipping = subtotal > 0 ? 10 : 0;
-    const discount = cart.couponDiscount || 0;
-    const total = subtotal + tax + shipping - discount;
-
-    const cartObj = cart.toObject() as any;
-    cartObj.subtotal = subtotal;
-    cartObj.tax = tax;
-    cartObj.shipping = shipping;
-    cartObj.total = total;
-    
-    // Ensure items have _id fields
-    if (cartObj.items) {
-      cartObj.items = cartObj.items.map((item: any, index: number) => ({
-        ...item,
-        _id: item._id || cart.items[index]._id?.toString(),
-      }));
-    }
-    
-    if (cart.couponCode && cart.couponDiscount) {
-      cartObj.coupon = {
-        code: cart.couponCode,
-        discount: cart.couponDiscount,
-      };
-    }
-
-    return {
-      success: true,
-      cart: cartObj,
-    };
+    return this.getCart(userId, currency);
   }
 
-  async removeFromCart(userId: string, itemId: string) {
+  async removeFromCart(userId: string, itemId: string, currency: string = 'INR') {
     const cart = await this.cartModel.findOne({ user: userId });
     if (!cart) {
       throw new NotFoundException('Cart not found');
@@ -235,45 +159,7 @@ export class CartService {
 
     cart.items = cart.items.filter((item) => item._id?.toString() !== itemId);
     await cart.save();
-    await cart.populate('items.product');
-
-    // Calculate cart totals
-    const subtotal = cart.items.reduce((total, item) => {
-      const product = item.product as any;
-      if (!product) return total;
-      return total + product.price * item.quantity;
-    }, 0);
-
-    const tax = subtotal * 0.1;
-    const shipping = subtotal > 0 ? 10 : 0;
-    const discount = cart.couponDiscount || 0;
-    const total = subtotal + tax + shipping - discount;
-
-    const cartObj = cart.toObject() as any;
-    cartObj.subtotal = subtotal;
-    cartObj.tax = tax;
-    cartObj.shipping = shipping;
-    cartObj.total = total;
-    
-    // Ensure items have _id fields
-    if (cartObj.items) {
-      cartObj.items = cartObj.items.map((item: any, index: number) => ({
-        ...item,
-        _id: item._id || cart.items[index]._id?.toString(),
-      }));
-    }
-    
-    if (cart.couponCode && cart.couponDiscount) {
-      cartObj.coupon = {
-        code: cart.couponCode,
-        discount: cart.couponDiscount,
-      };
-    }
-
-    return {
-      success: true,
-      cart: cartObj,
-    };
+    return this.getCart(userId, currency);
   }
 
   async clearCart(userId: string) {
@@ -283,6 +169,8 @@ export class CartService {
     }
 
     cart.items = [];
+    cart.couponCode = undefined;
+    cart.couponDiscount = undefined;
     await cart.save();
 
     return {
@@ -291,7 +179,7 @@ export class CartService {
     };
   }
 
-  async applyCoupon(userId: string, code: string) {
+  async applyCoupon(userId: string, code: string, currency: string = 'INR') {
     if (!code) {
       throw new BadRequestException('Coupon code is required');
     }
@@ -350,49 +238,7 @@ export class CartService {
     cart.couponCode = coupon.code;
     cart.couponDiscount = discount;
     await cart.save();
-    await cart.populate('items.product');
-
-    // Calculate cart totals
-    const subtotal = cart.items.reduce((total, item) => {
-      const product = item.product as any;
-      if (!product) return total;
-      return total + product.price * item.quantity;
-    }, 0);
-
-    const tax = subtotal * 0.1;
-    const shipping = subtotal > 0 ? 10 : 0;
-    const total = subtotal + tax + shipping - discount;
-
-    const cartObj = cart.toObject() as any;
-    cartObj.subtotal = subtotal;
-    cartObj.tax = tax;
-    cartObj.shipping = shipping;
-    cartObj.total = total;
-    
-    // Ensure items have _id fields
-    if (cartObj.items) {
-      cartObj.items = cartObj.items.map((item: any, index: number) => ({
-        ...item,
-        _id: item._id || cart.items[index]._id?.toString(),
-      }));
-    }
-    
-    cartObj.coupon = {
-      code: coupon.code,
-      discount,
-      type: coupon.type,
-    };
-
-    return {
-      success: true,
-      message: 'Coupon applied successfully',
-      coupon: {
-        code: coupon.code,
-        discount,
-        type: coupon.type,
-      },
-      cart: cartObj,
-    };
+    return this.getCart(userId, currency);
   }
 }
 

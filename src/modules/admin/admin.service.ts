@@ -12,6 +12,7 @@ import {
 } from '../../models/ImpersonationEvent.model';
 import { PaymentsService } from '../payments/payments.service';
 import { EmailService } from '../../services/email.service';
+import { ExchangeRateService, Currency } from '../../services/exchange-rate.service';
 import { AuthService } from '../auth/auth.service';
 import { assertOrderTransition } from '../orders/order-status';
 
@@ -29,7 +30,27 @@ export class AdminService {
     private emailService: EmailService,
     private jwtService: JwtService,
     private authService: AuthService,
+    private exchangeRateService: ExchangeRateService,
   ) {}
+
+  private convertOrderCurrency(order: any): any {
+    if (!order) return order;
+    const orderObj = typeof order.toObject === 'function' ? order.toObject() : order;
+    const rate = orderObj.exchangeRate || 1.0;
+    orderObj.subtotal = Number((orderObj.subtotal * rate).toFixed(2));
+    orderObj.tax = Number((orderObj.tax * rate).toFixed(2));
+    orderObj.shipping = Number((orderObj.shipping * rate).toFixed(2));
+    orderObj.discount = Number((orderObj.discount * rate).toFixed(2));
+    orderObj.total = Number((orderObj.total * rate).toFixed(2));
+    if (orderObj.items) {
+      orderObj.items = orderObj.items.map((item: any) => {
+        const itemObj = { ...item };
+        itemObj.price = Number((itemObj.price * rate).toFixed(2));
+        return itemObj;
+      });
+    }
+    return orderObj;
+  }
 
   /**
    * Mint an impersonation session. Returns a JWT carrying the target
@@ -175,7 +196,8 @@ export class AdminService {
     return { success: true, events };
   }
 
-  async getDashboard() {
+  async getDashboard(currency: string = 'INR') {
+    const rate = this.exchangeRateService.getExchangeRate(currency.toUpperCase() as Currency);
     const totalUsers = await this.userModel.countDocuments();
     const totalSellers = await this.userModel.countDocuments({ role: 'seller' });
     const totalProducts = await this.productModel.countDocuments();
@@ -246,6 +268,12 @@ export class AdminService {
       { $limit: 5 },
     ]);
 
+    // Convert recent orders to requested currency
+    const convertedRecentOrders = recentOrders.map((order: any) => {
+      const orderCopy = { ...order, exchangeRate: rate };
+      return this.convertOrderCurrency(orderCopy);
+    });
+
     return {
       success: true,
       dashboard: {
@@ -255,9 +283,9 @@ export class AdminService {
         totalOrders,
         pendingSellers,
         pendingProducts,
-        totalRevenue: totalRevenue[0]?.total || 0,
-        monthlyRevenue: monthlyRevenue[0]?.total || 0,
-        recentOrders: recentOrders.map((order: any) => ({
+        totalRevenue: Number(((totalRevenue[0]?.total || 0) * rate).toFixed(2)),
+        monthlyRevenue: Number(((monthlyRevenue[0]?.total || 0) * rate).toFixed(2)),
+        recentOrders: convertedRecentOrders.map((order: any) => ({
           _id: order._id,
           orderNumber: order.orderNumber,
           customer: order.customer,
@@ -270,7 +298,7 @@ export class AdminService {
           name: product.name,
           image: Array.isArray(product.image) ? product.image[0] : product.image,
           totalSold: product.totalSold,
-          revenue: product.revenue,
+          revenue: Number((product.revenue * rate).toFixed(2)),
         })),
       },
     };
@@ -720,7 +748,8 @@ export class AdminService {
     };
   }
 
-  async getFinancialReport(startDate?: Date, endDate?: Date) {
+  async getFinancialReport(startDate?: Date, endDate?: Date, currency: string = 'INR') {
+    const rate = this.exchangeRateService.getExchangeRate(currency.toUpperCase() as Currency);
     const matchQuery: any = { status: 'delivered' };
     if (startDate || endDate) {
       matchQuery.createdAt = {};
@@ -769,19 +798,34 @@ export class AdminService {
       },
     ]);
 
+    const summary = revenueBreakdown[0] || {
+      totalRevenue: 0,
+      totalSubtotal: 0,
+      totalTax: 0,
+      totalShipping: 0,
+      totalDiscount: 0,
+      orderCount: 0,
+    };
+
     return {
       success: true,
       report: {
-        summary: revenueBreakdown[0] || {
-          totalRevenue: 0,
-          totalSubtotal: 0,
-          totalTax: 0,
-          totalShipping: 0,
-          totalDiscount: 0,
-          orderCount: 0,
+        summary: {
+          totalRevenue: Number((summary.totalRevenue * rate).toFixed(2)),
+          totalSubtotal: Number((summary.totalSubtotal * rate).toFixed(2)),
+          totalTax: Number((summary.totalTax * rate).toFixed(2)),
+          totalShipping: Number((summary.totalShipping * rate).toFixed(2)),
+          totalDiscount: Number((summary.totalDiscount * rate).toFixed(2)),
+          orderCount: summary.orderCount,
         },
-        monthlyRevenue,
-        paymentMethodBreakdown,
+        monthlyRevenue: monthlyRevenue.map((m: any) => ({
+          ...m,
+          revenue: Number((m.revenue * rate).toFixed(2)),
+        })),
+        paymentMethodBreakdown: paymentMethodBreakdown.map((p: any) => ({
+          ...p,
+          revenue: Number((p.revenue * rate).toFixed(2)),
+        })),
       },
     };
   }

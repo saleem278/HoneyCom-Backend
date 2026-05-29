@@ -37,10 +37,14 @@ export class CartController {
   @Post()
   @ApiOperation({ summary: 'Add item to cart' })
   @ApiResponse({ status: 200, description: 'Item added to cart' })
-  async addToCart(@Request() req: AuthedRequest, @Body() body: { productId: string; quantity: number; variant?: string; variants?: any }) {
+  async addToCart(
+    @Request() req: AuthedRequest,
+    @Body() body: { productId: string; quantity: number; variant?: string; variants?: any },
+    @Currency() currency: string,
+  ) {
     // Support both 'variant' (string) and 'variants' (object) for backward compatibility
     const variants = body.variants || (body.variant ? { variant: body.variant } : {});
-    return this.cartService.addToCart(req.user.id, body.productId, body.quantity, variants);
+    return this.cartService.addToCart(req.user.id, body.productId, body.quantity, variants, currency);
   }
 
   @Put(':itemId')
@@ -49,16 +53,21 @@ export class CartController {
   async updateCartItem(
     @Request() req: AuthedRequest,
     @Param('itemId') itemId: string,
-    @Body() body: { quantity: number }
+    @Body() body: { quantity: number },
+    @Currency() currency: string,
   ) {
-    return this.cartService.updateCartItem(req.user.id, itemId, body.quantity);
+    return this.cartService.updateCartItem(req.user.id, itemId, body.quantity, currency);
   }
 
   @Delete(':itemId')
   @ApiOperation({ summary: 'Remove item from cart' })
   @ApiResponse({ status: 200, description: 'Item removed from cart' })
-  async removeFromCart(@Request() req: AuthedRequest, @Param('itemId') itemId: string) {
-    return this.cartService.removeFromCart(req.user.id, itemId);
+  async removeFromCart(
+    @Request() req: AuthedRequest,
+    @Param('itemId') itemId: string,
+    @Currency() currency: string,
+  ) {
+    return this.cartService.removeFromCart(req.user.id, itemId, currency);
   }
 
   @Delete()
@@ -72,8 +81,12 @@ export class CartController {
   @ApiOperation({ summary: 'Apply coupon code' })
   @ApiResponse({ status: 200, description: 'Coupon applied successfully' })
   @ApiResponse({ status: 400, description: 'Invalid coupon code' })
-  async applyCoupon(@Request() req: AuthedRequest, @Body() body: { code: string }) {
-    return this.cartService.applyCoupon(req.user.id, body.code);
+  async applyCoupon(
+    @Request() req: AuthedRequest,
+    @Body() body: { code: string },
+    @Currency() currency: string,
+  ) {
+    return this.cartService.applyCoupon(req.user.id, body.code, currency);
   }
 }
 

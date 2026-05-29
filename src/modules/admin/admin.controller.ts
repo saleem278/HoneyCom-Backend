@@ -7,6 +7,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import type { AuthedRequest } from '../../common/types/request.types';
 import { SESSION_COOKIE_NAME, ADMIN_STASH_COOKIE_NAME } from '../auth/strategies/jwt.strategy';
+import { Currency } from '../../common/decorators/currency.decorator';
 import {
   sessionCookieOptions,
   clearSessionCookieOptions,
@@ -23,8 +24,8 @@ export class AdminController {
   @Get('dashboard')
   @ApiOperation({ summary: 'Get admin dashboard' })
   @ApiResponse({ status: 200, description: 'Dashboard data' })
-  async getDashboard() {
-    return this.adminService.getDashboard();
+  async getDashboard(@Currency() currency: string) {
+    return this.adminService.getDashboard(currency);
   }
 
   @Get('users')
@@ -108,12 +109,13 @@ export class AdminController {
   @ApiOperation({ summary: 'Get financial report' })
   @ApiResponse({ status: 200, description: 'Financial report data' })
   async getFinancialReport(
+    @Currency() currency: string,
     @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string
+    @Query('endDate') endDate?: string,
   ) {
     const start = startDate ? new Date(startDate) : undefined;
     const end = endDate ? new Date(endDate) : undefined;
-    return this.adminService.getFinancialReport(start, end);
+    return this.adminService.getFinancialReport(start, end, currency);
   }
 
   // -------- Impersonation --------

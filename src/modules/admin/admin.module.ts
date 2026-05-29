@@ -11,6 +11,7 @@ import { ImpersonationEventSchema } from '../../models/ImpersonationEvent.model'
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { EmailService } from '../../services/email.service';
+import { ExchangeRateService } from '../../services/exchange-rate.service';
 
 @Module({
   imports: [
@@ -26,7 +27,7 @@ import { EmailService } from '../../services/email.service';
     PaymentsModule,
   ],
   controllers: [AdminController],
-  providers: [AdminService, EmailService],
+  providers: [AdminService, EmailService, ExchangeRateService],
   exports: [AdminService],
 })
 export class AdminModule {}

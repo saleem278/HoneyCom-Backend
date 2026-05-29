@@ -3,18 +3,30 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Review, IReview } from '../../models/Review.model';
 import { Product, IProduct } from '../../models/Product.model';
+import { IOrder } from '../../models/Order.model';
 
 @Injectable()
 export class ReviewsService {
   constructor(
     @InjectModel('Review') private reviewModel: Model<IReview>,
     @InjectModel('Product') private productModel: Model<IProduct>,
+    @InjectModel('Order') private orderModel: Model<IOrder>,
   ) {}
 
   async create(userId: string, productId: string, reviewData: any) {
     const product = await this.productModel.findById(productId);
     if (!product) {
       throw new NotFoundException('Product not found');
+    }
+
+    // Verify that user has purchased the product and it is delivered
+    const hasPurchased = await this.orderModel.findOne({
+      customer: userId,
+      status: 'delivered',
+      'items.product': productId,
+    });
+    if (!hasPurchased) {
+      throw new BadRequestException('You can only review products you have purchased and had delivered.');
     }
 
     // Check if user already reviewed

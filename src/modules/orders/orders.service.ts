@@ -1,6 +1,7 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import * as crypto from 'crypto';
 import { Order, IOrder } from '../../models/Order.model';
 import { Cart, ICart } from '../../models/Cart.model';
 import { Product, IProduct } from '../../models/Product.model';
@@ -10,6 +11,7 @@ import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
 import { assertOrderTransition } from './order-status';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class OrdersService {
@@ -24,6 +26,8 @@ export class OrdersService {
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
     private pdfService: PdfService,
+    @Inject(forwardRef(() => PaymentsService))
+    private paymentsService: PaymentsService,
   ) {}
 
   /**
@@ -35,6 +39,31 @@ export class OrdersService {
       return String((customer as { _id: { toString(): string } })._id);
     }
     return String(customer);
+  }
+
+  private convertOrderCurrency(order: any): any {
+    if (!order) return order;
+
+    // If order has toObject (is a Mongoose document), convert to plain object
+    const orderObj = typeof order.toObject === 'function' ? order.toObject() : order;
+
+    const rate = orderObj.exchangeRate || 1.0;
+
+    orderObj.subtotal = Number((orderObj.subtotal * rate).toFixed(2));
+    orderObj.tax = Number((orderObj.tax * rate).toFixed(2));
+    orderObj.shipping = Number((orderObj.shipping * rate).toFixed(2));
+    orderObj.discount = Number((orderObj.discount * rate).toFixed(2));
+    orderObj.total = Number((orderObj.total * rate).toFixed(2));
+
+    if (orderObj.items) {
+      orderObj.items = orderObj.items.map((item: any) => {
+        const itemObj = { ...item };
+        itemObj.price = Number((itemObj.price * rate).toFixed(2));
+        return itemObj;
+      });
+    }
+
+    return orderObj;
   }
 
   async create(userId: string, orderData: any) {
@@ -148,7 +177,7 @@ export class OrdersService {
     };
 
     const tax = subtotal * 0.1;
-    const shipping = subtotal > 0 ? 10 : 0;
+    const shipping = subtotal > 0 ? 500 : 0;
     const discount = cart?.couponDiscount || 0;
     const total = subtotal + tax + shipping - discount;
 
@@ -245,7 +274,8 @@ export class OrdersService {
       }
 
       const orderCount = await this.orderModel.countDocuments();
-      const orderNumber = `ORD-${String(Date.now()).slice(-8)}-${String(orderCount + 1).padStart(4, '0')}`;
+      const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+      const orderNumber = `ORD-${String(Date.now()).slice(-8)}-${String(orderCount + 1).padStart(4, '0')}-${randomSuffix}`;
 
       order = await this.orderModel.create({
         orderNumber,
@@ -324,7 +354,7 @@ export class OrdersService {
 
     return {
       success: true,
-      order,
+      order: this.convertOrderCurrency(order),
     };
   }
 
@@ -348,9 +378,11 @@ export class OrdersService {
     
     const total = await this.orderModel.countDocuments(filter);
     
+    const convertedOrders = orders.map((o) => this.convertOrderCurrency(o));
+
     return {
       success: true,
-      orders,
+      orders: convertedOrders,
       pagination: {
         page,
         limit,
@@ -375,10 +407,12 @@ export class OrdersService {
       throw new BadRequestException('Not authorized');
     }
 
+    // Convert order and its item prices first
+    const convertedOrder = this.convertOrderCurrency(order);
+
     // Transform items to match frontend expectations
-    const orderObj = order as any;
-    if (orderObj.items) {
-      orderObj.items = orderObj.items.map((item: any) => ({
+    if (convertedOrder.items) {
+      convertedOrder.items = convertedOrder.items.map((item: any) => ({
         ...item,
         product: {
           _id: item.product,
@@ -391,7 +425,7 @@ export class OrdersService {
 
     return {
       success: true,
-      order: orderObj,
+      order: convertedOrder,
     };
   }
 
@@ -407,6 +441,16 @@ export class OrdersService {
 
     // Validate transition (covers both terminal-state and skip-state attempts).
     assertOrderTransition(order.status, 'cancelled');
+
+    // Process Stripe refund if it is a paid Stripe order
+    if (order.paymentMethod === 'stripe' && order.paymentIntentId && order.paymentStatus === 'paid') {
+      try {
+        await this.paymentsService.processRefund(order.paymentIntentId, order.total, 'Order cancellation');
+        order.paymentStatus = 'refunded';
+      } catch (refundError: any) {
+        this.logger.warn(`Failed to process Stripe refund for cancellation on order ${order._id}: ${refundError.message}`);
+      }
+    }
 
     // Persist the cancellation first, then restore inventory. If a downstream
     // worker double-cancels, the assertion above short-circuits (idempotent).
@@ -426,7 +470,7 @@ export class OrdersService {
 
     return {
       success: true,
-      order,
+      order: this.convertOrderCurrency(order),
     };
   }
 
@@ -444,16 +488,50 @@ export class OrdersService {
       throw new BadRequestException('Order is not eligible for return');
     }
 
-    // For now, just update order status to 'refunded'.
-    // (In a full implementation, you'd create a ReturnRequest document.)
+    // Enforce 30-day return window from delivery/updated timestamp
+    if (order.status === 'delivered') {
+      const returnWindowDays = 30;
+      const deliveryDate = order.updatedAt;
+      const daysSinceDelivery = (Date.now() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceDelivery > returnWindowDays) {
+        throw new BadRequestException(`Return window of ${returnWindowDays} days has expired for this order.`);
+      }
+    }
+
+    // Process Stripe refund if there is an active payment intent ID
+    if (order.paymentIntentId) {
+      try {
+        await this.paymentsService.processRefund(order.paymentIntentId, order.total, 'Customer return request');
+      } catch (refundError: any) {
+        this.logger.warn(`Failed to process Stripe refund for return on order ${order._id}: ${refundError.message}`);
+        // We continue anyway so the return can be processed, as admin can process Stripe refund manually
+      }
+    }
+
+    // Replenish product inventory for all returned items
+    try {
+      await Promise.all(
+        order.items.map((item: any) =>
+          this.productModel.updateOne(
+            { _id: item.product },
+            { $inc: { inventory: item.quantity } },
+          ),
+        ),
+      );
+    } catch (inventoryError: any) {
+      this.logger.warn(`Failed to replenish inventory on return for order ${order._id}: ${inventoryError.message}`);
+    }
+
+    // Update order statuses
     assertOrderTransition(order.status, 'refunded');
     order.status = 'refunded';
+    order.paymentStatus = 'refunded';
     await order.save();
 
     return {
       success: true,
       message: 'Return request submitted successfully',
-      order,
+      order: this.convertOrderCurrency(order),
     };
   }
 
@@ -559,26 +637,29 @@ export class OrdersService {
       }
     }
 
+    // Convert currency first
+    const convertedOrder = this.convertOrderCurrency(order);
+
     // Generate invoice data
     const invoice = {
-      invoiceNumber: `INV-${order.orderNumber}`,
-      orderNumber: order.orderNumber,
-      date: order.createdAt,
+      invoiceNumber: `INV-${convertedOrder.orderNumber}`,
+      orderNumber: convertedOrder.orderNumber,
+      date: convertedOrder.createdAt,
       customer: {
-        name: typeof order.customer === 'object' ? (order.customer as any).name : 'N/A',
-        email: typeof order.customer === 'object' ? (order.customer as any).email : 'N/A',
-        phone: typeof order.customer === 'object' ? (order.customer as any).phone : 'N/A',
+        name: typeof convertedOrder.customer === 'object' ? (convertedOrder.customer as any).name : 'N/A',
+        email: typeof convertedOrder.customer === 'object' ? (convertedOrder.customer as any).email : 'N/A',
+        phone: typeof convertedOrder.customer === 'object' ? (convertedOrder.customer as any).phone : 'N/A',
       },
-      shippingAddress: order.shippingAddress,
-      items: order.items,
-      subtotal: order.subtotal,
-      tax: order.tax,
-      shipping: order.shipping,
-      discount: order.discount,
-      total: order.total,
-      paymentMethod: order.paymentMethod,
-      paymentStatus: order.paymentStatus,
-      status: order.status,
+      shippingAddress: convertedOrder.shippingAddress,
+      items: convertedOrder.items,
+      subtotal: convertedOrder.subtotal,
+      tax: convertedOrder.tax,
+      shipping: convertedOrder.shipping,
+      discount: convertedOrder.discount,
+      total: convertedOrder.total,
+      paymentMethod: convertedOrder.paymentMethod,
+      paymentStatus: convertedOrder.paymentStatus,
+      status: convertedOrder.status,
     };
 
     // Generate PDF invoice

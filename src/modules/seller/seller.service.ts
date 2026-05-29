@@ -203,6 +203,9 @@ export class SellerService {
     assertOrderTransition(order.status, updateData.status);
 
     order.status = updateData.status as any;
+    if (order.status === 'delivered' && order.paymentMethod === 'cash_on_delivery') {
+      order.paymentStatus = 'paid';
+    }
     if (updateData.trackingNumber) {
       order.trackingNumber = updateData.trackingNumber;
     }

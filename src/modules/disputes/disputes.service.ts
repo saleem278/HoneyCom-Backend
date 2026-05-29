@@ -139,31 +139,31 @@ export class DisputesService {
       throw new BadRequestException('Dispute cannot be resolved in current status');
     }
 
+    // Process refund if resolution requires it
+    if (resolutionData.resolution === 'refund' || resolutionData.resolution === 'partial_refund') {
+      const order = dispute.order as any;
+      const refundAmount = resolutionData.refundAmount || order.total;
+      
+      if (order.paymentIntentId) {
+        try {
+          await this.paymentsService.processRefund(order.paymentIntentId, refundAmount, resolutionData.notes);
+        } catch (error: any) {
+          throw new BadRequestException(`Stripe refund failed: ${error.message || error}. Dispute was not resolved.`);
+        }
+      }
+      
+      // Update order status only if refund succeeded (or wasn't stripe)
+      order.status = 'refunded';
+      order.paymentStatus = 'refunded';
+      await order.save();
+    }
+
     dispute.status = 'resolved';
     dispute.resolution = resolutionData.resolution;
     dispute.resolutionNotes = resolutionData.notes;
     dispute.resolvedBy = adminId as any;
     dispute.resolvedAt = new Date();
     await dispute.save();
-
-    // Process refund if resolution requires it
-    if (resolutionData.resolution === 'refund' || resolutionData.resolution === 'partial_refund') {
-      const order = dispute.order as any;
-      const refundAmount = resolutionData.refundAmount || order.total;
-      
-      try {
-        if (order.paymentIntentId) {
-          await this.paymentsService.processRefund(order.paymentIntentId, refundAmount, resolutionData.notes);
-        }
-        // Update order status
-        order.status = 'refunded';
-        order.paymentStatus = 'refunded';
-        await order.save();
-      } catch (error: any) {
-        // Error processing refund
-        // Continue even if refund fails - admin can process manually
-      }
-    }
 
     return {
       success: true,
