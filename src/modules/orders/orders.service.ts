@@ -178,8 +178,8 @@ export class OrdersService {
 
     const tax = subtotal * 0.1;
     const shipping = subtotal > 0 ? 500 : 0;
-    const discount = cart?.couponDiscount || 0;
-    const total = subtotal + tax + shipping - discount;
+    let discount = 0;
+    let total = 0;
 
     let order;
     try {
@@ -275,7 +275,53 @@ export class OrdersService {
             'Coupon is invalid, expired, or has reached its usage limit.',
           );
         }
+
+        // Validate minimum purchase
+        if (redeemed.minPurchase && subtotal < redeemed.minPurchase) {
+          throw new BadRequestException(
+            `Minimum purchase of ${redeemed.minPurchase} required for coupon ${redeemed.code}`,
+          );
+        }
+
+        // Calculate discount based on eligible products/categories
+        let eligibleSubtotal = 0;
+        for (const item of items) {
+          const product = await this.productModel.findById(item.product);
+          if (!product) continue;
+
+          let isEligible = true;
+          if (redeemed.applicableProducts && redeemed.applicableProducts.length > 0) {
+            isEligible = redeemed.applicableProducts.some(
+              (pId) => pId.toString() === product._id.toString()
+            );
+          }
+          if (isEligible && redeemed.applicableCategories && redeemed.applicableCategories.length > 0) {
+            isEligible = redeemed.applicableCategories.some(
+              (cId) => cId.toString() === product.category?.toString()
+            );
+          }
+
+          if (isEligible) {
+            eligibleSubtotal += item.price * item.quantity;
+          }
+        }
+
+        let calculatedDiscount = 0;
+        if (redeemed.type === 'percentage') {
+          calculatedDiscount = (eligibleSubtotal * redeemed.value) / 100;
+          if (redeemed.maxDiscount) {
+            calculatedDiscount = Math.min(calculatedDiscount, redeemed.maxDiscount);
+          }
+        } else {
+          if (eligibleSubtotal > 0) {
+            calculatedDiscount = Math.min(redeemed.value, eligibleSubtotal);
+          }
+        }
+
+        discount = Math.min(calculatedDiscount, subtotal);
       }
+
+      total = Math.max(0, subtotal + tax + shipping - discount);
 
       const orderCount = await this.orderModel.countDocuments();
       const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
@@ -488,18 +534,16 @@ export class OrdersService {
       throw new BadRequestException('Not authorized');
     }
 
-    if (!['delivered', 'shipped'].includes(order.status)) {
-      throw new BadRequestException('Order is not eligible for return');
+    if (order.status !== 'delivered') {
+      throw new BadRequestException('Order is not eligible for return. Only delivered orders can be returned.');
     }
 
     // Enforce 30-day return window from delivery/updated timestamp
-    if (order.status === 'delivered') {
-      const returnWindowDays = 30;
-      const deliveryDate = order.updatedAt;
-      const daysSinceDelivery = (Date.now() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24);
-      if (daysSinceDelivery > returnWindowDays) {
-        throw new BadRequestException(`Return window of ${returnWindowDays} days has expired for this order.`);
-      }
+    const returnWindowDays = 30;
+    const deliveryDate = order.updatedAt;
+    const daysSinceDelivery = (Date.now() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceDelivery > returnWindowDays) {
+      throw new BadRequestException(`Return window of ${returnWindowDays} days has expired for this order.`);
     }
 
     // Process Stripe refund if there is an active payment intent ID

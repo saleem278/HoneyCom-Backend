@@ -142,12 +142,14 @@ export class ReviewsService {
 
   private async updateProductRating(productId: string) {
     const reviews = await this.reviewModel.find({ product: productId });
-    const rating =
-      reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
+    const reviewsCount = reviews.length;
+    const rating = reviewsCount > 0 
+      ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviewsCount
+      : 0;
 
     await this.productModel.findByIdAndUpdate(productId, {
-      rating: rating || 0,
-      numReviews: reviews.length,
+      rating: rating,
+      numReviews: reviewsCount,
     });
   }
 }

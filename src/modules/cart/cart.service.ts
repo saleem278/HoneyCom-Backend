@@ -15,11 +15,111 @@ export class CartService {
     private exchangeRateService: ExchangeRateService,
   ) {}
 
+  private async recalculateCartDiscount(cart: ICart): Promise<void> {
+    if (!cart.couponCode) {
+      cart.couponDiscount = 0;
+      return;
+    }
+
+    const coupon = await this.couponModel.findOne({
+      code: cart.couponCode.toUpperCase(),
+      status: 'active',
+    });
+
+    if (!coupon) {
+      cart.couponCode = undefined;
+      cart.couponDiscount = 0;
+      return;
+    }
+
+    // Check if coupon is valid (time-wise)
+    const now = new Date();
+    if (now < coupon.validFrom || now > coupon.validUntil) {
+      cart.couponCode = undefined;
+      cart.couponDiscount = 0;
+      return;
+    }
+
+    // Check usage limit
+    if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
+      cart.couponCode = undefined;
+      cart.couponDiscount = 0;
+      return;
+    }
+
+    // Populate items.product if not already populated
+    if (!cart.populated('items.product')) {
+      await cart.populate('items.product');
+    }
+
+    // Calculate cart totals in base currency (INR)
+    let eligibleSubtotal = 0;
+    let totalSubtotal = 0;
+
+    for (const item of cart.items) {
+      const product = item.product as any;
+      if (!product) continue;
+
+      const itemPrice = product.price;
+      const itemTotal = itemPrice * item.quantity;
+      totalSubtotal += itemTotal;
+
+      let isEligible = true;
+      if (coupon.applicableProducts && coupon.applicableProducts.length > 0) {
+        isEligible = coupon.applicableProducts.some(
+          (pId) => pId.toString() === product._id.toString()
+        );
+      }
+      if (isEligible && coupon.applicableCategories && coupon.applicableCategories.length > 0) {
+        isEligible = coupon.applicableCategories.some(
+          (cId) => cId.toString() === product.category?.toString()
+        );
+      }
+
+      if (isEligible) {
+        eligibleSubtotal += itemTotal;
+      }
+    }
+
+    // Check minimum purchase
+    if (coupon.minPurchase && totalSubtotal < coupon.minPurchase) {
+      cart.couponCode = undefined;
+      cart.couponDiscount = 0;
+      return;
+    }
+
+    // Calculate discount in base currency
+    let discount = 0;
+    if (coupon.type === 'percentage') {
+      discount = (eligibleSubtotal * coupon.value) / 100;
+      if (coupon.maxDiscount) {
+        discount = Math.min(discount, coupon.maxDiscount);
+      }
+    } else {
+      if (eligibleSubtotal > 0) {
+        discount = Math.min(coupon.value, eligibleSubtotal);
+      }
+    }
+
+    // Cap discount at totalSubtotal
+    cart.couponDiscount = Math.min(discount, totalSubtotal);
+  }
+
   async getCart(userId: string, currency: string = 'INR') {
     let cart = await this.cartModel.findOne({ user: userId }).populate('items.product');
 
     if (!cart) {
       cart = await this.cartModel.create({ user: userId, items: [] });
+    }
+
+    // Recalculate coupon discount to ensure it's up to date
+    if (cart.couponCode) {
+      const oldDiscount = cart.couponDiscount;
+      const oldCode = cart.couponCode;
+      await this.recalculateCartDiscount(cart);
+      if (cart.couponDiscount !== oldDiscount || cart.couponCode !== oldCode) {
+        await cart.save();
+      }
     }
 
     // Convert currency to uppercase
@@ -35,7 +135,7 @@ export class CartService {
     const taxBase = subtotalBase * 0.1; // 10% tax
     const shippingBase = subtotalBase > 0 ? 500 : 0; // ₹500 shipping if cart has items (in INR base currency)
     const discountBase = cart.couponDiscount || 0;
-    const totalBase = subtotalBase + taxBase + shippingBase - discountBase;
+    const totalBase = Math.max(0, subtotalBase + taxBase + shippingBase - discountBase);
 
     // Convert totals to requested currency
     const subtotal = this.exchangeRateService.convertToCurrency(subtotalBase, currencyUpper);
@@ -126,6 +226,7 @@ export class CartService {
       });
     }
 
+    await this.recalculateCartDiscount(cart);
     await cart.save();
     return this.getCart(userId, currency);
   }
@@ -147,6 +248,7 @@ export class CartService {
       item.quantity = quantity;
     }
 
+    await this.recalculateCartDiscount(cart);
     await cart.save();
     return this.getCart(userId, currency);
   }
@@ -158,6 +260,7 @@ export class CartService {
     }
 
     cart.items = cart.items.filter((item) => item._id?.toString() !== itemId);
+    await this.recalculateCartDiscount(cart);
     await cart.save();
     return this.getCart(userId, currency);
   }
@@ -204,15 +307,17 @@ export class CartService {
       throw new BadRequestException('Coupon usage limit reached');
     }
 
-    const cart = await this.cartModel.findOne({ user: userId }).populate('items.product');
+    const cart = await this.cartModel.findOne({ user: userId });
 
     if (!cart || cart.items.length === 0) {
       throw new BadRequestException('Cart is empty');
     }
 
     // Calculate cart total
+    await cart.populate('items.product');
     const cartTotal = cart.items.reduce((total, item) => {
       const product = item.product as any;
+      if (!product) return total;
       return total + product.price * item.quantity;
     }, 0);
 
@@ -223,20 +328,19 @@ export class CartService {
       );
     }
 
-    // Calculate discount
-    let discount = 0;
-    if (coupon.type === 'percentage') {
-      discount = (cartTotal * coupon.value) / 100;
-      if (coupon.maxDiscount) {
-        discount = Math.min(discount, coupon.maxDiscount);
-      }
-    } else {
-      discount = coupon.value;
-    }
-
     // Apply coupon to cart
     cart.couponCode = coupon.code;
-    cart.couponDiscount = discount;
+    await this.recalculateCartDiscount(cart);
+
+    if (!cart.couponDiscount || cart.couponDiscount === 0) {
+      cart.couponCode = undefined;
+      cart.couponDiscount = 0;
+      await cart.save();
+      throw new BadRequestException(
+        'This coupon is not applicable to the items in your cart.'
+      );
+    }
+
     await cart.save();
     return this.getCart(userId, currency);
   }
