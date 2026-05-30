@@ -253,9 +253,13 @@ export class OrdersService {
       // request — refuse the order so the user can retry without the
       // expired coupon. Reservation rollback happens in the outer catch.
       if (cart?.couponCode) {
+        const now = new Date();
         const redeemed = await this.couponModel.findOneAndUpdate(
           {
             code: cart.couponCode.toUpperCase(),
+            status: 'active',
+            validFrom: { $lte: now },
+            validUntil: { $gte: now },
             // Either no limit, OR current usage strictly below limit.
             $or: [
               { usageLimit: { $exists: false } },
@@ -268,7 +272,7 @@ export class OrdersService {
         );
         if (!redeemed) {
           throw new BadRequestException(
-            'Coupon usage limit reached. Please remove the coupon and try again.',
+            'Coupon is invalid, expired, or has reached its usage limit.',
           );
         }
       }
