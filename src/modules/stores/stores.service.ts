@@ -60,6 +60,19 @@ export class StoresService {
   async updateStore(sellerId: string, updateData: any) {
     let store = await this.storeModel.findOne({ seller: sellerId });
     
+    // SECURITY: Whitelist only safe store fields. Block Mass Assignment.
+    // Sellers must not be able to reactivate suspended stores or reassign store ownership.
+    const allowedFields = [
+      'storeName', 'description', 'logo', 'banner', 'slug', 
+      'address', 'contact', 'socialMedia'
+    ];
+    const filteredUpdateData: any = {};
+    for (const key of Object.keys(updateData)) {
+      if (allowedFields.includes(key)) {
+        filteredUpdateData[key] = updateData[key];
+      }
+    }
+
     if (!store) {
       // Create store if doesn't exist
       const seller = await this.userModel.findById(sellerId);
@@ -68,29 +81,30 @@ export class StoresService {
       }
 
       // Generate slug if not provided
-      if (!updateData.slug && updateData.storeName) {
-        updateData.slug = updateData.storeName
+      if (!filteredUpdateData.slug && filteredUpdateData.storeName) {
+        filteredUpdateData.slug = filteredUpdateData.storeName
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
           .replace(/(^-|-$)/g, '');
       }
 
       // Check slug uniqueness
-      if (updateData.slug) {
-        const existingStore = await this.storeModel.findOne({ slug: updateData.slug });
+      if (filteredUpdateData.slug) {
+        const existingStore = await this.storeModel.findOne({ slug: filteredUpdateData.slug });
         if (existingStore) {
           throw new BadRequestException('Store with this slug already exists');
         }
       }
 
       store = await this.storeModel.create({
-        ...updateData,
+        ...filteredUpdateData,
         seller: sellerId,
+        status: 'active', // Default status is active on creation
       });
     } else {
       // Update existing store
-      if (updateData.slug && updateData.slug !== store.slug) {
-        const existingStore = await this.storeModel.findOne({ slug: updateData.slug, _id: { $ne: store._id } });
+      if (filteredUpdateData.slug && filteredUpdateData.slug !== store.slug) {
+        const existingStore = await this.storeModel.findOne({ slug: filteredUpdateData.slug, _id: { $ne: store._id } });
         if (existingStore) {
           throw new BadRequestException('Store with this slug already exists');
         }
@@ -98,7 +112,7 @@ export class StoresService {
 
       store = await this.storeModel.findByIdAndUpdate(
         store._id,
-        updateData,
+        filteredUpdateData,
         { new: true, runValidators: true }
       );
     }

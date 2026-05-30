@@ -31,7 +31,18 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, updateData: Partial<IUser>) {
-    const user = await this.userModel.findByIdAndUpdate(userId, updateData, {
+    // SECURITY: Whitelist only safe fields to prevent Mass Assignment / Privilege Escalation.
+    // An attacker sending { role: 'admin' } must not be able to elevate their privileges.
+    const allowedFields: Array<keyof IUser | string> = ['name', 'email', 'phone', 'avatar'];
+    const filteredUpdateData: any = {};
+    
+    for (const key of Object.keys(updateData)) {
+      if (allowedFields.includes(key)) {
+        filteredUpdateData[key] = updateData[key as keyof IUser];
+      }
+    }
+
+    const user = await this.userModel.findByIdAndUpdate(userId, filteredUpdateData, {
       new: true,
       runValidators: true,  
     });

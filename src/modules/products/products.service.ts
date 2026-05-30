@@ -228,9 +228,30 @@ export class ProductsService {
       throw new BadRequestException('Not authorized to update this product');
     }
 
+    // SECURITY: Whitelist only safe product fields. Block Mass Assignment.
+    // Sellers must not be able to mark their products as 'approved' automatically,
+    // change the product's seller ID, or override reviews/ratings fields.
+    let allowedFields = [
+      'name', 'description', 'sku', 'price', 'compareAtPrice',
+      'category', 'images', 'inventory', 'variants', 'weight',
+      'dimensions', 'featured', 'tags'
+    ];
+    
+    // Admins can also update status and rejection fields
+    if (userRole === 'admin') {
+      allowedFields = [...allowedFields, 'status', 'rejectionReason', 'seller', 'rating', 'numReviews'];
+    }
+
+    const filteredUpdateData: any = {};
+    for (const key of Object.keys(updateProductDto)) {
+      if (allowedFields.includes(key)) {
+        filteredUpdateData[key] = updateProductDto[key];
+      }
+    }
+
     const updatedProduct = await this.productModel.findByIdAndUpdate(
       id,
-      updateProductDto,
+      filteredUpdateData,
       { new: true, runValidators: true }
     ).populate('category', 'name slug').populate('seller', 'name email');
 

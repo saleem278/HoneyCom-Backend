@@ -80,9 +80,19 @@ export class ReviewsService {
       throw new BadRequestException('Not authorized');
     }
 
+    // SECURITY: Whitelist only safe review fields to prevent Mass Assignment.
+    // Users must not be able to modify the associated product, review author, or helpful counts.
+    const allowedFields = ['rating', 'title', 'comment'];
+    const filteredUpdateData: any = {};
+    for (const key of Object.keys(updateData)) {
+      if (allowedFields.includes(key)) {
+        filteredUpdateData[key] = updateData[key];
+      }
+    }
+
     const updatedReview = await this.reviewModel.findByIdAndUpdate(
       id,
-      updateData,
+      filteredUpdateData,
       { new: true, runValidators: true }
     );
 
