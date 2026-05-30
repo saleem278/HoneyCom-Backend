@@ -19,10 +19,19 @@ export class OptionalJwtAuthGuard extends AuthGuard('jwt') {
   }
 
   handleRequest(err: any, user: any, info: any) {
-    // Don't throw error if no token or invalid token - just return null
-    // This allows the endpoint to work for both authenticated and unauthenticated users
-    if (err || !user) {
-      return null; // Return null instead of throwing
+    // If NO token was provided, treat as unauthenticated guest (allow through).
+    // If a token WAS provided but is invalid/expired, reject — a client that
+    // deliberately sends a token expects authentication, and a forged/stale
+    // token should never silently downgrade to guest access.
+    if (err) throw err;
+    if (!user) {
+      // info.name === 'JsonWebTokenError' | 'TokenExpiredError' when a token
+      // was supplied but failed verification. Distinguish from "no token" case.
+      if (info && info.name && info.name !== 'No auth token') {
+        const { UnauthorizedException } = require('@nestjs/common');
+        throw new UnauthorizedException(info.message || 'Invalid token');
+      }
+      return null; // Genuinely no token → guest
     }
     return user;
   }

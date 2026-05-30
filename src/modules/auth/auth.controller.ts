@@ -166,6 +166,7 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
   @ApiOperation({ summary: 'Request password reset' })
   @ApiBody({ type: ForgotPasswordDto })
   @ApiResponse({ status: 200, description: 'Password reset email sent' })
@@ -292,15 +293,20 @@ export class AuthController {
     @Request() req: AuthedRequest,
     @Res({ passthrough: true }) res: ExpressResponse,
   ) {
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.replace('Bearer ', '');
+    // Revoke the session so this token cannot be replayed even if it
+    // hasn't expired. Without this, a stolen token stays valid for up
+    // to JWT_EXPIRE (default 30 days) after the user logs out.
+    const token =
+      req.cookies?.[SESSION_COOKIE_NAME] ||
+      (req.headers.authorization || '').replace('Bearer ', '');
     if (token) {
-      await this.authService.updateSessionActivity(token);
+      try {
+        await this.authService.revokeSessionByToken(token);
+      } catch (err: any) {
+        // Best-effort: don't fail logout if revocation hits a DB hiccup.
+        // The cookie is cleared below regardless.
+      }
     }
-    // Clear the session cookie. clearCookie's options must mirror
-    // *all* of the original Set-Cookie attributes (path, sameSite,
-    // secure) — passing only `path: '/'` leaves the browser's
-    // SameSite=None cookie alone in production.
     res.clearCookie(SESSION_COOKIE_NAME, clearSessionCookieOptions());
     return {
       success: true,

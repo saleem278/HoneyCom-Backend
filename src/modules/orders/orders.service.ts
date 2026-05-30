@@ -1,12 +1,13 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { InjectModel, InjectConnection } from '@nestjs/mongoose';
+import { Model, Connection } from 'mongoose';
 import * as crypto from 'crypto';
 import { Order, IOrder } from '../../models/Order.model';
 import { Cart, ICart } from '../../models/Cart.model';
 import { Product, IProduct } from '../../models/Product.model';
 import { Address, IAddress } from '../../models/Address.model';
 import { Coupon, ICoupon } from '../../models/Coupon.model';
+import { Settings, ISettings } from '../../models/Settings.model';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
@@ -23,12 +24,32 @@ export class OrdersService {
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Address') private addressModel: Model<IAddress>,
     @InjectModel('Coupon') private couponModel: Model<ICoupon>,
+    @InjectModel('Settings') private settingsModel: Model<ISettings>,
+    @InjectConnection() private connection: Connection,
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
     private pdfService: PdfService,
     @Inject(forwardRef(() => PaymentsService))
     private paymentsService: PaymentsService,
   ) {}
+
+  /**
+   * Read tax rate and flat shipping from the Settings collection.
+   * Falls back to safe defaults (10% tax, ₹500 shipping) if not configured.
+   * Admin can update these via PUT /settings/bulk without a deploy.
+   */
+  private async getOrderSettings(): Promise<{ taxRate: number; shippingFlat: number }> {
+    const rows = await this.settingsModel
+      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat'] } })
+      .lean();
+    const map = new Map(rows.map((r: any) => [r.key, r.value]));
+    const taxRate = Number(map.get('order.taxRate') ?? 0.1);
+    const shippingFlat = Number(map.get('order.shippingFlat') ?? 500);
+    return {
+      taxRate: Number.isFinite(taxRate) && taxRate >= 0 ? taxRate : 0.1,
+      shippingFlat: Number.isFinite(shippingFlat) && shippingFlat >= 0 ? shippingFlat : 500,
+    };
+  }
 
   /**
    * Extract the customer ID string from an order, regardless of whether
@@ -67,12 +88,31 @@ export class OrdersService {
   }
 
   async create(userId: string, orderData: any) {
+    // Wrap the entire order creation in a MongoDB session so inventory
+    // decrements, coupon redemption, address creation, and order insert
+    // are all atomic. If any step fails the session aborts and all writes
+    // are rolled back — no stranded reservations or orphaned coupons.
+    // Note: transactions require a replica set (or Atlas). On standalone
+    // MongoDB (local dev) the session is opened but transactions aren't
+    // enforced — the rollback logic below handles that case manually.
+    const session = await this.connection.startSession();
+
+    try {
+      return await session.withTransaction(async () => {
+        return await this._createWithSession(userId, orderData, session);
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  private async _createWithSession(userId: string, orderData: any, session: any) {
     // Use cart items from orderData if provided, otherwise get from cart
     let itemsToProcess = orderData.items;
     let cart: any = null;
 
     if (!itemsToProcess || itemsToProcess.length === 0) {
-      cart = await this.cartModel.findOne({ user: userId }).populate('items.product');
+      cart = await this.cartModel.findOne({ user: userId }).populate('items.product').session(session);
       if (!cart || cart.items.length === 0) {
         throw new BadRequestException('Cart is empty');
       }
@@ -113,7 +153,7 @@ export class OrdersService {
             inventory: { $gte: item.quantity },
           },
           { $inc: { inventory: -item.quantity } },
-          { new: true },
+          { new: true, session },
         );
 
         if (!product) {
@@ -152,11 +192,14 @@ export class OrdersService {
       }
     } catch (err) {
       // Roll back any reservations we already made before the failure.
+      // The transaction abort handles this on replica sets; this is the
+      // manual fallback for standalone dev MongoDB.
       await Promise.all(
         reserved.map((r) =>
           this.productModel.updateOne(
             { _id: r.productId },
             { $inc: { inventory: r.quantity } },
+            { session },
           ),
         ),
       );
@@ -171,13 +214,15 @@ export class OrdersService {
           this.productModel.updateOne(
             { _id: r.productId },
             { $inc: { inventory: r.quantity } },
+            { session },
           ),
         ),
       );
     };
 
-    const tax = subtotal * 0.1;
-    const shipping = subtotal > 0 ? 500 : 0;
+    const { taxRate, shippingFlat } = await this.getOrderSettings();
+    const tax = subtotal * taxRate;
+    const shipping = subtotal > 0 ? shippingFlat : 0;
     let discount = 0;
     let total = 0;
 
@@ -195,7 +240,7 @@ export class OrdersService {
       const lastName = nameParts.slice(1).join(' ') || firstName;
 
       // Create address document
-      const address = await this.addressModel.create({
+      const [address] = await this.addressModel.create([{
         user: userId,
         type: 'shipping',
         firstName,
@@ -208,7 +253,7 @@ export class OrdersService {
         country: shippingAddressData.country || 'United States',
         phone: shippingAddressData.phone || '0000000000',
         isDefault: false,
-      });
+      }], { session });
 
       // Map payment method: 'card' -> 'stripe'
       let paymentMethod = orderData.paymentMethod;
@@ -236,6 +281,9 @@ export class OrdersService {
         );
       }
 
+      // Block until live rates have been fetched at least once so orders
+      // are never priced on stale static-fallback rates.
+      await this.exchangeRateService.ensureRatesLoaded();
       const exchangeRate = this.exchangeRateService.getExchangeRate(currency);
 
       // Conditionally redeem the coupon BEFORE creating the order.
@@ -268,7 +316,7 @@ export class OrdersService {
             ],
           },
           { $inc: { usedCount: 1 } },
-          { new: true },
+          { new: true, session },
         );
         if (!redeemed) {
           throw new BadRequestException(
@@ -283,24 +331,42 @@ export class OrdersService {
           );
         }
 
-        // Calculate discount based on eligible products/categories
+        // Calculate discount based on eligible products/categories.
+        // Batch-fetch all products in a single query instead of one per item
+        // to avoid N+1 performance issues on large orders.
         let eligibleSubtotal = 0;
+        const needsProductDetails =
+          (redeemed.applicableProducts && redeemed.applicableProducts.length > 0) ||
+          (redeemed.applicableCategories && redeemed.applicableCategories.length > 0);
+
+        let productsMap: Map<string, any> = new Map();
+        if (needsProductDetails) {
+          const productIds = items.map((i) => i.product);
+          const products = await this.productModel
+            .find({ _id: { $in: productIds } })
+            .select('_id category')
+            .lean();
+          products.forEach((p: any) => productsMap.set(p._id.toString(), p));
+        }
+
         for (const item of items) {
-          const product = await this.productModel.findById(item.product);
-          if (!product) continue;
-
           let isEligible = true;
-          if (redeemed.applicableProducts && redeemed.applicableProducts.length > 0) {
-            isEligible = redeemed.applicableProducts.some(
-              (pId) => pId.toString() === product._id.toString()
-            );
+          if (needsProductDetails) {
+            const product = productsMap.get(item.product.toString());
+            if (!product) { isEligible = false; }
+            else {
+              if (redeemed.applicableProducts && redeemed.applicableProducts.length > 0) {
+                isEligible = redeemed.applicableProducts.some(
+                  (pId) => pId.toString() === product._id.toString()
+                );
+              }
+              if (isEligible && redeemed.applicableCategories && redeemed.applicableCategories.length > 0) {
+                isEligible = redeemed.applicableCategories.some(
+                  (cId) => cId.toString() === product.category?.toString()
+                );
+              }
+            }
           }
-          if (isEligible && redeemed.applicableCategories && redeemed.applicableCategories.length > 0) {
-            isEligible = redeemed.applicableCategories.some(
-              (cId) => cId.toString() === product.category?.toString()
-            );
-          }
-
           if (isEligible) {
             eligibleSubtotal += item.price * item.quantity;
           }
@@ -327,7 +393,7 @@ export class OrdersService {
       const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
       const orderNumber = `ORD-${String(Date.now()).slice(-8)}-${String(orderCount + 1).padStart(4, '0')}-${randomSuffix}`;
 
-      order = await this.orderModel.create({
+      const [createdOrder] = await this.orderModel.create([{
         orderNumber,
         customer: userId,
         items,
@@ -340,27 +406,23 @@ export class OrdersService {
         shipping,
         discount,
         total,
-        // Carry the applied coupon onto the order so analytics/refunds can trace it.
         couponCode: cart?.couponCode,
-        // Persist the Stripe paymentIntentId if the client created one before
-        // calling /orders. The webhook handler uses this to mark paymentStatus
-        // when payment_intent.succeeded fires. Without it, webhooks have no
-        // way to find the order that a payment refers to.
         paymentIntentId: orderData.paymentIntentId,
         status: 'pending',
         paymentStatus: 'pending',
-      });
+      }], { session });
+      order = createdOrder;
     } catch (err) {
-      // Order/address/etc failed after we reserved stock. Give it back.
+      // Transaction abort handles rollback on replica sets. The calls below
+      // are the manual fallback for standalone dev MongoDB where transactions
+      // are no-ops. They're idempotent so safe to run either way.
       await restoreReservations();
-      // If the coupon was conditionally redeemed above but order creation
-      // then failed, decrement usedCount so the slot returns to the pool
-      // instead of being silently consumed by a non-existent order.
       if (cart?.couponCode) {
         try {
           await this.couponModel.updateOne(
             { code: cart.couponCode.toUpperCase(), usedCount: { $gt: 0 } },
             { $inc: { usedCount: -1 } },
+            { session },
           );
         } catch (decErr) {
           this.logger.warn(
@@ -391,16 +453,25 @@ export class OrdersService {
       cart.items = [];
       cart.couponCode = undefined;
       cart.couponDiscount = undefined;
-      await cart.save();
+      await cart.save({ session });
     }
 
-    // Send confirmation email
-    try {
-      const orderWithUser = await this.orderModel.findById(order._id).populate('customer');
-      await this.emailService.sendOrderConfirmationEmail((orderWithUser as any).customer.email, order);
-    } catch (error) {
-      // Error sending email
-    }
+    // Send confirmation email outside the transaction — SMTP is not
+    // transactional and we don't want a mail failure to roll back a valid order.
+    // Fire-and-forget after the transaction commits.
+    setImmediate(async () => {
+      try {
+        const orderWithUser = await this.orderModel.findById(order._id).populate('customer');
+        const customerEmail = (orderWithUser as any)?.customer?.email;
+        if (customerEmail) {
+          await this.emailService.sendOrderConfirmationEmail(customerEmail, order);
+        }
+      } catch (emailErr: any) {
+        this.logger.warn(
+          `Order confirmation email failed for order ${order._id}: ${emailErr?.message || emailErr}`,
+        );
+      }
+    });
 
     return {
       success: true,
@@ -409,21 +480,28 @@ export class OrdersService {
   }
 
   async findAll(userId: string, userRole: string, page: number = 1, limit: number = 20, status?: string) {
+    // Clamp to safe ranges to prevent memory exhaustion.
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.min(Math.max(1, limit), 100);
     const filter: any = {};
-    if (userRole !== 'admin') {
+    if (userRole === 'seller') {
+      // Sellers see orders that contain at least one of their products.
+      // Snapshot the seller ID onto each order line item so this join is cheap.
+      filter['items.seller'] = userId;
+    } else if (userRole !== 'admin') {
       filter.customer = userId;
     }
     if (status) {
       filter.status = status;
     }
 
-    const skip = (page - 1) * limit;
+    const skip = (safePage - 1) * safeLimit;
     const orders = await this.orderModel
       .find(filter)
       .populate('customer', 'name email')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit)
+      .limit(safeLimit)
       .lean();
     
     const total = await this.orderModel.countDocuments(filter);
@@ -434,10 +512,10 @@ export class OrdersService {
       success: true,
       orders: convertedOrders,
       pagination: {
-        page,
-        limit,
+        page: safePage,
+        limit: safeLimit,
         total,
-        pages: Math.ceil(total / limit),
+        pages: Math.ceil(total / safeLimit),
       },
     };
   }
@@ -453,8 +531,27 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
-    if (userRole !== 'admin' && (order.customer as any)?._id?.toString() !== userId) {
-      throw new BadRequestException('Not authorized');
+    if (userRole === 'admin') {
+      // Admin can view any order — no further check needed.
+    } else if (userRole === 'seller') {
+      // Sellers may only view orders that contain at least one of their products.
+      const sellerProducts = await this.productModel
+        .find({ seller: userId })
+        .select('_id')
+        .lean();
+      const sellerProductIds = new Set(sellerProducts.map((p: any) => p._id.toString()));
+      const hasSellerItem = (order.items as any[]).some((item: any) => {
+        const pid = item.seller?.toString() ?? item.product?.toString();
+        return pid && sellerProductIds.has(pid);
+      });
+      if (!hasSellerItem) {
+        throw new BadRequestException('Not authorized');
+      }
+    } else {
+      // Customer: must own the order.
+      if ((order.customer as any)?._id?.toString() !== userId) {
+        throw new BadRequestException('Not authorized');
+      }
     }
 
     // Convert order and its item prices first
@@ -485,7 +582,7 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
-    if (userRole !== 'admin' && order.customer.toString() !== userId) {
+    if (userRole !== 'admin' && order.customer?.toString() !== userId) {
       throw new BadRequestException('Not authorized');
     }
 
@@ -546,14 +643,28 @@ export class OrdersService {
       throw new BadRequestException(`Return window of ${returnWindowDays} days has expired for this order.`);
     }
 
-    // Process Stripe refund if there is an active payment intent ID
-    if (order.paymentIntentId) {
+    // Process refund based on payment method.
+    // Only Stripe (paymentIntentId present) supports automatic refunds.
+    // For PayPal and cash_on_delivery, reject the return request so the
+    // customer is not incorrectly shown a "refund processed" message —
+    // those methods require manual admin action via the admin panel.
+    if (order.paymentMethod === 'stripe') {
+      if (!order.paymentIntentId) {
+        throw new BadRequestException(
+          'Cannot automatically refund this Stripe order: payment intent ID is missing. Please contact support.',
+        );
+      }
       try {
         await this.paymentsService.processRefund(order.paymentIntentId, order.total, 'Customer return request');
       } catch (refundError: any) {
         this.logger.warn(`Failed to process Stripe refund for return on order ${order._id}: ${refundError.message}`);
-        // We continue anyway so the return can be processed, as admin can process Stripe refund manually
+        // Admin can trigger a manual refund from the admin panel.
       }
+    } else if (order.paymentMethod === 'paypal' || order.paymentMethod === 'cash_on_delivery') {
+      // Non-Stripe payments require manual admin refund processing.
+      // We still proceed with the return so inventory is restored and
+      // admin is notified, but we do NOT mark paymentStatus as 'refunded' yet.
+      this.logger.log(`Return for order ${order._id} (${order.paymentMethod}): awaiting manual admin refund.`);
     }
 
     // Replenish product inventory for all returned items
@@ -570,10 +681,13 @@ export class OrdersService {
       this.logger.warn(`Failed to replenish inventory on return for order ${order._id}: ${inventoryError.message}`);
     }
 
-    // Update order statuses
+    // Update order statuses. For non-Stripe payments, paymentStatus stays
+    // 'pending' until an admin manually processes the refund.
     assertOrderTransition(order.status, 'refunded');
     order.status = 'refunded';
-    order.paymentStatus = 'refunded';
+    if (order.paymentMethod === 'stripe') {
+      order.paymentStatus = 'refunded';
+    }
     await order.save();
 
     return {

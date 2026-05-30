@@ -46,8 +46,10 @@ export class ProductsController {
   @ApiQuery({ name: 'status', required: false, type: String })
   @ApiResponse({ status: 200, description: 'List of products' })
   async findAll(@Query() query: any, @Request() req: any, @Currency() currency: string) {
-    const userRole = req?.user?.role;
-    const userId = req?.user?.id;
+    // Treat unauthenticated requests as 'customer' so the service always
+    // receives a defined role and falls into the "approved products only" branch.
+    const userRole: string = req?.user?.role ?? 'customer';
+    const userId: string | undefined = req?.user?.id;
     return this.productsService.findAll(query, userRole, userId, currency);
   }
 

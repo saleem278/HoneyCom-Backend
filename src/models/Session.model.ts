@@ -104,8 +104,12 @@ export const SessionSchema: Schema = new Schema(
 // Compound index for efficient queries
 SessionSchema.index({ userId: 1, isActive: 1 });
 SessionSchema.index({ userId: 1, expiresAt: 1 });
+// Critical: jwt.strategy.ts queries by { token, isActive, expiresAt } on every request.
+// Without this compound index, Mongo uses the single token index but then scans to
+// filter isActive/expiresAt, creating O(n) work per request under high concurrency.
+SessionSchema.index({ token: 1, isActive: 1, expiresAt: 1 });
 
-// Auto-cleanup expired sessions (optional, can also be done via cron)
+// Auto-cleanup expired sessions via MongoDB TTL
 SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const Session = mongoose.model<ISession>('Session', SessionSchema);

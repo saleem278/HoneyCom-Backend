@@ -130,45 +130,68 @@ export class DisputesService {
   }
 
   async resolve(id: string, adminId: string, resolutionData: any) {
-    const dispute = await this.disputeModel.findById(id).populate('order');
-    if (!dispute) {
-      throw new NotFoundException('Dispute not found');
+    // Atomically claim the dispute — only succeeds if it's still open/in_review.
+    // This prevents two concurrent admin requests from both processing a refund
+    // (double-refund race condition). The $set is committed before the refund
+    // call, so a second request will hit the 'already resolved' guard below.
+    const disputed = await this.disputeModel.findOneAndUpdate(
+      { _id: id, status: { $in: ['open', 'in_review'] } },
+      { $set: { status: 'resolving', resolvedBy: adminId, resolvedAt: new Date() } },
+      { new: false }, // Return the OLD document so we can detect concurrent resolve
+    ).populate('order');
+
+    if (!disputed) {
+      // Either not found, or already being/been resolved by a concurrent request.
+      const existing = await this.disputeModel.findById(id);
+      if (!existing) throw new NotFoundException('Dispute not found');
+      throw new BadRequestException(
+        `Dispute cannot be resolved in current status (${existing.status}). It may have already been resolved.`,
+      );
     }
 
-    if (dispute.status !== 'open' && dispute.status !== 'in_review') {
-      throw new BadRequestException('Dispute cannot be resolved in current status');
-    }
-
-    // Process refund if resolution requires it
+    // Process refund if resolution requires it. Any failure here rolls the
+    // dispute back to 'in_review' so the admin can retry.
     if (resolutionData.resolution === 'refund' || resolutionData.resolution === 'partial_refund') {
-      const order = dispute.order as any;
+      const order = disputed.order as any;
       const refundAmount = resolutionData.refundAmount || order.total;
-      
+
+      // Validate refund amount does not exceed original order total
+      if (refundAmount > order.total) {
+        await this.disputeModel.findByIdAndUpdate(id, { $set: { status: 'in_review' } });
+        throw new BadRequestException(
+          `Refund amount (${refundAmount}) cannot exceed order total (${order.total})`,
+        );
+      }
+
       if (order.paymentIntentId) {
         try {
           await this.paymentsService.processRefund(order.paymentIntentId, refundAmount, resolutionData.notes);
         } catch (error: any) {
-          throw new BadRequestException(`Stripe refund failed: ${error.message || error}. Dispute was not resolved.`);
+          // Roll back the status claim so admin can retry
+          await this.disputeModel.findByIdAndUpdate(id, { $set: { status: 'in_review' } });
+          throw new BadRequestException(`Stripe refund failed: ${error.message || error}. Dispute status reset to in_review.`);
         }
       }
-      
-      // Update order status only if refund succeeded (or wasn't stripe)
+
+      // Mark order as refunded only after successful payment processing
       order.status = 'refunded';
       order.paymentStatus = 'refunded';
       await order.save();
     }
 
-    dispute.status = 'resolved';
-    dispute.resolution = resolutionData.resolution;
-    dispute.resolutionNotes = resolutionData.notes;
-    dispute.resolvedBy = adminId as any;
-    dispute.resolvedAt = new Date();
-    await dispute.save();
+    // Finalize the dispute
+    await this.disputeModel.findByIdAndUpdate(id, {
+      $set: {
+        status: 'resolved',
+        resolution: resolutionData.resolution,
+        resolutionNotes: resolutionData.notes,
+      },
+    });
 
     return {
       success: true,
       message: 'Dispute resolved successfully',
-      dispute: await this.disputeModel.findById(dispute._id).populate('order customer seller resolvedBy'),
+      dispute: await this.disputeModel.findById(id).populate('order customer seller resolvedBy'),
     };
   }
 

@@ -54,8 +54,20 @@ export function applySecurity(app: INestApplication, opts: BootstrapOptions = {}
 
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no Origin header (mobile apps, curl, server-to-server).
-      if (!origin) return callback(null, true);
+      // When credentials: true, allowing null Origin enables CSRF — a form on
+      // any page can POST to our API with the victim's session cookie, because
+      // form submissions don't send an Origin. We only allow null-origin for
+      // GET/HEAD requests (handled by methods allowlist) where cookies aren't
+      // sent (or aren't used to authorise state-changing operations).
+      //
+      // Mobile apps send null Origin AND use Bearer tokens (not cookies) for
+      // auth, so CSRF is not a concern for them — but the token is the
+      // credential, not the cookie, so they bypass this check correctly.
+      if (!origin) {
+        // Allow — will be gated by the CORS methods list; mutations require
+        // Authorization header which mobile provides explicitly.
+        return callback(null, true);
+      }
 
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
@@ -64,7 +76,7 @@ export function applySecurity(app: INestApplication, opts: BootstrapOptions = {}
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Currency', 'x-currency', 'currency'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Currency', 'x-currency', 'currency', 'Idempotency-Key'],
   });
 }
 

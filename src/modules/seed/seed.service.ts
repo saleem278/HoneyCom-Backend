@@ -55,6 +55,7 @@ export class SeedService {
       await this.seedOrders(users, products, addresses);
       await this.seedReviews(users, products);
       await this.seedCMS(users);
+      await this.seedSettings();
 
       this.logger.log('✅ Database seeding completed successfully!');
       return { success: true, message: 'Database seeded successfully' };
@@ -133,7 +134,15 @@ export class SeedService {
 
   private async seedUsers() {
     this.logger.log('Seeding users...');
-    const hashedPassword = await bcrypt.hash('password123', 10);
+    // Use env var so seed passwords are never committed to source. If the
+    // variable is absent, generate a random one and log it ONCE so whoever
+    // ran the seed can retrieve it. Never use a predictable default.
+    const rawPassword = process.env.SEED_USER_PASSWORD || (() => {
+      const generated = require('crypto').randomBytes(16).toString('hex');
+      this.logger.warn(`SEED_USER_PASSWORD not set — generated one-time password: ${generated}`);
+      return generated;
+    })();
+    const hashedPassword = await bcrypt.hash(rawPassword, 12);
 
     const users = [
       {
@@ -1031,6 +1040,37 @@ export class SeedService {
     ]);
 
     this.logger.log('✅ Created CMS content (pages, blog posts, media, menus, forms)');
+  }
+
+  private async seedSettings() {
+    this.logger.log('Seeding platform settings...');
+    const db = this.userModel.db;
+    const settingsCollection = db.collection('settings');
+
+    await settingsCollection.deleteMany({
+      key: { $in: ['order.taxRate', 'order.shippingFlat'] },
+    });
+
+    await settingsCollection.insertMany([
+      {
+        key: 'order.taxRate',
+        value: 0.1,
+        category: 'orders',
+        description: 'Tax rate applied to order subtotal (decimal, e.g. 0.1 = 10%)',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      {
+        key: 'order.shippingFlat',
+        value: 500,
+        category: 'orders',
+        description: 'Flat shipping fee in base currency (INR by default) applied when cart is not empty',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+
+    this.logger.log('✅ Created platform settings (tax rate, shipping)');
   }
 }
 

@@ -97,6 +97,8 @@ const OrderSchema: Schema = new Schema(
         price: {
           type: Number,
           required: true,
+          min: [0, 'Item price cannot be negative'],
+          max: [10000000, 'Item price cannot exceed 10,000,000'],
         },
         image: {
           type: String,
@@ -218,14 +220,18 @@ OrderSchema.pre('save', async function (next) {
 });
 
 OrderSchema.index({ customer: 1, createdAt: -1 });
-OrderSchema.index({ orderNumber: 1 });
-OrderSchema.index({ status: 1 });
+OrderSchema.index({ orderNumber: 1 }, { unique: true });
+OrderSchema.index({ status: 1, createdAt: -1 });
 // Sparse so non-Stripe orders (cash on delivery / paypal) don't bloat the index.
 // The webhook handler does findOne({ paymentIntentId }), which gets indexed lookups.
 OrderSchema.index({ paymentIntentId: 1 }, { sparse: true });
 // Seller-orders query: find every order containing a line item this
 // seller owns. Mongo can use a multikey index on `items.seller`.
 OrderSchema.index({ 'items.seller': 1, createdAt: -1 });
+// Coupon analytics: find all orders that used a given coupon code.
+OrderSchema.index({ couponCode: 1 }, { sparse: true });
+// Admin financial reports often filter by payment status + date.
+OrderSchema.index({ paymentStatus: 1, createdAt: -1 });
 
 export const Order = mongoose.model<IOrder>('Order', OrderSchema);
 export { OrderSchema };

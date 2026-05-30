@@ -7,23 +7,26 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
  * Note: For accessing ConfigService in decorators, we use process.env directly
  * as decorators are executed before dependency injection
  */
+// Supported currencies — must stay in sync with ExchangeRateService.
+const VALID_CURRENCIES = new Set(['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY']);
+
 export const Currency = createParamDecorator(
   (data: unknown, ctx: ExecutionContext): string => {
     const request = ctx.switchToHttp().getRequest();
-    
-    // Get default currency from environment variable
-    // Using process.env directly since decorators execute before DI
     const defaultCurrency = (process.env.BASE_CURRENCY || 'INR').toUpperCase();
-    
-    // Priority: Header > Query > Env Default > INR
-    const currency = 
-      request.headers['x-currency'] || 
-      request.headers['currency'] || 
-      request.query?.currency || 
+
+    // Priority: X-Currency header > currency header > query param > env default
+    const raw =
+      request.headers['x-currency'] ||
+      request.headers['currency'] ||
+      request.query?.currency ||
       defaultCurrency;
-    
-    const finalCurrency = (currency as string).toUpperCase();
-    
+
+    // Validate: only accept short strings that are in the allowlist.
+    // Rejects injection attempts, unknown currencies, and oversized values.
+    const candidate = typeof raw === 'string' ? raw.trim().toUpperCase().slice(0, 10) : '';
+    const finalCurrency = VALID_CURRENCIES.has(candidate) ? candidate : defaultCurrency;
+
     return finalCurrency;
   },
 );

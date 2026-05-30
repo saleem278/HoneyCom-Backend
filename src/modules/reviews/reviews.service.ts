@@ -96,8 +96,9 @@ export class ReviewsService {
       { new: true, runValidators: true }
     );
 
-    // Update product rating
-    await this.updateProductRating(review.product.toString());
+    // updateProductRating is handled by the Review model's post-save hook.
+    // Calling it here as well was causing a double recalculation.
+    // If the model hook is ever removed, re-add the call here.
 
     return {
       success: true,
@@ -128,38 +129,42 @@ export class ReviewsService {
   }
 
   async markHelpful(reviewId: string, userId: string) {
-    const review = await this.reviewModel.findById(reviewId);
-    if (!review) {
-      throw new NotFoundException('Review not found');
-    }
+    // Atomic $addToSet + $inc prevents the read-modify-write race condition
+    // where two concurrent requests both pass the "already marked" check before
+    // either has committed. $addToSet is a no-op if the value is already in
+    // the array, so this is idempotent.
+    const updated = await (this.reviewModel as any).findOneAndUpdate(
+      { _id: reviewId, helpfulUsers: { $ne: userId } },
+      {
+        $addToSet: { helpfulUsers: userId },
+        $inc: { helpful: 1 },
+      },
+      { new: true },
+    );
 
-    // Check if user already marked as helpful (assuming helpfulUsers array exists)
-    const helpfulUsers = (review as any).helpfulUsers || [];
-    if (helpfulUsers.includes(userId)) {
+    if (!updated) {
+      // Either review doesn't exist or user already marked it helpful.
+      const exists = await this.reviewModel.exists({ _id: reviewId });
+      if (!exists) throw new NotFoundException('Review not found');
       throw new BadRequestException('You have already marked this review as helpful');
     }
 
-    helpfulUsers.push(userId);
-    review.helpful = (review.helpful || 0) + 1;
-    (review as any).helpfulUsers = helpfulUsers;
-    await review.save();
-
-    return {
-      success: true,
-      review,
-    };
+    return { success: true, review: updated };
   }
 
   private async updateProductRating(productId: string) {
-    const reviews = await this.reviewModel.find({ product: productId });
-    const reviewsCount = reviews.length;
-    const rating = reviewsCount > 0 
-      ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviewsCount
-      : 0;
+    // Only count approved reviews so pending/rejected ones don't skew the score.
+    // Use aggregation to calculate atomically in a single round-trip rather than
+    // fetching all documents and computing in JS (avoids the read/write race
+    // where two concurrent reviews could overwrite each other's calculation).
+    const [result] = await this.reviewModel.aggregate([
+      { $match: { product: new (require('mongoose').Types.ObjectId)(productId), status: 'approved' } },
+      { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+    ]);
 
     await this.productModel.findByIdAndUpdate(productId, {
-      rating: rating,
-      numReviews: reviewsCount,
+      rating: result ? Number(result.avg.toFixed(1)) : 0,
+      numReviews: result ? result.count : 0,
     });
   }
 }

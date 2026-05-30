@@ -1,5 +1,8 @@
 import { Injectable, BadRequestException, Logger, Inject, forwardRef } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
+import { IWebhookEvent } from '../../models/WebhookEvent.model';
 
 @Injectable()
 export class PaymentsService {
@@ -9,7 +12,10 @@ export class PaymentsService {
   private stripe: any;
   private ordersService: any; // Will be injected via setter to avoid circular dependency
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    @InjectModel('WebhookEvent') private webhookEventModel: Model<IWebhookEvent>,
+  ) {
     // Initialize Stripe if secret key is available
     this.stripeSecretKey = this.configService.get<string>('STRIPE_SECRET_KEY') || '';
     this.stripeWebhookSecret = this.configService.get<string>('STRIPE_WEBHOOK_SECRET') || '';
@@ -29,10 +35,24 @@ export class PaymentsService {
     }
   }
 
+  // Stripe-supported currencies (subset of ISO 4217 codes). Stripe rejects
+  // unknown codes with a cryptic 400; we validate early for a clear error.
+  private static readonly SUPPORTED_CURRENCIES = new Set([
+    'USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY', 'SGD', 'HKD',
+    'CHF', 'SEK', 'NOK', 'DKK', 'MXN', 'BRL', 'AED', 'SAR', 'ZAR',
+  ]);
+
   async createPaymentIntent(amount: number, currency: string = 'INR') {
     // Validate amount
     if (amount <= 0) {
       throw new BadRequestException('Amount must be greater than 0');
+    }
+
+    const normalizedCurrency = currency.toUpperCase();
+    if (!PaymentsService.SUPPORTED_CURRENCIES.has(normalizedCurrency)) {
+      throw new BadRequestException(
+        `Unsupported currency: ${currency}. Supported: ${[...PaymentsService.SUPPORTED_CURRENCIES].join(', ')}`,
+      );
     }
 
     // Convert to cents for Stripe
@@ -43,7 +63,7 @@ export class PaymentsService {
       try {
         const paymentIntent = await this.stripe.paymentIntents.create({
           amount: amountInCents,
-          currency: currency.toUpperCase(),
+          currency: normalizedCurrency,
           automatic_payment_methods: {
             enabled: true,
           },
@@ -61,7 +81,16 @@ export class PaymentsService {
       }
     }
 
-    // Placeholder mode (for development/testing)
+    // Placeholder mode only allowed in non-production environments.
+    // In production, a missing Stripe key is a misconfiguration — not a
+    // valid operating mode. Orders created with placeholder IDs will never
+    // be confirmed by a webhook, leaving them permanently in 'pending'.
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    if (isProd) {
+      throw new BadRequestException('Payment service is not configured. Please contact support.');
+    }
+
+    this.logger.warn('Stripe not configured — returning placeholder payment intent (non-production only)');
     return {
       success: true,
       clientSecret: `placeholder_secret_${Date.now()}`,
@@ -223,6 +252,28 @@ export class PaymentsService {
    * This should be called after handleWebhook to process the event
    */
   async processWebhookEvent(event: any): Promise<{ success: boolean; message: string }> {
+    // Idempotency guard: Stripe retries webhooks on delivery failure, so the
+    // same event can arrive multiple times. We record each event ID atomically
+    // using `insertOne` — if the ID already exists (unique index), the insert
+    // throws a duplicate-key error and we skip processing. This prevents
+    // double-crediting an order or double-refunding a charge.
+    try {
+      await this.webhookEventModel.create({
+        eventId: event.id,
+        eventType: event.type,
+        processedAt: new Date(),
+      });
+    } catch (dupErr: any) {
+      if (dupErr?.code === 11000) {
+        // Duplicate key — already processed this event
+        this.logger.log(`Stripe webhook ${event.id} (${event.type}) already processed — skipping`);
+        return { success: true, message: 'Event already processed (idempotent skip)' };
+      }
+      // Any other DB error should NOT silently swallow the event — rethrow so
+      // Stripe retries and we can investigate.
+      throw dupErr;
+    }
+
     try {
       switch (event.type) {
         case 'payment_intent.succeeded':

@@ -124,28 +124,41 @@ export class EmailService {
     });
   }
 
+  private h(str: unknown): string {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#x27;');
+  }
+
   async sendProductApprovalEmail(email: string, productName: string): Promise<void> {
+    const safeName = this.h(productName);
     await this.sendEmail({
       to: email,
-      subject: `Your product "${productName}" has been approved`,
+      subject: `Your product has been approved`,
       html: `
         <h2>Product approved</h2>
-        <p>Your product <strong>${productName}</strong> has been approved and is now live on Honey Store.</p>
+        <p>Your product <strong>${safeName}</strong> has been approved and is now live on Honey Store.</p>
         <p>Customers can now find and purchase it.</p>
       `,
     });
   }
 
   async sendProductRejectionEmail(email: string, productName: string, reason?: string): Promise<void> {
-    const reasonBlock = reason
-      ? `<p><strong>Reason:</strong> ${reason}</p>`
+    const safeName = this.h(productName);
+    const safeReason = reason ? this.h(reason) : null;
+    const reasonBlock = safeReason
+      ? `<p><strong>Reason:</strong> ${safeReason}</p>`
       : '<p>Please review the listing guidelines and contact support if you have questions.</p>';
     await this.sendEmail({
       to: email,
-      subject: `Your product "${productName}" was not approved`,
+      subject: `Your product was not approved`,
       html: `
         <h2>Product not approved</h2>
-        <p>Your product <strong>${productName}</strong> was not approved for listing.</p>
+        <p>Your product <strong>${safeName}</strong> was not approved for listing.</p>
         ${reasonBlock}
       `,
     });

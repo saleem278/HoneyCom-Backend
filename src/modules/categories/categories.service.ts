@@ -10,7 +10,7 @@ export class CategoriesService {
   ) {}
 
   async findAll() {
-    const categories = await this.categoryModel.find().sort({ name: 1 });
+    const categories = await this.categoryModel.find().sort({ name: 1 }).limit(500).lean();
     return {
       success: true,
       categories,

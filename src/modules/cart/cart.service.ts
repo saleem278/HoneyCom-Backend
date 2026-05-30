@@ -81,10 +81,13 @@ export class CartService {
       }
     }
 
-    // Check minimum purchase
+    // Check minimum purchase. If cart drops below the threshold (e.g. user
+    // removed items), silently remove the coupon. The cart response includes
+    // `couponRemoved: true` so the client can show a toast.
     if (coupon.minPurchase && totalSubtotal < coupon.minPurchase) {
       cart.couponCode = undefined;
       cart.couponDiscount = 0;
+      (cart as any).__couponRemovedReason = `Coupon removed: cart total is below the minimum purchase of ${coupon.minPurchase}`;
       return;
     }
 
@@ -180,13 +183,16 @@ export class CartService {
     if (cart.couponCode && cart.couponDiscount) {
       cartObj.coupon = {
         code: cart.couponCode,
-        discount: discount, // Converted discount
+        discount: discount,
       };
     }
+
+    const couponRemovedReason = (cart as any).__couponRemovedReason;
 
     return {
       success: true,
       cart: cartObj,
+      ...(couponRemovedReason ? { couponRemoved: true, couponRemovedReason } : {}),
     };
   }
 

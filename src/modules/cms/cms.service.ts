@@ -145,19 +145,19 @@ export class CmsService {
       throw new NotFoundException('Page not found');
     }
 
-    // Update slug if title changed
-    if (data.title && data.title !== page.title && !data.slug) {
-      data.slug = data.title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '');
-    }
+    // Never auto-regenerate a slug when the title changes — the existing
+    // slug may already be indexed by search engines and live in customer
+    // emails. Silently replacing it would break those links. If the caller
+    // wants a new slug they must provide it explicitly in `data.slug`.
 
-    // Check slug uniqueness if changed
+    // Check slug uniqueness if caller explicitly provides a new one
     if (data.slug && data.slug !== page.slug) {
-      const existingPage = await this.pageModel.findOne({ slug: data.slug });
+      const existingPage = await this.pageModel.findOne({
+        slug: data.slug,
+        _id: { $ne: id },
+      });
       if (existingPage) {
-        throw new BadRequestException('Page with this slug already exists');
+        throw new BadRequestException('A page with this slug already exists');
       }
     }
 
@@ -247,19 +247,18 @@ export class CmsService {
       throw new NotFoundException('Blog post not found');
     }
 
-    // Update slug if title changed
-    if (data.title && data.title !== post.title && !data.slug) {
-      data.slug = data.title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/(^-|-$)/g, '');
-    }
+    // Do NOT auto-regenerate slug on title change — it breaks existing links,
+    // search engine indexes, and customer-bookmarked URLs. Caller must supply
+    // an explicit slug if they want to change it.
 
-    // Check slug uniqueness if changed
+    // Check uniqueness only if caller provides a new slug
     if (data.slug && data.slug !== post.slug) {
-      const existingPost = await this.blogModel.findOne({ slug: data.slug });
+      const existingPost = await this.blogModel.findOne({
+        slug: data.slug,
+        _id: { $ne: id },
+      });
       if (existingPost) {
-        throw new BadRequestException('Blog post with this slug already exists');
+        throw new BadRequestException('A blog post with this slug already exists');
       }
     }
 

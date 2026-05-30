@@ -378,8 +378,9 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
     
-    // Get wishlist products (assuming wishlist is stored as array of product IDs in user)
-    const wishlistIds = (user as any).wishlist || [];
+    // Get wishlist products. Limit to 200 to prevent memory exhaustion on
+    // users who accumulate large wishlists. Paginate if needed in future.
+    const wishlistIds = ((user as any).wishlist || []).slice(0, 200);
     const products = await this.productModel
       .find({ _id: { $in: wishlistIds }, status: 'approved' })
       .populate('category', 'name slug')

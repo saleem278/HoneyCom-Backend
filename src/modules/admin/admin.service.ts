@@ -214,32 +214,28 @@ export class AdminService {
       status: 'pending',
     });
     
-    // Calculate total revenue
+    // Calculate total revenue (all time, delivered orders only)
     const totalRevenue = await this.orderModel.aggregate([
       { $match: { status: 'delivered' } },
       { $group: { _id: null, total: { $sum: '$total' } } },
     ]);
 
-    // Calculate monthly revenue (current month)
+    // Calculate monthly revenue (current calendar month)
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
     const monthlyRevenue = await this.orderModel.aggregate([
-      { 
-        $match: { 
-          status: 'delivered',
-          createdAt: { $gte: startOfMonth }
-        } 
-      },
+      { $match: { status: 'delivered', createdAt: { $gte: startOfMonth } } },
       { $group: { _id: null, total: { $sum: '$total' } } },
     ]);
 
-    // Get recent orders (last 5)
+    // Get recent orders (last 5, any status so admins see new pending orders)
     const recentOrders = await this.orderModel
-      .find()
+      .find({})
       .sort({ createdAt: -1 })
       .limit(5)
       .populate('customer', 'name email')
+      .select('orderNumber customer total status createdAt paymentStatus')
       .lean();
 
     // Get top products (by sales/revenue)
@@ -384,8 +380,8 @@ export class AdminService {
   }
 
   async updateUserStatus(userId: string, status: 'active' | 'inactive' | 'suspended') {
-    if (!['active', 'suspended'].includes(status)) {
-      throw new BadRequestException('Invalid status. Must be "active" or "suspended"');
+    if (!['active', 'inactive', 'suspended'].includes(status)) {
+      throw new BadRequestException('Invalid status. Must be "active", "inactive", or "suspended"');
     }
 
     const user = await this.userModel.findById(userId);
@@ -468,10 +464,12 @@ export class AdminService {
   }
 
   async getPendingSellers() {
-    const sellers = await this.userModel.find({
-      role: 'seller',
-      'sellerInfo.approvalStatus': 'pending',
-    }).select('-password');
+    const sellers = await this.userModel
+      .find({ role: 'seller', 'sellerInfo.approvalStatus': 'pending' })
+      .select('-password')
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
     return {
       success: true,
       sellers,

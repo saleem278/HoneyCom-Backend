@@ -224,12 +224,16 @@ export class SellerService {
     const products = await this.productModel.find({ seller: sellerId }).select('_id');
     const productIds = products.map(p => p._id);
 
-    const matchQuery: any = { 'items.product': { $in: productIds } };
-    if (startDate || endDate) {
-      matchQuery.createdAt = {};
-      if (startDate) matchQuery.createdAt.$gte = startDate;
-      if (endDate) matchQuery.createdAt.$lte = endDate;
-    }
+    // Default to last 90 days when no date range is provided to prevent
+    // full-table scans on large order collections.
+    const defaultStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const effectiveStart = startDate ?? defaultStart;
+    const effectiveEnd = endDate ?? new Date();
+
+    const matchQuery: any = {
+      'items.product': { $in: productIds },
+      createdAt: { $gte: effectiveStart, $lte: effectiveEnd },
+    };
 
     // Common pipeline prefix: only delivered orders that include this seller's
     // products, then $unwind so each line item becomes its own document, then

@@ -1,6 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsString, MinLength, IsOptional, IsEnum } from 'class-validator';
+import { IsEmail, IsString, MinLength, IsOptional } from 'class-validator';
 
+// `role` is intentionally absent — self-registration always creates customers.
+// Sellers use /auth/register/seller; admins are provisioned by existing admins.
 export class RegisterDto {
   @ApiProperty({ example: 'John Doe' })
   @IsString()
@@ -20,10 +22,5 @@ export class RegisterDto {
   @IsOptional()
   @IsString()
   phone?: string;
-
-  @ApiProperty({ enum: ['customer', 'seller', 'admin'], default: 'customer', required: false })
-  @IsOptional()
-  @IsEnum(['customer', 'seller', 'admin'])
-  role?: string;
 }
 

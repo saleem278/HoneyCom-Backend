@@ -34,9 +34,8 @@ export class AuthService {
     email: string;
     password: string;
     phone?: string;
-    role?: string;
   }) {
-    const { name, email, password, phone, role } = registerDto;
+    const { name, email, password, phone } = registerDto;
 
     // Check if user exists
     const userExists = await this.userModel.findOne({ email });
@@ -48,12 +47,13 @@ export class AuthService {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Create user
+    // Create user — role is always 'customer' for self-registration.
+    // Sellers use /auth/register/seller; admins are created by existing admins.
     const user = await this.userModel.create({
       name,
       email,
       password: hashedPassword,
-      role: role || 'customer',
+      role: 'customer',
       emailVerified: false,
     });
 
@@ -308,7 +308,11 @@ export class AuthService {
     }
 
     const otp = (Math.floor(100000 + Math.random() * 900000)).toString();
-    user.phoneLoginOtp = otp;
+    // Hash before storage — a DB breach must not expose usable OTPs.
+    // bcrypt cost 8 is enough for a 6-digit code; we don't need the full 10
+    // because the search space is tiny and OTPs expire in 10 minutes anyway.
+    const otpHash = await bcrypt.hash(otp, 8);
+    user.phoneLoginOtp = otpHash;
     user.phoneLoginOtpExpire = new Date(Date.now() + 10 * 60 * 1000);
     // Issuing a fresh OTP resets attempt counter and any prior lockout. The
     // legitimate user may have triggered lockout themselves by mistyping; a
@@ -382,8 +386,13 @@ export class AuthService {
       );
     }
 
+    // OTP is stored as bcrypt hash — use constant-time compare.
+    const otpHashMatch =
+      candidate.phoneLoginOtp
+        ? await bcrypt.compare(otp, candidate.phoneLoginOtp)
+        : false;
     const otpMatches =
-      candidate.phoneLoginOtp === otp &&
+      otpHashMatch &&
       !!candidate.phoneLoginOtpExpire &&
       candidate.phoneLoginOtpExpire > now;
 
@@ -410,6 +419,16 @@ export class AuthService {
         );
       }
       throw new UnauthorizedException('Invalid or expired OTP');
+    }
+
+    // Apply the same status gate as the email/password login path.
+    if (candidate.status === 'suspended') {
+      throw new UnauthorizedException('Your account has been suspended. Contact support.');
+    }
+    if (candidate.status === 'inactive') {
+      throw new UnauthorizedException(
+        'Your account is pending approval. You will be notified once it has been reviewed.',
+      );
     }
 
     // Successful login — clear the OTP, the attempt counter, and any lock.
@@ -517,7 +536,8 @@ export class AuthService {
       user = await this.userModel.create({
         name: userData.name,
         email: userData.email,
-        password: crypto.randomBytes(32).toString('hex'), // Random password for social login users
+        password: crypto.randomBytes(32).toString('hex'),
+        role: 'customer',
         emailVerified: true,
         socialLogin: {
           provider,
@@ -601,8 +621,11 @@ export class AuthService {
 
     try {
       await this.emailService.sendPasswordResetEmail(email, rawToken);
-    } catch (error) {
-      throw new BadRequestException('Error sending email');
+    } catch (emailErr: any) {
+      // Log but don't reveal email delivery failure — the reset token is saved,
+      // so an admin can resend manually. Throwing here would leak whether the
+      // email address is registered (successful save = real address).
+      this.logger.error(`Failed to send password reset email to ${email}: ${emailErr?.message || emailErr}`);
     }
 
     return {
@@ -867,14 +890,15 @@ export class AuthService {
       // Recovery code path. Strip whitespace and hyphens for input
       // tolerance, then linear-scan the hashes. The list is small
       // (8 codes by default) so an O(n) bcrypt-compare is fine.
+      // Recovery codes are stored as bcrypt hashes of the plain
+      // uppercase string WITHOUT hyphens (matching generateRecoveryCodes).
+      // We normalize the user input to the same format before comparing.
       const normalized = trimmed.replace(/[-\s]/g, '').toUpperCase();
       const stored = user.twoFactor.recoveryCodes || [];
       let matchedIdx = -1;
       for (let i = 0; i < stored.length; i++) {
-        // Hashed codes were stored with hyphens; re-add to compare.
-        const candidate = `${normalized.slice(0, 4)}-${normalized.slice(4, 8)}-${normalized.slice(8, 12)}-${normalized.slice(12, 16)}`;
         // eslint-disable-next-line no-await-in-loop
-        if (await bcrypt.compare(candidate, stored[i])) {
+        if (await bcrypt.compare(normalized, stored[i])) {
           matchedIdx = i;
           break;
         }
@@ -1063,6 +1087,19 @@ export class AuthService {
     );
 
     return { success: true, message: 'All other sessions revoked successfully' };
+  }
+
+  /**
+   * Revoke a session by raw token value (used by logout endpoint).
+   * Hashes the token before looking it up so the plain value is never
+   * stored — consistent with how createSession stores it.
+   */
+  async revokeSessionByToken(token: string): Promise<void> {
+    const hashedToken = this.hashToken(token);
+    await this.sessionModel.updateOne(
+      { token: hashedToken, isActive: true },
+      { isActive: false, revokedAt: new Date() },
+    );
   }
 
   /**

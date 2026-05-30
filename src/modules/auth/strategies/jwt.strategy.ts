@@ -114,20 +114,28 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Account is inactive');
     }
 
-    // Update session activity
-    session.lastActivity = new Date();
-    await session.save();
+    // Update session activity with a targeted updateOne to avoid full-document
+    // write lock contention under high concurrency. session.save() serializes
+    // the entire document and acquires a write lock — at 100k+ RPS this creates
+    // a thundering-herd on the sessions collection.
+    await this.sessionModel.updateOne(
+      { _id: session._id },
+      { $set: { lastActivity: new Date() } },
+    );
+
+    // Read impersonator from the SESSION RECORD, not the JWT payload.
+    // The JWT is signed but its claims are visible to anyone who decodes it;
+    // an attacker could forge a token with `impersonator: someAdminId` to
+    // manipulate audit trails or privilege checks. The session row is
+    // server-only and was written by trusted code at login time.
+    const impersonator =
+      session.purpose === 'impersonation' ? session.impersonator : undefined;
 
     return {
       id: user._id.toString(),
       email: user.email,
       role: user.role,
-      // Pass-through the impersonator id when present in the JWT.
-      // Downstream code (audit trail, banner rendering) uses it to
-      // distinguish "admin acting as themselves" from "admin acting
-      // through a target user". Plain logins set this to undefined,
-      // so the field is harmless when absent.
-      impersonator: payload.impersonator,
+      impersonator,
     };
   }
 }

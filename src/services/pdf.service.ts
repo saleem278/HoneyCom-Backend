@@ -21,20 +21,41 @@ import { uploadBufferToCloudinary } from './fileUpload.service';
 export class PdfService {
   private readonly logger = new Logger(PdfService.name);
 
+  // Maximum PDF size we'll hold in memory before aborting. 10 MB is
+  // enough for any legitimate invoice; beyond this is a DoS attempt.
+  private static readonly MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 MB
+  // Maximum order line items we'll render — prevents huge loops.
+  private static readonly MAX_INVOICE_ITEMS = 500;
+
   /**
    * Render the PDFKit document into a Buffer. Resolves once the doc
    * end event fires. Errors during write surface as rejections.
+   * Aborts if the generated buffer would exceed MAX_PDF_BYTES.
    */
   private renderToBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
-      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      let totalBytes = 0;
+      doc.on('data', (chunk: Buffer) => {
+        totalBytes += chunk.length;
+        if (totalBytes > PdfService.MAX_PDF_BYTES) {
+          doc.destroy();
+          reject(new Error(`PDF exceeded maximum size of ${PdfService.MAX_PDF_BYTES} bytes`));
+          return;
+        }
+        chunks.push(chunk);
+      });
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
     });
   }
 
   async generateInvoice(invoiceData: any): Promise<string> {
+    if (invoiceData?.items?.length > PdfService.MAX_INVOICE_ITEMS) {
+      throw new Error(
+        `Invoice cannot contain more than ${PdfService.MAX_INVOICE_ITEMS} line items`,
+      );
+    }
     const doc = new PDFDocument({ margin: 50 });
     const bufferPromise = this.renderToBuffer(doc);
 
