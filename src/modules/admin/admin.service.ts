@@ -615,7 +615,8 @@ export class AdminService {
     };
   }
 
-  async getPlatformAnalytics(startDate?: Date, endDate?: Date) {
+  async getPlatformAnalytics(startDate?: Date, endDate?: Date, currency: string = 'INR') {
+    const rate = this.exchangeRateService.getExchangeRate(currency.toUpperCase() as Currency);
     const matchQuery: any = {};
     if (startDate || endDate) {
       matchQuery.createdAt = {};
@@ -739,11 +740,20 @@ export class AdminService {
     return {
       success: true,
       analytics: {
-        dailyAnalytics,
+        dailyAnalytics: dailyAnalytics.map((d: any) => ({
+          ...d,
+          revenue: Number((d.revenue * rate).toFixed(2)),
+        })),
         userGrowth,
         productGrowth,
-        topSellers,
-        categoryPerformance,
+        topSellers: topSellers.map((t: any) => ({
+          ...t,
+          revenue: Number((t.revenue * rate).toFixed(2)),
+        })),
+        categoryPerformance: categoryPerformance.map((c: any) => ({
+          ...c,
+          revenue: Number((c.revenue * rate).toFixed(2)),
+        })),
       },
     };
   }

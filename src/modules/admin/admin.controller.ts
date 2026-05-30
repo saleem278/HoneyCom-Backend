@@ -97,12 +97,13 @@ export class AdminController {
   @ApiOperation({ summary: 'Get platform analytics' })
   @ApiResponse({ status: 200, description: 'Platform analytics data' })
   async getPlatformAnalytics(
+    @Currency() currency: string,
     @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string
+    @Query('endDate') endDate?: string,
   ) {
     const start = startDate ? new Date(startDate) : undefined;
     const end = endDate ? new Date(endDate) : undefined;
-    return this.adminService.getPlatformAnalytics(start, end);
+    return this.adminService.getPlatformAnalytics(start, end, currency);
   }
 
   @Get('reports/financial')
