@@ -1,10 +1,10 @@
 import multer from 'multer';
 import type { Request } from 'express';
 import { v2 as cloudinary } from 'cloudinary';
-// multer-storage-cloudinary ships no types — quietly silence the import.
+// multer-storage-cloudinary exports a factory (module.exports = fn), not a class.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — no type defs published.
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
+import createCloudinaryStorage from 'multer-storage-cloudinary';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -18,7 +18,7 @@ cloudinary.config({
 
 // Configure storage. `req`/`file` are unused but the signature must match what
 // multer-storage-cloudinary expects.
-const storage = new CloudinaryStorage({
+const storage = createCloudinaryStorage({
   cloudinary: cloudinary,
   params: async (_req: Request, _file: Express.Multer.File) => {
     return {
