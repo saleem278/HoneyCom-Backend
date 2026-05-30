@@ -36,16 +36,20 @@ export class PdfService {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
       let totalBytes = 0;
+      let aborted = false;
       doc.on('data', (chunk: Buffer) => {
         totalBytes += chunk.length;
         if (totalBytes > PdfService.MAX_PDF_BYTES) {
-          doc.destroy();
+          aborted = true;
+          doc.end();
           reject(new Error(`PDF exceeded maximum size of ${PdfService.MAX_PDF_BYTES} bytes`));
           return;
         }
         chunks.push(chunk);
       });
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('end', () => {
+        if (!aborted) resolve(Buffer.concat(chunks));
+      });
       doc.on('error', reject);
     });
   }
