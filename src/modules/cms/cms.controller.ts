@@ -5,6 +5,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import { Public } from '../auth/decorators/public.decorator';
 import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('CMS')
@@ -191,6 +192,7 @@ export class CmsController {
   }
 
   @Post('forms/:id/submit')
+  @Public()
   @ApiOperation({ summary: 'Submit form data' })
   async submitForm(@Param('id') id: string, @Body() data: any) {
     return this.cmsService.submitForm(id, data);
@@ -229,6 +231,7 @@ export class CmsController {
 
   // ========== SITEMAP ==========
   @Get('sitemap')
+  @Public()
   @UseGuards(OptionalJwtAuthGuard) // Public endpoint for SEO
   @ApiOperation({ summary: 'Generate sitemap.xml (public)' })
   @ApiResponse({ status: 200, description: 'Sitemap XML' })
@@ -238,6 +241,7 @@ export class CmsController {
 
   // ========== ROBOTS.TXT ==========
   @Get('robots-txt')
+  @Public()
   @UseGuards(OptionalJwtAuthGuard) // Public endpoint for SEO
   @ApiOperation({ summary: 'Get robots.txt content (public)' })
   @ApiResponse({ status: 200, description: 'Robots.txt content' })
