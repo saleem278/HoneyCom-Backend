@@ -91,6 +91,12 @@ export class ProductsService {
         filter.rating = { $gte: parseFloat(query.rating) };
       }
 
+      // Featured filter — homepage "featured products" rail. Accepts
+      // ?featured=true (string from query string).
+      if (query.featured === 'true' || query.featured === true) {
+        filter.featured = true;
+      }
+
       // Escape user input before embedding in $regex to prevent ReDoS.
       // Malicious patterns like "(a+)+" cause exponential backtracking in MongoDB.
       if (query.search) {
@@ -100,6 +106,20 @@ export class ProductsService {
           { description: { $regex: safeSearch, $options: 'i' } },
         ];
       }
+
+      // Map the public `sort` param to a Mongo sort spec. Defaults to newest.
+      // Note: 'popular' approximates by numReviews then rating; 'discount'
+      // can't be sorted in Mongo without a computed field, so we sort by
+      // rating as a reasonable proxy and rely on the discount badge in the UI.
+      const sortMap: Record<string, Record<string, 1 | -1>> = {
+        price_asc: { price: 1 },
+        price_desc: { price: -1 },
+        rating: { rating: -1, numReviews: -1 },
+        newest: { createdAt: -1 },
+        popular: { numReviews: -1, rating: -1 },
+        discount: { rating: -1 },
+      };
+      const sortSpec = sortMap[query.sort as string] || { createdAt: -1 };
 
       // Use regular populate but handle errors gracefully
       const products = await this.productModel
@@ -118,7 +138,7 @@ export class ProductsService {
         })
         .skip(skip)
         .limit(limit)
-        .sort({ createdAt: -1 })
+        .sort(sortSpec)
         .lean();
 
       const total = await this.productModel.countDocuments(filter);

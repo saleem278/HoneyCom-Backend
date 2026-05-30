@@ -44,6 +44,8 @@ export class ProductsController {
   @ApiQuery({ name: 'minPrice', required: false, type: Number })
   @ApiQuery({ name: 'maxPrice', required: false, type: Number })
   @ApiQuery({ name: 'status', required: false, type: String })
+  @ApiQuery({ name: 'featured', required: false, type: Boolean })
+  @ApiQuery({ name: 'sort', required: false, enum: ['price_asc', 'price_desc', 'rating', 'newest', 'popular', 'discount'] })
   @ApiResponse({ status: 200, description: 'List of products' })
   async findAll(@Query() query: any, @Request() req: any, @Currency() currency: string) {
     // Treat unauthenticated requests as 'customer' so the service always

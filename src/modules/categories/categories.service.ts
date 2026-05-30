@@ -9,8 +9,16 @@ export class CategoriesService {
     @InjectModel('Category') private categoryModel: Model<ICategory>,
   ) {}
 
-  async findAll() {
-    const categories = await this.categoryModel.find().sort({ name: 1 }).limit(500).lean();
+  async findAll(filters?: { featured?: string; status?: string }) {
+    const query: Record<string, unknown> = {};
+    if (filters?.featured === 'true') query.featured = true;
+    if (filters?.status) query.status = filters.status;
+    const categories = await this.categoryModel
+      .find(query)
+      // displayOrder first (storefront-controlled order), then name as tiebreak
+      .sort({ displayOrder: 1, name: 1 })
+      .limit(500)
+      .lean();
     return {
       success: true,
       categories,
