@@ -215,6 +215,48 @@ export class AdminController {
     return result;
   }
 
+  // -------- Order management --------
+
+  @Put('orders/:id')
+  @ApiOperation({ summary: 'Admin: update order status / tracking number' })
+  async adminUpdateOrder(
+    @Param('id') id: string,
+    @Body() body: { status?: string; trackingNumber?: string; note?: string },
+  ) {
+    return this.adminService.adminUpdateOrder(id, body);
+  }
+
+  @Post('orders/bulk-status')
+  @ApiOperation({ summary: 'Admin: bulk update order status' })
+  async adminBulkUpdateOrders(@Body() body: { ids: string[]; status: string }) {
+    return this.adminService.adminBulkUpdateOrders(body.ids, body.status);
+  }
+
+  // -------- User editing --------
+
+  @Put('users/:id/edit')
+  @ApiOperation({ summary: 'Admin: edit user name/email/role/phone' })
+  async adminEditUser(
+    @Param('id') id: string,
+    @Body() body: { name?: string; email?: string; role?: string; phone?: string },
+  ) {
+    return this.adminService.adminEditUser(id, body);
+  }
+
+  // -------- Bulk product actions --------
+
+  @Post('products/bulk')
+  @ApiOperation({ summary: 'Admin: bulk approve/reject/feature products' })
+  async adminBulkProducts(
+    @Body() body: {
+      ids: string[];
+      action: 'approve' | 'reject' | 'feature' | 'unfeature';
+      reason?: string;
+    },
+  ) {
+    return this.adminService.adminBulkProducts(body.ids, body.action, body.reason);
+  }
+
   // -------- Notifications --------
 
   @Get('notifications')

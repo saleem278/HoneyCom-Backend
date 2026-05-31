@@ -11,6 +11,7 @@ import {
   IImpersonationEvent,
 } from '../../models/ImpersonationEvent.model';
 import { INotification } from '../../models/Notification.model';
+import { IOrder } from '../../models/Order.model';
 import { PaymentsService } from '../payments/payments.service';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService, Currency } from '../../services/exchange-rate.service';
@@ -28,6 +29,7 @@ export class AdminService {
     @InjectModel('Category') private categoryModel: Model<ICategory>,
     @InjectModel('ImpersonationEvent') private impersonationModel: Model<IImpersonationEvent>,
     @InjectModel('Notification') private notificationModel: Model<INotification>,
+    @InjectModel('Order') private orderModel: Model<IOrder>,
     private paymentsService: PaymentsService,
     private emailService: EmailService,
     private jwtService: JwtService,
@@ -838,6 +840,79 @@ export class AdminService {
         })),
       },
     };
+  }
+
+  // -------- Order management --------
+
+  async adminUpdateOrder(
+    id: string,
+    data: { status?: string; trackingNumber?: string; note?: string },
+  ) {
+    const order = await this.orderModel.findById(id);
+    if (!order) throw new NotFoundException('Order not found');
+
+    const update: Record<string, unknown> = {};
+    if (data.status) update.status = data.status;
+    if (data.trackingNumber !== undefined) update.trackingNumber = data.trackingNumber;
+    if (data.note !== undefined) update.note = data.note;
+
+    const updated = await this.orderModel.findByIdAndUpdate(id, update, { new: true });
+    return { success: true, order: updated };
+  }
+
+  async adminBulkUpdateOrders(ids: string[], status: string) {
+    const result = await this.orderModel.updateMany(
+      { _id: { $in: ids } },
+      { status },
+    );
+    return { success: true, modified: result.modifiedCount };
+  }
+
+  // -------- User editing --------
+
+  async adminEditUser(
+    id: string,
+    data: { name?: string; email?: string; role?: string; phone?: string },
+  ) {
+    const user = await this.userModel.findById(id);
+    if (!user) throw new NotFoundException('User not found');
+
+    const allowedFields = ['name', 'email', 'role', 'phone'] as const;
+    const update: Record<string, unknown> = {};
+    for (const k of allowedFields) {
+      if (data[k] !== undefined) update[k] = data[k];
+    }
+
+    // Prevent privilege escalation: admin can change role, but not to 'admin'
+    // unless changing FROM admin (de-escalation is fine).
+    if (update.role === 'admin' && user.role !== 'admin') {
+      throw new BadRequestException('Cannot promote a user to admin via API');
+    }
+
+    const updated = await this.userModel
+      .findByIdAndUpdate(id, update, { new: true, runValidators: true })
+      .select('-password -refreshToken');
+    return { success: true, user: updated };
+  }
+
+  // -------- Bulk product actions --------
+
+  async adminBulkProducts(
+    ids: string[],
+    action: 'approve' | 'reject' | 'feature' | 'unfeature',
+    reason?: string,
+  ) {
+    let update: Record<string, unknown> = {};
+    if (action === 'approve') update = { status: 'active' };
+    else if (action === 'reject') update = { status: 'inactive', rejectionReason: reason };
+    else if (action === 'feature') update = { featured: true };
+    else if (action === 'unfeature') update = { featured: false };
+
+    const result = await this.productModel.updateMany(
+      { _id: { $in: ids } },
+      update,
+    );
+    return { success: true, modified: result.modifiedCount };
   }
 
   // -------- Notification management --------
