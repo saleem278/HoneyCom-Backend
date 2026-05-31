@@ -146,6 +146,14 @@ export class SeedService {
 
     const users = [
       {
+        name: 'Super Admin',
+        email: 'superadmin@honeycom.in',
+        password: hashedPassword,
+        role: 'superadmin',
+        status: 'active',
+        emailVerified: true,
+      },
+      {
         name: 'Admin User',
         email: 'admin@honeycom.in',
         password: hashedPassword,

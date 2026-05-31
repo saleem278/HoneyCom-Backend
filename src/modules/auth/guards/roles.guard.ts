@@ -29,6 +29,8 @@ export class RolesGuard implements CanActivate {
     if (!user) {
       return false;
     }
+    // superadmin passes every role check — they have full platform access.
+    if (user.role === 'superadmin') return true;
     return requiredRoles.some((role) => user.role === role);
   }
 }

@@ -4,7 +4,9 @@ import mongoose, { Schema, Document } from 'mongoose';
 // the IUser type reference this so they cannot drift. Clients (mobile + web)
 // must use these exact strings — note that the CMS role is 'contentEditor'
 // (camelCase), not 'content_editor' or 'cms'.
-export const USER_ROLES = ['customer', 'seller', 'admin', 'contentEditor'] as const;
+// superadmin has all admin powers plus: manage other admins, access all settings,
+// and cannot be locked out. Only 1 superadmin should exist per installation.
+export const USER_ROLES = ['customer', 'seller', 'admin', 'superadmin', 'contentEditor'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
 export interface IUser extends Document {
