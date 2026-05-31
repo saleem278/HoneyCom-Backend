@@ -10,6 +10,7 @@ import { GoogleStrategy } from './strategies/google.strategy';
 import { FacebookStrategy } from './strategies/facebook.strategy';
 import { User, UserSchema } from '../../models/User.model';
 import { Session, SessionSchema } from '../../models/Session.model';
+import { Settings, SettingsSchema } from '../../models/Settings.model';
 import { EmailService } from '../../services/email.service';
 import { SmsService } from '../../services/sms.service';
 
@@ -18,6 +19,7 @@ import { SmsService } from '../../services/sms.service';
     MongooseModule.forFeature([
       { name: 'User', schema: UserSchema },
       { name: 'Session', schema: SessionSchema },
+      { name: 'Settings', schema: SettingsSchema },
     ]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({

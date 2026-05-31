@@ -758,7 +758,9 @@ export class AuthService {
     await user.save();
 
     const accountName = user.email || (user.phone ? user.phone : `user-${user._id}`);
-    const issuer = process.env.TOTP_ISSUER || 'Dayam';
+    // TOTP issuer shown in authenticator apps. Override via TOTP_ISSUER env var.
+    // Falls back to APP_NAME env var, then a neutral default.
+    const issuer = process.env.TOTP_ISSUER || process.env.APP_NAME || 'My Store';
     const otpauthUrl = buildOtpauthUrl({ secret, accountName, issuer });
 
     return {
