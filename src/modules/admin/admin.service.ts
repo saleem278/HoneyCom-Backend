@@ -10,6 +10,7 @@ import {
   ImpersonationEvent,
   IImpersonationEvent,
 } from '../../models/ImpersonationEvent.model';
+import { INotification } from '../../models/Notification.model';
 import { PaymentsService } from '../payments/payments.service';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService, Currency } from '../../services/exchange-rate.service';
@@ -26,6 +27,7 @@ export class AdminService {
     @InjectModel('Order') private orderModel: Model<IOrder>,
     @InjectModel('Category') private categoryModel: Model<ICategory>,
     @InjectModel('ImpersonationEvent') private impersonationModel: Model<IImpersonationEvent>,
+    @InjectModel('Notification') private notificationModel: Model<INotification>,
     private paymentsService: PaymentsService,
     private emailService: EmailService,
     private jwtService: JwtService,
@@ -836,6 +838,65 @@ export class AdminService {
         })),
       },
     };
+  }
+
+  // -------- Notification management --------
+
+  async getNotifications(page = 1, limit = 20, type?: string) {
+    const filter: Record<string, unknown> = {};
+    if (type) filter.type = type;
+    const skip = (page - 1) * limit;
+    const [notifications, total] = await Promise.all([
+      this.notificationModel
+        .find(filter)
+        .populate('user', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      this.notificationModel.countDocuments(filter),
+    ]);
+    return {
+      success: true,
+      notifications,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    };
+  }
+
+  async broadcastNotification(data: {
+    title: string;
+    message: string;
+    type: 'promotion' | 'system' | 'other';
+    targetRole?: string;
+    userIds?: string[];
+  }) {
+    let userQuery: Record<string, unknown> = { status: 'active' };
+    if (data.userIds && data.userIds.length > 0) {
+      userQuery = { _id: { $in: data.userIds } };
+    } else if (data.targetRole) {
+      userQuery = { status: 'active', role: data.targetRole };
+    }
+
+    const users = await this.userModel.find(userQuery).select('_id').lean();
+    if (users.length === 0) {
+      return { success: true, sent: 0 };
+    }
+
+    const docs = users.map((u) => ({
+      user: u._id,
+      title: data.title,
+      message: data.message,
+      type: data.type,
+      sentAt: new Date(),
+    }));
+
+    await this.notificationModel.insertMany(docs);
+    return { success: true, sent: docs.length };
+  }
+
+  async deleteNotification(id: string) {
+    const result = await this.notificationModel.findByIdAndDelete(id);
+    if (!result) throw new NotFoundException('Notification not found');
+    return { success: true, message: 'Notification deleted' };
   }
 }
 

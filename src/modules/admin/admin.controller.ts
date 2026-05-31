@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Param, Body, UseGuards, Request, Post, Query, Res, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Put, Delete, Param, Body, UseGuards, Request, Post, Query, Res, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -213,6 +213,42 @@ export class AdminController {
     res.cookie(SESSION_COOKIE_NAME, result.token, sessionCookieOptions(60 * 60 * 1000));
 
     return result;
+  }
+
+  // -------- Notifications --------
+
+  @Get('notifications')
+  @ApiOperation({ summary: 'List all platform notifications' })
+  async getNotifications(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('type') type?: string,
+  ) {
+    return this.adminService.getNotifications(
+      parseInt(page || '', 10) || 1,
+      parseInt(limit || '', 10) || 20,
+      type,
+    );
+  }
+
+  @Post('notifications/broadcast')
+  @ApiOperation({ summary: 'Broadcast notification to users' })
+  async broadcastNotification(
+    @Body() body: {
+      title: string;
+      message: string;
+      type: 'promotion' | 'system' | 'other';
+      targetRole?: string;
+      userIds?: string[];
+    },
+  ) {
+    return this.adminService.broadcastNotification(body);
+  }
+
+  @Delete('notifications/:id')
+  @ApiOperation({ summary: 'Delete a notification' })
+  async deleteNotification(@Param('id') id: string) {
+    return this.adminService.deleteNotification(id);
   }
 
   @Get('impersonate/audit')

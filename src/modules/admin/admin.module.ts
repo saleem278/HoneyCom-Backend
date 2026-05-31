@@ -9,6 +9,7 @@ import { Order, OrderSchema } from '../../models/Order.model';
 import { Category, CategorySchema } from '../../models/Category.model';
 import { ImpersonationEventSchema } from '../../models/ImpersonationEvent.model';
 import { SettingsSchema } from '../../models/Settings.model';
+import { NotificationSchema } from '../../models/Notification.model';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { EmailService } from '../../services/email.service';
@@ -23,6 +24,7 @@ import { ExchangeRateService } from '../../services/exchange-rate.service';
       { name: 'Category', schema: CategorySchema },
       { name: 'ImpersonationEvent', schema: ImpersonationEventSchema },
       { name: 'Settings', schema: SettingsSchema },
+      { name: 'Notification', schema: NotificationSchema },
     ]),
     ConfigModule,
     AuthModule,

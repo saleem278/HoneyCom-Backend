@@ -1728,36 +1728,120 @@ export class SeedService {
     const db = this.userModel.db;
     const settingsCollection = db.collection('settings');
 
-    // Wipe all existing settings so we start clean
     await settingsCollection.deleteMany({});
 
     const now = new Date();
     const settings = [
-      // ── Branding ───────────────────────────────────────────────────────────
-      { key: 'branding.siteName',       value: 'Dayam',                           category: 'branding', description: 'Marketplace display name shown in the header, emails and page titles.' },
-      { key: 'branding.tagline',        value: "India's Trusted Multi-Seller Marketplace", category: 'branding', description: 'Short tagline shown in footer and email templates.' },
-      { key: 'branding.logoEmoji',      value: '🛒',                                  category: 'branding', description: 'Emoji used as logo placeholder when no image logo is set.' },
-      { key: 'branding.supportEmail',   value: 'support@dayam.in',                category: 'branding', description: 'Customer-facing support email shown in emails and footer.' },
-      { key: 'branding.supportPhone',   value: '+91 98765 43210',                    category: 'branding', description: 'Customer-facing support phone number.' },
-      { key: 'branding.address',        value: '4th Floor, Tech Park Building, Sector 18, Gurugram, Haryana – 122001', category: 'branding', description: 'Company address shown in footer and legal pages.' },
-      { key: 'branding.primaryColor',   value: '#F97316',                            category: 'branding', description: 'Primary accent colour (orange). Used in email CTAs and highlights.' },
-      { key: 'branding.currency',       value: 'INR',                               category: 'branding', description: 'Default display currency for the storefront.' },
+      // ── Branding ────────────────────────────────────────────────────────────
+      { key: 'branding.siteName',       value: 'Dayam',                             category: 'branding', description: 'Marketplace display name in header, emails, page titles.' },
+      { key: 'branding.tagline',        value: "India's Trusted Multi-Seller Marketplace", category: 'branding', description: 'Short tagline in footer and emails.' },
+      { key: 'branding.logoEmoji',      value: '🛒',                                category: 'branding', description: 'Logo emoji beside brand name.' },
+      { key: 'branding.supportEmail',   value: 'support@dayam.in',                  category: 'branding', description: 'Support email in footer and emails.' },
+      { key: 'branding.supportPhone',   value: '+91 98765 43210',                   category: 'branding', description: 'Support phone in footer.' },
+      { key: 'branding.address',        value: '4th Floor, Tech Park, Sector 18, Gurugram, Haryana – 122001', category: 'branding', description: 'Company address.' },
+      { key: 'branding.primaryColor',   value: '#F97316',                           category: 'branding', description: 'Primary accent color (hex).' },
+      // Social links
+      { key: 'branding.socialFacebook', value: 'https://facebook.com/dayam',        category: 'branding', description: 'Facebook page URL.' },
+      { key: 'branding.socialTwitter',  value: 'https://twitter.com/dayam',         category: 'branding', description: 'Twitter/X profile URL.' },
+      { key: 'branding.socialInstagram',value: 'https://instagram.com/dayam',       category: 'branding', description: 'Instagram profile URL.' },
+      { key: 'branding.socialYoutube',  value: 'https://youtube.com/@dayam',        category: 'branding', description: 'YouTube channel URL.' },
+      { key: 'branding.socialWhatsapp', value: 'https://wa.me/919876543210',        category: 'branding', description: 'WhatsApp chat link.' },
+
       // ── Orders ────────────────────────────────────────────────────────────
-      { key: 'order.taxRate',           value: 0.1,                                  category: 'orders',   description: 'Tax rate applied to order subtotal (decimal, e.g. 0.1 = 10%).' },
-      { key: 'order.shippingFlat',      value: 99,                                   category: 'orders',   description: 'Flat shipping fee in INR. Set to 0 for free shipping on all orders.' },
-      { key: 'order.freeShippingAbove', value: 499,                                  category: 'orders',   description: 'Cart subtotal above which shipping is free (INR). Set to 0 to disable.' },
-      // ── Storefront ────────────────────────────────────────────────────────
-      { key: 'storefront.announcementBar', value: '🚚 Free delivery on orders above ₹499 | ✅ 500+ Verified Sellers | 🛡️ Buyer Protection', category: 'storefront', description: 'Text shown in the top announcement ticker bar. Separate items with |.' },
-      { key: 'storefront.heroSlogan',   value: 'Shop Everything. Trust Everyone.',   category: 'storefront', description: 'Hero section main slogan.' },
-      { key: 'storefront.featuredCount', value: 8,                                   category: 'storefront', description: 'Number of featured products shown on the homepage.' },
-      // ── SEO ───────────────────────────────────────────────────────────────
-      { key: 'seo.metaTitle',           value: 'Dayam — India\'s Trusted Marketplace', category: 'seo', description: 'Default HTML <title> for the storefront.' },
-      { key: 'seo.metaDescription',     value: 'Shop electronics, fashion, home, beauty and more from 500+ verified sellers. Best prices, fast delivery, easy returns.', category: 'seo', description: 'Default meta description for SEO.' },
-      { key: 'seo.keywords',            value: 'online shopping, marketplace, electronics, fashion, grocery, India', category: 'seo', description: 'Default meta keywords (comma-separated).' },
+      { key: 'order.taxRate',           value: 0.1,    category: 'orders', description: 'Tax rate (decimal). 0.18 = 18% GST.' },
+      { key: 'order.shippingFlat',      value: 99,     category: 'orders', description: 'Flat shipping fee in INR.' },
+      { key: 'order.freeShippingAbove', value: 499,    category: 'orders', description: 'Order subtotal above which shipping is free.' },
+
+      // ── Storefront — general ──────────────────────────────────────────────
+      { key: 'storefront.announcementBar',    value: '🚚 Free delivery above ₹499 | ✅ 500+ Verified Sellers | 🛡️ Buyer Protection | 💳 EMI available', category: 'storefront', description: 'Ticker bar text. Pipe | separates items.' },
+      { key: 'storefront.heroSlogan',         value: 'Shop Everything. Trust Everyone.', category: 'storefront', description: 'Hero section slogan.' },
+      { key: 'storefront.featuredCount',      value: 8, category: 'storefront', description: 'Products shown in Deals of the Day.' },
+      { key: 'storefront.defaultDeliveryCity',value: 'Mumbai', category: 'storefront', description: 'Default city shown in "Deliver to" header.' },
+      { key: 'storefront.defaultDeliveryPin', value: '400001', category: 'storefront', description: 'Default PIN code shown in header.' },
+      { key: 'storefront.searchPlaceholder',  value: 'Search for phones, fashion, groceries…', category: 'storefront', description: 'Search bar placeholder.' },
+      { key: 'storefront.trendingSearches',   value: 'Samsung Galaxy S24, Nike Air Max, Minimalist Serum, Levi\'s Jeans', category: 'storefront', description: 'Comma-separated trending search terms in search dropdown.' },
+
+      // ── Storefront — homepage ─────────────────────────────────────────────
+      { key: 'storefront.promoBanner1Title',  value: 'Flash Sale', category: 'storefront', description: 'Left promo banner title.' },
+      { key: 'storefront.promoBanner1Sub',    value: 'Up to 40% Off', category: 'storefront', description: 'Left promo banner subtitle.' },
+      { key: 'storefront.promoBanner1Badge',  value: 'Limited Time', category: 'storefront', description: 'Left promo banner badge text.' },
+      { key: 'storefront.promoBanner1Link',   value: '/products?sort=discount', category: 'storefront', description: 'Left promo banner click URL.' },
+      { key: 'storefront.promoBanner1Emoji',  value: '🛍️', category: 'storefront', description: 'Left promo banner emoji.' },
+      { key: 'storefront.promoBanner1Color',  value: 'from-orange-500 via-amber-500 to-yellow-400', category: 'storefront', description: 'Left banner Tailwind gradient classes.' },
+      { key: 'storefront.promoBanner2Title',  value: 'Trending Fashion Picks', category: 'storefront', description: 'Right promo banner title.' },
+      { key: 'storefront.promoBanner2Sub',    value: 'New Collection', category: 'storefront', description: 'Right promo banner badge.' },
+      { key: 'storefront.promoBanner2Badge',  value: 'New Collection', category: 'storefront', description: 'Right promo banner badge text.' },
+      { key: 'storefront.promoBanner2Link',   value: '/products?category=fashion', category: 'storefront', description: 'Right promo banner click URL.' },
+      { key: 'storefront.promoBanner2Emoji',  value: '👗', category: 'storefront', description: 'Right promo banner emoji.' },
+      { key: 'storefront.promoBanner2Color',  value: 'from-purple-600 via-violet-500 to-indigo-500', category: 'storefront', description: 'Right banner Tailwind gradient classes.' },
+
+      // Mid-page feature banner
+      { key: 'storefront.midBannerTitle',     value: 'Latest Smartphones & Laptops', category: 'storefront', description: 'Mid-page dark banner title.' },
+      { key: 'storefront.midBannerSubtitle',  value: 'Up to 40% Off', category: 'storefront', description: 'Mid-page banner highlighted subtitle.' },
+      { key: 'storefront.midBannerDesc',      value: 'Samsung, Apple, OnePlus, Dell and more — top brands at the best prices, delivered in 2 days.', category: 'storefront', description: 'Mid-page banner description.' },
+      { key: 'storefront.midBannerLink',      value: '/products?category=electronics', category: 'storefront', description: 'Mid-page banner click URL.' },
+      { key: 'storefront.midBannerEmoji',     value: '📱', category: 'storefront', description: 'Mid-page banner emoji.' },
+      { key: 'storefront.midBannerCta',       value: 'Shop Now', category: 'storefront', description: 'Mid-page banner CTA button text.' },
+      { key: 'storefront.midBannerNote',      value: 'Free delivery on all orders above ₹499', category: 'storefront', description: 'Mid-page banner small note.' },
+
+      // Testimonials (JSON array)
+      { key: 'storefront.testimonials', value: JSON.stringify([
+          { name: 'Priya Sharma', location: 'Mumbai', rating: 5, avatar: '👩', text: 'Got my Samsung S24 in 2 days! Packaging was perfect and product is 100% genuine.' },
+          { name: 'Rajesh Kumar', location: 'Bangalore', rating: 5, avatar: '👨', text: 'Great selection and fast delivery. The Levi\'s jeans fit perfectly. Will shop again!' },
+          { name: 'Anita Patel', location: 'Delhi', rating: 5, avatar: '👩‍🦱', text: 'Minimalist serum arrived quickly and is 100% authentic. Customer support was helpful.' },
+          { name: 'Vikram Singh', location: 'Pune', rating: 5, avatar: '🧔', text: 'Best prices for Nike shoes. Easy checkout, fast shipping, hassle-free returns.' },
+        ]), category: 'storefront', description: 'Homepage customer reviews. JSON array of {name, location, rating, avatar, text}.' },
+
+      // Homepage stats bar
+      { key: 'storefront.stats', value: JSON.stringify([
+          { value: '10K+', label: 'Products', emoji: '📦' },
+          { value: '500+', label: 'Sellers', emoji: '🏪' },
+          { value: '4.9★', label: 'Avg Rating', emoji: '⭐' },
+          { value: '50K+', label: 'Customers', emoji: '🤝' },
+        ]), category: 'storefront', description: 'Homepage stats bar. JSON array of {value, label, emoji}.' },
+
+      // Newsletter
+      { key: 'storefront.newsletterTitle',    value: 'Stay in the Loop', category: 'storefront', description: 'Newsletter section heading.' },
+      { key: 'storefront.newsletterSubtitle', value: 'Subscribe for exclusive deals, new arrivals, and tips. No spam, ever.', category: 'storefront', description: 'Newsletter section subtitle.' },
+      { key: 'storefront.newsletterCta',      value: 'Subscribe Free', category: 'storefront', description: 'Newsletter subscribe button text.' },
+      { key: 'storefront.newsletterNote',     value: 'Join 50,000+ happy shoppers. Unsubscribe anytime.', category: 'storefront', description: 'Small note below newsletter form.' },
+      { key: 'storefront.newsletterPlaceholder', value: 'Enter your email', category: 'storefront', description: 'Newsletter email input placeholder.' },
+
+      // About page stats
+      { key: 'storefront.aboutStats', value: JSON.stringify([
+          { label: 'Products Listed', value: '10,000+' },
+          { label: 'Verified Sellers', value: '500+' },
+          { label: 'Happy Customers', value: '50,000+' },
+          { label: 'Cities Served', value: '200+' },
+        ]), category: 'storefront', description: 'About page statistics strip. JSON array of {label, value}.' },
+
+      // Footer links
+      { key: 'storefront.footerShopLinks', value: JSON.stringify([
+          { label: 'All Products', href: '/products' },
+          { label: 'Electronics', href: '/products?category=electronics' },
+          { label: 'Fashion', href: '/products?category=fashion' },
+          { label: 'Home & Kitchen', href: '/products?category=home-kitchen' },
+          { label: 'Deals & Offers', href: '/products?sort=discount' },
+          { label: 'New Arrivals', href: '/products?sort=newest' },
+        ]), category: 'storefront', description: 'Footer "Shop" column links. JSON array of {label, href}.' },
+
+      { key: 'storefront.footerHelpLinks', value: JSON.stringify([
+          { label: 'Track My Order', href: '/orders' },
+          { label: 'Returns & Refunds', href: '/returns' },
+          { label: 'Shipping Info', href: '/shipping' },
+          { label: 'FAQ', href: '/faq' },
+          { label: 'Contact Us', href: '/contact' },
+          { label: 'Sell on Dayam', href: '/seller/register' },
+        ]), category: 'storefront', description: 'Footer "Help" column links. JSON array of {label, href}.' },
+
+      // ── SEO ────────────────────────────────────────────────────────────────
+      { key: 'seo.metaTitle',       value: "Dayam — India's Trusted Marketplace", category: 'seo', description: 'Default page <title>.' },
+      { key: 'seo.metaDescription', value: 'Shop electronics, fashion, home, beauty and more from 500+ verified sellers. Best prices, fast delivery, easy returns.', category: 'seo', description: 'Default meta description.' },
+      { key: 'seo.keywords',        value: 'online shopping, marketplace, electronics, fashion, grocery, India', category: 'seo', description: 'Meta keywords (comma-separated).' },
     ].map(s => ({ ...s, createdAt: now, updatedAt: now }));
 
     await settingsCollection.insertMany(settings);
-    this.logger.log(`✅ Created ${settings.length} platform settings (branding, orders, storefront, SEO)`);
+    this.logger.log(`✅ Created ${settings.length} platform settings`);
   }
 }
 

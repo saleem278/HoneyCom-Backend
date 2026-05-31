@@ -152,6 +152,50 @@ export class ReviewsService {
     return { success: true, review: updated };
   }
 
+  // -------- Admin methods --------
+
+  async adminFindAll(page = 1, limit = 20, status?: string, productId?: string) {
+    const filter: Record<string, unknown> = {};
+    if (status) filter.status = status;
+    if (productId) filter.product = productId;
+
+    const skip = (page - 1) * limit;
+    const [reviews, total] = await Promise.all([
+      this.reviewModel
+        .find(filter)
+        .populate('user', 'name email avatar')
+        .populate('product', 'name images')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      this.reviewModel.countDocuments(filter),
+    ]);
+
+    return {
+      success: true,
+      reviews,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    };
+  }
+
+  async adminUpdateStatus(id: string, status: 'approved' | 'rejected') {
+    const review = await this.reviewModel.findById(id);
+    if (!review) throw new NotFoundException('Review not found');
+    review.status = status;
+    await review.save();
+    await this.updateProductRating(review.product.toString());
+    return { success: true, review };
+  }
+
+  async adminDelete(id: string) {
+    const review = await this.reviewModel.findById(id);
+    if (!review) throw new NotFoundException('Review not found');
+    const productId = review.product.toString();
+    await this.reviewModel.findByIdAndDelete(id);
+    await this.updateProductRating(productId);
+    return { success: true, message: 'Review deleted' };
+  }
+
   private async updateProductRating(productId: string) {
     // Only count approved reviews so pending/rejected ones don't skew the score.
     // Use aggregation to calculate atomically in a single round-trip rather than
