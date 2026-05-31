@@ -30,7 +30,7 @@ export class EmailTemplatesService {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>${title} - Honey Store</title>
+  <title>${title} - HoneyCom</title>
   <!--[if mso]>
   <style type="text/css">
     body, table, td {font-family: Arial, sans-serif !important;}
@@ -46,7 +46,7 @@ export class EmailTemplatesService {
           <tr>
             <td style="background: linear-gradient(135deg, #f59e0b 0%, #f97316 50%, #fbbf24 100%); padding: 40px 30px; text-align: center; border-radius: 12px 12px 0 0;">
               <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: 700; letter-spacing: -0.5px;">
-                🍯 Honey Store
+                🛒 HoneyCom
               </h1>
             </td>
           </tr>
@@ -65,8 +65,8 @@ export class EmailTemplatesService {
                 <tr>
                   <td style="text-align: center; padding-bottom: 20px;">
                     <p style="margin: 0; color: #6b7280; font-size: 14px; line-height: 1.6;">
-                      <strong style="color: #f97316;">Honey Store</strong><br>
-                      Premium Quality Natural Honey Products
+                      <strong style="color: #f97316;">HoneyCom</strong><br>
+                      India's Trusted Multi-Seller Marketplace
                     </p>
                   </td>
                 </tr>
@@ -78,7 +78,7 @@ export class EmailTemplatesService {
                 <tr>
                   <td style="text-align: center;">
                     <p style="margin: 0; color: #9ca3af; font-size: 12px; line-height: 1.5;">
-                      This email was sent by Honey Store.<br>
+                      This email was sent by HoneyCom.<br>
                       If you have any questions, please contact our support team.
                     </p>
                   </td>
@@ -104,13 +104,13 @@ export class EmailTemplatesService {
         <div style="width: 80px; height: 80px; margin: 0 auto 20px; background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
           <span style="font-size: 40px;">✉️</span>
         </div>
-        <h2 style="margin: 0 0 10px; color: #1f2937; font-size: 28px; font-weight: 700;">Welcome to Honey Store!</h2>
+        <h2 style="margin: 0 0 10px; color: #1f2937; font-size: 28px; font-weight: 700;">Welcome to HoneyCom!</h2>
         <p style="margin: 0; color: #6b7280; font-size: 16px;">We're excited to have you join us</p>
       </div>
       
       <div style="background-color: #fffbeb; border-left: 4px solid #f59e0b; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
         <p style="margin: 0; color: #78350f; font-size: 15px; line-height: 1.6;">
-          <strong>Almost there!</strong> Please verify your email address to complete your registration and start shopping for premium honey products.
+          <strong>Almost there!</strong> Please verify your email address to complete your registration and start shopping across thousands of products.
         </p>
       </div>
       
@@ -339,8 +339,8 @@ export class EmailTemplatesService {
       
       <div style="background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); padding: 25px; border-radius: 10px; margin-bottom: 30px;">
         <p style="margin: 0; color: #065f46; font-size: 16px; line-height: 1.8; text-align: center;">
-          <strong style="font-size: 18px;">Welcome to Honey Store!</strong><br>
-          Your seller account has been approved. You can now start listing your premium honey products and reach thousands of customers.
+          <strong style="font-size: 18px;">Welcome to HoneyCom!</strong><br>
+          Your seller account has been approved. You can now start listing your products and reach thousands of customers.
         </p>
       </div>
       
@@ -362,7 +362,7 @@ export class EmailTemplatesService {
       
       <div style="background-color: #ecfdf5; border-left: 4px solid #10b981; padding: 15px; border-radius: 8px; margin-top: 25px;">
         <p style="margin: 0; color: #065f46; font-size: 14px; line-height: 1.6;">
-          💡 <strong>Need help?</strong> Our support team is here to assist you. If you have any questions about selling on Honey Store, don't hesitate to reach out.
+          💡 <strong>Need help?</strong> Our support team is here to assist you. If you have any questions about selling on HoneyCom, don't hesitate to reach out.
         </p>
       </div>
     `;
@@ -404,7 +404,7 @@ export class EmailTemplatesService {
       
       <div style="background-color: #f9fafb; padding: 15px; border-radius: 8px; margin-top: 25px;">
         <p style="margin: 0; color: #6b7280; font-size: 13px; line-height: 1.6; text-align: center;">
-          Thank you for your interest in selling on <strong style="color: #f97316;">Honey Store</strong>. We appreciate your understanding.
+          Thank you for your interest in selling on <strong style="color: #f97316;">HoneyCom</strong>. We appreciate your understanding.
         </p>
       </div>
     `;

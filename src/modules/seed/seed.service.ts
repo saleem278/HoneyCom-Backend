@@ -1720,30 +1720,36 @@ export class SeedService {
     const db = this.userModel.db;
     const settingsCollection = db.collection('settings');
 
-    await settingsCollection.deleteMany({
-      key: { $in: ['order.taxRate', 'order.shippingFlat'] },
-    });
+    // Wipe all existing settings so we start clean
+    await settingsCollection.deleteMany({});
 
-    await settingsCollection.insertMany([
-      {
-        key: 'order.taxRate',
-        value: 0.1,
-        category: 'orders',
-        description: 'Tax rate applied to order subtotal (decimal, e.g. 0.1 = 10%)',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-      {
-        key: 'order.shippingFlat',
-        value: 500,
-        category: 'orders',
-        description: 'Flat shipping fee in base currency (INR by default) applied when cart is not empty',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      },
-    ]);
+    const now = new Date();
+    const settings = [
+      // ── Branding ───────────────────────────────────────────────────────────
+      { key: 'branding.siteName',       value: 'HoneyCom',                           category: 'branding', description: 'Marketplace display name shown in the header, emails and page titles.' },
+      { key: 'branding.tagline',        value: "India's Trusted Multi-Seller Marketplace", category: 'branding', description: 'Short tagline shown in footer and email templates.' },
+      { key: 'branding.logoEmoji',      value: '🛒',                                  category: 'branding', description: 'Emoji used as logo placeholder when no image logo is set.' },
+      { key: 'branding.supportEmail',   value: 'support@honeycom.in',                category: 'branding', description: 'Customer-facing support email shown in emails and footer.' },
+      { key: 'branding.supportPhone',   value: '+91 98765 43210',                    category: 'branding', description: 'Customer-facing support phone number.' },
+      { key: 'branding.address',        value: '4th Floor, Tech Park Building, Sector 18, Gurugram, Haryana – 122001', category: 'branding', description: 'Company address shown in footer and legal pages.' },
+      { key: 'branding.primaryColor',   value: '#F97316',                            category: 'branding', description: 'Primary accent colour (orange). Used in email CTAs and highlights.' },
+      { key: 'branding.currency',       value: 'INR',                               category: 'branding', description: 'Default display currency for the storefront.' },
+      // ── Orders ────────────────────────────────────────────────────────────
+      { key: 'order.taxRate',           value: 0.1,                                  category: 'orders',   description: 'Tax rate applied to order subtotal (decimal, e.g. 0.1 = 10%).' },
+      { key: 'order.shippingFlat',      value: 99,                                   category: 'orders',   description: 'Flat shipping fee in INR. Set to 0 for free shipping on all orders.' },
+      { key: 'order.freeShippingAbove', value: 499,                                  category: 'orders',   description: 'Cart subtotal above which shipping is free (INR). Set to 0 to disable.' },
+      // ── Storefront ────────────────────────────────────────────────────────
+      { key: 'storefront.announcementBar', value: '🚚 Free delivery on orders above ₹499 | ✅ 500+ Verified Sellers | 🛡️ Buyer Protection', category: 'storefront', description: 'Text shown in the top announcement ticker bar. Separate items with |.' },
+      { key: 'storefront.heroSlogan',   value: 'Shop Everything. Trust Everyone.',   category: 'storefront', description: 'Hero section main slogan.' },
+      { key: 'storefront.featuredCount', value: 8,                                   category: 'storefront', description: 'Number of featured products shown on the homepage.' },
+      // ── SEO ───────────────────────────────────────────────────────────────
+      { key: 'seo.metaTitle',           value: 'HoneyCom — India\'s Trusted Marketplace', category: 'seo', description: 'Default HTML <title> for the storefront.' },
+      { key: 'seo.metaDescription',     value: 'Shop electronics, fashion, home, beauty and more from 500+ verified sellers. Best prices, fast delivery, easy returns.', category: 'seo', description: 'Default meta description for SEO.' },
+      { key: 'seo.keywords',            value: 'online shopping, marketplace, electronics, fashion, grocery, India', category: 'seo', description: 'Default meta keywords (comma-separated).' },
+    ].map(s => ({ ...s, createdAt: now, updatedAt: now }));
 
-    this.logger.log('✅ Created platform settings (tax rate, shipping)');
+    await settingsCollection.insertMany(settings);
+    this.logger.log(`✅ Created ${settings.length} platform settings (branding, orders, storefront, SEO)`);
   }
 }
 
