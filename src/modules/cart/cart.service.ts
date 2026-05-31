@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { Cart, ICart } from '../../models/Cart.model';
 import { Product, IProduct } from '../../models/Product.model';
 import { Coupon, ICoupon } from '../../models/Coupon.model';
+import { ISettings } from '../../models/Settings.model';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 
 @Injectable()
@@ -12,8 +13,21 @@ export class CartService {
     @InjectModel('Cart') private cartModel: Model<ICart>,
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Coupon') private couponModel: Model<ICoupon>,
+    @InjectModel('Settings') private settingsModel: Model<ISettings>,
     private exchangeRateService: ExchangeRateService,
   ) {}
+
+  private async getCartSettings(): Promise<{ taxRate: number; shippingFlat: number; freeShippingAbove: number }> {
+    const rows = await this.settingsModel
+      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat', 'order.freeShippingAbove'] } })
+      .lean();
+    const map = new Map(rows.map(r => [r.key, Number(r.value)]));
+    return {
+      taxRate:           map.get('order.taxRate')           ?? 0.18,
+      shippingFlat:      map.get('order.shippingFlat')      ?? 99,
+      freeShippingAbove: map.get('order.freeShippingAbove') ?? 499,
+    };
+  }
 
   private async recalculateCartDiscount(cart: ICart): Promise<void> {
     if (!cart.couponCode) {
@@ -135,8 +149,9 @@ export class CartService {
       return total + product.price * item.quantity;
     }, 0);
 
-    const taxBase = subtotalBase * 0.1; // 10% tax
-    const shippingBase = subtotalBase > 0 ? 500 : 0; // ₹500 shipping if cart has items (in INR base currency)
+    const { taxRate, shippingFlat, freeShippingAbove } = await this.getCartSettings();
+    const taxBase = subtotalBase * taxRate;
+    const shippingBase = subtotalBase > freeShippingAbove ? 0 : subtotalBase > 0 ? shippingFlat : 0;
     const discountBase = cart.couponDiscount || 0;
     const totalBase = Math.max(0, subtotalBase + taxBase + shippingBase - discountBase);
 
