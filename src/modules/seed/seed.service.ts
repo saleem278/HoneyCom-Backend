@@ -147,39 +147,39 @@ export class SeedService {
     const users = [
       {
         name: 'Admin User',
-        email: 'admin@honey.com',
+        email: 'admin@honeycom.in',
         password: hashedPassword,
         role: 'admin',
         status: 'active',
         emailVerified: true,
       },
       {
-        name: 'John Seller',
-        email: 'seller@honey.com',
+        name: 'Raj Electronics',
+        email: 'seller@honeycom.in',
         password: hashedPassword,
         role: 'seller',
         status: 'active',
         emailVerified: true,
       },
       {
-        name: 'Jane Seller',
-        email: 'jane.seller@honey.com',
+        name: 'Priya Fashion Store',
+        email: 'jane.seller@honeycom.in',
         password: hashedPassword,
         role: 'seller',
         status: 'active',
         emailVerified: true,
       },
       {
-        name: 'Customer One',
-        email: 'customer1@honey.com',
+        name: 'Ankit Sharma',
+        email: 'customer1@honeycom.in',
         password: hashedPassword,
         role: 'customer',
         status: 'active',
         emailVerified: true,
       },
       {
-        name: 'Customer Two',
-        email: 'customer2@honey.com',
+        name: 'Meera Patel',
+        email: 'customer2@honeycom.in',
         password: hashedPassword,
         role: 'customer',
         status: 'active',
@@ -187,7 +187,7 @@ export class SeedService {
       },
       {
         name: 'Content Editor',
-        email: 'editor@honey.com',
+        email: 'editor@honeycom.in',
         password: hashedPassword,
         role: 'contentEditor',
         status: 'active',
@@ -221,43 +221,199 @@ export class SeedService {
 
   private async seedCategories() {
     this.logger.log('Seeding categories...');
-    
-    // Dynamically import Category schema only - avoid importing the pre-registered model
-    // This prevents mongoose.model() from executing and triggering validation on other models
+
     const categoryModule = await import('../../models/Category.model');
     const CategorySchema = categoryModule.CategorySchema;
-    
-    // Register Category model using schema directly - this prevents validation on other models
-    // The model file exports a pre-registered model, but we'll create a new one with just the schema
     const categoryModel = this.connection.model('Category', CategorySchema);
 
     const categories = [
+      // ── Electronics ─────────────────────────────────────────────────────
       {
-        name: 'Raw Honey',
-        slug: 'raw-honey',
-        description: 'Pure, unprocessed honey straight from the hive',
-        image: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=500',
+        name: 'Electronics',
+        slug: 'electronics',
+        description: 'Smartphones, laptops, accessories, and the latest gadgets',
+        image: 'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=600',
+        icon: '📱',
+        featured: true,
+        displayOrder: 1,
         status: 'active',
       },
       {
-        name: 'Flavored Honey',
-        slug: 'flavored-honey',
-        description: 'Honey infused with natural flavors',
-        image: 'https://images.unsplash.com/photo-1558642452-9d2a7deb7f62?w=500',
+        name: 'Smartphones',
+        slug: 'smartphones',
+        description: 'Latest Android and iOS smartphones from top brands',
+        image: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600',
+        icon: '📱',
+        featured: false,
+        displayOrder: 2,
         status: 'active',
       },
       {
-        name: 'Honey Products',
-        slug: 'honey-products',
-        description: 'Products made with honey',
-        image: 'https://images.unsplash.com/photo-1615485925534-4d27d0f8bd2b?w=500',
+        name: 'Laptops & Computers',
+        slug: 'laptops',
+        description: 'Laptops, desktops, monitors and computing accessories',
+        image: 'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=600',
+        icon: '💻',
+        featured: false,
+        displayOrder: 3,
+        status: 'active',
+      },
+      // ── Fashion ──────────────────────────────────────────────────────────
+      {
+        name: 'Fashion',
+        slug: 'fashion',
+        description: "Men's, women's and kids' clothing, footwear and accessories",
+        image: 'https://images.unsplash.com/photo-1445205170230-053b83016050?w=600',
+        icon: '👗',
+        featured: true,
+        displayOrder: 4,
         status: 'active',
       },
       {
-        name: 'Organic Honey',
-        slug: 'organic-honey',
-        description: 'Certified organic honey from sustainable sources',
-        image: 'https://images.unsplash.com/photo-1615485925534-4d27d0f8bd2b?w=500',
+        name: "Men's Clothing",
+        slug: 'mens-clothing',
+        description: "Shirts, trousers, suits, and casual wear for men",
+        image: 'https://images.unsplash.com/photo-1490578474895-699cd4e2cf59?w=600',
+        icon: '👔',
+        featured: false,
+        displayOrder: 5,
+        status: 'active',
+      },
+      {
+        name: "Women's Clothing",
+        slug: 'womens-clothing',
+        description: "Dresses, tops, ethnic wear and western outfits for women",
+        image: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=600',
+        icon: '👗',
+        featured: false,
+        displayOrder: 6,
+        status: 'active',
+      },
+      {
+        name: 'Footwear',
+        slug: 'footwear',
+        description: 'Sneakers, formal shoes, sandals and sports footwear',
+        image: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=600',
+        icon: '👟',
+        featured: false,
+        displayOrder: 7,
+        status: 'active',
+      },
+      // ── Home & Kitchen ───────────────────────────────────────────────────
+      {
+        name: 'Home & Kitchen',
+        slug: 'home-kitchen',
+        description: 'Furniture, cookware, decor and everything for your home',
+        image: 'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=600',
+        icon: '🏠',
+        featured: true,
+        displayOrder: 8,
+        status: 'active',
+      },
+      {
+        name: 'Kitchen Appliances',
+        slug: 'kitchen-appliances',
+        description: 'Mixers, microwaves, air fryers and smart kitchen gadgets',
+        image: 'https://images.unsplash.com/photo-1585771724684-38269d6639fd?w=600',
+        icon: '🍳',
+        featured: false,
+        displayOrder: 9,
+        status: 'active',
+      },
+      {
+        name: 'Home Decor',
+        slug: 'home-decor',
+        description: 'Candles, wall art, cushions and decorative items',
+        image: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=600',
+        icon: '🕯️',
+        featured: false,
+        displayOrder: 10,
+        status: 'active',
+      },
+      // ── Beauty & Personal Care ───────────────────────────────────────────
+      {
+        name: 'Beauty & Personal Care',
+        slug: 'beauty',
+        description: 'Skincare, haircare, makeup and personal grooming products',
+        image: 'https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=600',
+        icon: '💄',
+        featured: true,
+        displayOrder: 11,
+        status: 'active',
+      },
+      {
+        name: 'Skincare',
+        slug: 'skincare',
+        description: 'Moisturisers, serums, sunscreens and face wash',
+        image: 'https://images.unsplash.com/photo-1570194065650-d99fb4ee3b4c?w=600',
+        icon: '✨',
+        featured: false,
+        displayOrder: 12,
+        status: 'active',
+      },
+      // ── Sports & Fitness ─────────────────────────────────────────────────
+      {
+        name: 'Sports & Fitness',
+        slug: 'sports',
+        description: 'Gym equipment, sportswear, cycles and outdoor gear',
+        image: 'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=600',
+        icon: '🏋️',
+        featured: true,
+        displayOrder: 13,
+        status: 'active',
+      },
+      // ── Books & Stationery ───────────────────────────────────────────────
+      {
+        name: 'Books & Stationery',
+        slug: 'books',
+        description: 'Fiction, non-fiction, textbooks, notebooks and art supplies',
+        image: 'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=600',
+        icon: '📚',
+        featured: false,
+        displayOrder: 14,
+        status: 'active',
+      },
+      // ── Grocery & Gourmet ────────────────────────────────────────────────
+      {
+        name: 'Grocery & Gourmet',
+        slug: 'grocery',
+        description: 'Organic foods, snacks, beverages and specialty gourmet items',
+        image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=600',
+        icon: '🛒',
+        featured: true,
+        displayOrder: 15,
+        status: 'active',
+      },
+      {
+        name: 'Health & Nutrition',
+        slug: 'health-nutrition',
+        description: 'Vitamins, supplements, protein powders and wellness products',
+        image: 'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=600',
+        icon: '💊',
+        featured: false,
+        displayOrder: 16,
+        status: 'active',
+      },
+      // ── Toys & Baby ──────────────────────────────────────────────────────
+      {
+        name: 'Toys & Baby',
+        slug: 'toys-baby',
+        description: 'Educational toys, baby gear, games and kids accessories',
+        image: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=600',
+        icon: '🧸',
+        featured: false,
+        displayOrder: 17,
+        status: 'active',
+      },
+      // ── Automotive ───────────────────────────────────────────────────────
+      {
+        name: 'Automotive',
+        slug: 'automotive',
+        description: 'Car accessories, tools, care products and bike gear',
+        image: 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=600',
+        icon: '🚗',
+        featured: false,
+        displayOrder: 18,
         status: 'active',
       },
     ];
@@ -270,159 +426,617 @@ export class SeedService {
   private async seedProducts(users: any[], categories: any[]) {
     this.logger.log('Seeding products...');
 
-    // Dynamically import Product schema only - avoid importing the pre-registered model
-    // This prevents mongoose.model() from executing and triggering validation on other models
     const productModule = await import('../../models/Product.model');
     const ProductSchema = productModule.ProductSchema;
-    
-    // Register Product model using schema directly - this prevents validation on other models
     const productModel = this.connection.model('Product', ProductSchema);
 
-    const seller1 = users.find(u => u.email === 'seller@honey.com');
-    const seller2 = users.find(u => u.email === 'jane.seller@honey.com');
+    const seller1 = users.find(u => u.email === 'seller@honeycom.in');
+    const seller2 = users.find(u => u.email === 'jane.seller@honeycom.in');
+
+    // Helper to find category by slug
+    const cat = (slug: string) => {
+      const found = categories.find((c: any) => c.slug === slug);
+      if (!found) throw new Error(`Category not found: ${slug}`);
+      return found._id;
+    };
 
     const products = [
+      // ── Electronics / Smartphones ────────────────────────────────────────
       {
-        name: 'Pure Wildflower Honey',
-        description: 'Delicious wildflower honey collected from diverse floral sources. Rich in flavor with a smooth, creamy texture.',
-        sku: 'HONEY-001',
-        price: 24.99,
-        compareAtPrice: 29.99,
-        category: categories[0]._id,
+        name: 'Samsung Galaxy S24 Ultra 256GB',
+        description: 'The Samsung Galaxy S24 Ultra features a 6.8-inch Dynamic AMOLED display, Snapdragon 8 Gen 3 chipset, 200MP quad-camera system, and built-in S Pen. All-day battery life with 45W fast charging.',
+        sku: 'ELEC-SM-S24U',
+        price: 124999,
+        compareAtPrice: 134999,
+        category: cat('smartphones'),
         seller: seller1._id,
         images: [
-          'https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=500',
-          'https://images.unsplash.com/photo-1558642452-9d2a7deb7f62?w=500',
+          'https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?w=600',
+          'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600',
         ],
-        inventory: 150,
+        inventory: 45,
         status: 'approved',
-        rating: 4.5,
-        numReviews: 12,
-        tags: ['wildflower', 'pure', 'natural'],
+        featured: true,
+        rating: 4.7,
+        numReviews: 312,
+        tags: ['samsung', 'galaxy', 'android', 'flagship', '5g'],
       },
       {
-        name: 'Organic Acacia Honey',
-        description: 'Premium organic acacia honey with a light, delicate flavor. Perfect for tea and desserts.',
-        sku: 'HONEY-002',
-        price: 29.99,
-        compareAtPrice: 34.99,
-        category: categories[3]._id,
-        seller: seller1._id,
-        images: [
-          'https://images.unsplash.com/photo-1615485925534-4d27d0f8bd2b?w=500',
-        ],
-        inventory: 100,
-        status: 'approved',
-        rating: 4.8,
-        numReviews: 25,
-        tags: ['organic', 'acacia', 'premium'],
-      },
-      {
-        name: 'Lavender Infused Honey',
-        description: 'Aromatic honey infused with natural lavender. Perfect for relaxation and flavor enhancement.',
-        sku: 'HONEY-003',
-        price: 27.99,
-        compareAtPrice: 32.99,
-        category: categories[1]._id,
+        name: 'Apple iPhone 15 Pro 128GB Natural Titanium',
+        description: 'iPhone 15 Pro with A17 Pro chip, titanium design, 48MP main camera with 5x optical zoom, Action Button, and USB-C with USB 3 speeds. Available in natural titanium finish.',
+        sku: 'ELEC-AP-IP15P',
+        price: 134900,
+        compareAtPrice: 139900,
+        category: cat('smartphones'),
         seller: seller2._id,
         images: [
-          'https://images.unsplash.com/photo-1558642452-9d2a7deb7f62?w=500',
+          'https://images.unsplash.com/photo-1592750475338-74b7b21085ab?w=600',
+          'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=600',
         ],
-        inventory: 80,
+        inventory: 30,
         status: 'approved',
-        rating: 4.3,
-        numReviews: 8,
-        tags: ['lavender', 'flavored', 'aromatic'],
+        featured: true,
+        rating: 4.9,
+        numReviews: 547,
+        tags: ['apple', 'iphone', 'ios', 'flagship', '5g'],
       },
       {
-        name: 'Manuka Honey 500+',
-        description: 'Premium Manuka honey with 500+ MGO rating. Known for its unique properties and rich flavor.',
-        sku: 'HONEY-004',
-        price: 49.99,
-        compareAtPrice: 59.99,
-        category: categories[0]._id,
+        name: 'OnePlus 12 256GB Flowy Emerald',
+        description: 'OnePlus 12 packs Snapdragon 8 Gen 3, 50MP Hasselblad triple camera, 100W SUPERVOOC charging, and a 6.82-inch LTPO AMOLED display with up to 120Hz refresh rate.',
+        sku: 'ELEC-OP-OP12',
+        price: 64999,
+        compareAtPrice: 69999,
+        category: cat('smartphones'),
         seller: seller1._id,
         images: [
-          'https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=500',
-        ],
-        inventory: 50,
-        status: 'approved',
-        rating: 5.0,
-        numReviews: 15,
-        tags: ['manuka', 'premium', 'mgo500'],
-      },
-      {
-        name: 'Honey Comb',
-        description: 'Natural honeycomb chunks. Eat as is or use to sweeten your favorite dishes.',
-        sku: 'HONEY-005',
-        price: 34.99,
-        compareAtPrice: 39.99,
-        category: categories[2]._id,
-        seller: seller2._id,
-        images: [
-          'https://images.unsplash.com/photo-1615485925534-4d27d0f8bd2b?w=500',
+          'https://images.unsplash.com/photo-1601784551446-20c9e07cdbdb?w=600',
         ],
         inventory: 60,
         status: 'approved',
-        rating: 4.7,
-        numReviews: 10,
-        tags: ['honeycomb', 'natural', 'unprocessed'],
+        featured: false,
+        rating: 4.5,
+        numReviews: 189,
+        tags: ['oneplus', 'android', '5g', 'fast-charging'],
       },
+      // ── Laptops ──────────────────────────────────────────────────────────
       {
-        name: 'Buckwheat Honey',
-        description: 'Dark, robust buckwheat honey with a strong, distinct flavor. Rich in antioxidants.',
-        sku: 'HONEY-006',
-        price: 26.99,
-        compareAtPrice: 31.99,
-        category: categories[0]._id,
-        seller: seller1._id,
-        images: [
-          'https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=500',
-        ],
-        inventory: 120,
-        status: 'approved',
-        rating: 4.2,
-        numReviews: 7,
-        tags: ['buckwheat', 'dark', 'robust'],
-      },
-      {
-        name: 'Honey Soap',
-        description: 'Natural soap made with honey. Moisturizing and gentle on the skin.',
-        sku: 'HONEY-007',
-        price: 12.99,
-        compareAtPrice: 15.99,
-        category: categories[2]._id,
+        name: 'Apple MacBook Air M3 13-inch 8GB/256GB',
+        description: 'MacBook Air with M3 chip — the most advanced MacBook Air ever. Up to 18 hours battery, 13.6-inch Liquid Retina display, 8-core CPU and 8-core GPU. Fanless, silent performance.',
+        sku: 'ELEC-AP-MBA-M3',
+        price: 114900,
+        compareAtPrice: 119900,
+        category: cat('laptops'),
         seller: seller2._id,
         images: [
-          'https://images.unsplash.com/photo-1615485925534-4d27d0f8bd2b?w=500',
+          'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=600',
+          'https://images.unsplash.com/photo-1496181133206-80ce9b88a853?w=600',
+        ],
+        inventory: 25,
+        status: 'approved',
+        featured: true,
+        rating: 4.8,
+        numReviews: 423,
+        tags: ['apple', 'macbook', 'laptop', 'm3', 'ultrabook'],
+      },
+      {
+        name: 'Dell XPS 15 Intel Core i7 16GB/512GB',
+        description: 'Dell XPS 15 with 13th Gen Intel Core i7-13700H, 16GB DDR5 RAM, 512GB NVMe SSD, NVIDIA RTX 4060, and a stunning 15.6-inch OLED 3.5K touchscreen display.',
+        sku: 'ELEC-DL-XPS15',
+        price: 159990,
+        compareAtPrice: 179990,
+        category: cat('laptops'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1593642632559-0c6d3fc62b89?w=600',
+        ],
+        inventory: 18,
+        status: 'approved',
+        featured: false,
+        rating: 4.6,
+        numReviews: 156,
+        tags: ['dell', 'xps', 'laptop', 'gaming', 'oled'],
+      },
+      // ── Men's Clothing ───────────────────────────────────────────────────
+      {
+        name: 'Allen Solly Men Slim Fit Formal Shirt - White',
+        description: 'Allen Solly Men formal slim fit shirt in premium cotton fabric. Features a classic point collar, single chest pocket, and full button placket. Machine washable. Available in sizes S-XXL.',
+        sku: 'FASH-AS-MSHIRT-WHT',
+        price: 1299,
+        compareAtPrice: 1799,
+        category: cat('mens-clothing'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=600',
+          'https://images.unsplash.com/photo-1490578474895-699cd4e2cf59?w=600',
         ],
         inventory: 200,
         status: 'approved',
-        rating: 4.6,
-        numReviews: 18,
-        tags: ['soap', 'skincare', 'natural'],
+        featured: false,
+        rating: 4.2,
+        numReviews: 88,
+        tags: ['shirt', 'formal', 'mens', 'slim-fit'],
+        variants: [{ name: 'Size', options: ['S', 'M', 'L', 'XL', 'XXL'] }],
       },
       {
-        name: 'Cinnamon Honey',
-        description: 'Warm and spicy cinnamon-infused honey. Perfect for toast and baking.',
-        sku: 'HONEY-008',
-        price: 25.99,
-        compareAtPrice: 30.99,
-        category: categories[1]._id,
+        name: 'Levi\'s 511 Slim Fit Jeans - Blue Indigo',
+        description: 'Levi\'s iconic 511 slim fit jeans crafted from stretch denim for comfort and mobility. Sits below the waist, slim through the seat and thigh, and narrow at the leg opening.',
+        sku: 'FASH-LV-511-INDIGO',
+        price: 2999,
+        compareAtPrice: 3999,
+        category: cat('mens-clothing'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1542272604-787c3835535d?w=600',
+        ],
+        inventory: 150,
+        status: 'approved',
+        featured: false,
+        rating: 4.5,
+        numReviews: 234,
+        tags: ['levis', 'jeans', 'mens', 'denim'],
+        variants: [{ name: 'Size', options: ['28', '30', '32', '34', '36'] }],
+      },
+      // ── Women's Clothing ─────────────────────────────────────────────────
+      {
+        name: 'Biba Women Anarkali Kurta - Multicolor',
+        description: 'Biba women anarkali kurta in multicolor floral print. Made from premium cotton blend fabric. Features three-quarter sleeves and a flared silhouette. Perfect for festive occasions.',
+        sku: 'FASH-BB-WKURTA-MC',
+        price: 1599,
+        compareAtPrice: 2299,
+        category: cat('womens-clothing'),
         seller: seller1._id,
         images: [
-          'https://images.unsplash.com/photo-1558642452-9d2a7deb7f62?w=500',
+          'https://images.unsplash.com/photo-1594938298603-c8148c4b0abb?w=600',
+          'https://images.unsplash.com/photo-1483985988355-763728e1935b?w=600',
+        ],
+        inventory: 120,
+        status: 'approved',
+        featured: true,
+        rating: 4.3,
+        numReviews: 145,
+        tags: ['biba', 'kurta', 'ethnic', 'womens', 'festive'],
+        variants: [{ name: 'Size', options: ['XS', 'S', 'M', 'L', 'XL'] }],
+      },
+      {
+        name: 'H&M Women Floral Wrap Dress',
+        description: 'Elegant wrap dress in a floaty woven fabric with an all-over floral print. V-neck, long sleeves with buttons at the cuffs, and a tie belt at the waist. Midi length.',
+        sku: 'FASH-HM-WDRESS-FL',
+        price: 1999,
+        compareAtPrice: 2799,
+        category: cat('womens-clothing'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1515372039744-b8f02a3ae446?w=600',
+        ],
+        inventory: 85,
+        status: 'approved',
+        featured: false,
+        rating: 4.1,
+        numReviews: 67,
+        tags: ['hm', 'dress', 'floral', 'womens', 'midi'],
+        variants: [{ name: 'Size', options: ['XS', 'S', 'M', 'L'] }],
+      },
+      // ── Footwear ─────────────────────────────────────────────────────────
+      {
+        name: 'Nike Air Max 270 Running Shoes - Black/White',
+        description: "Nike Air Max 270 features Nike's largest Air unit yet for incredible all-day comfort. Mesh upper for breathability, foam midsole for cushioning, and rubber outsole for durability.",
+        sku: 'FASH-NK-AM270-BLK',
+        price: 10995,
+        compareAtPrice: 13495,
+        category: cat('footwear'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=600',
+          'https://images.unsplash.com/photo-1460353581641-37baddab0fa2?w=600',
+        ],
+        inventory: 80,
+        status: 'approved',
+        featured: true,
+        rating: 4.6,
+        numReviews: 391,
+        tags: ['nike', 'airmax', 'running', 'shoes', 'sneakers'],
+        variants: [{ name: 'Size (UK)', options: ['6', '7', '8', '9', '10', '11'] }],
+      },
+      {
+        name: 'Adidas Ultraboost 22 Running Shoes',
+        description: 'Adidas Ultraboost 22 with Boost midsole for incredible energy return, Primeknit upper for adaptive support, and Continental rubber outsole for exceptional grip on any surface.',
+        sku: 'FASH-AD-UB22-WHT',
+        price: 14999,
+        compareAtPrice: 17999,
+        category: cat('footwear'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1608231387042-66d1773070a5?w=600',
+        ],
+        inventory: 55,
+        status: 'approved',
+        featured: false,
+        rating: 4.7,
+        numReviews: 278,
+        tags: ['adidas', 'ultraboost', 'running', 'shoes'],
+        variants: [{ name: 'Size (UK)', options: ['6', '7', '8', '9', '10', '11'] }],
+      },
+      // ── Kitchen Appliances ────────────────────────────────────────────────
+      {
+        name: 'Philips HD9252/90 Air Fryer 1400W 4.1L',
+        description: 'Philips air fryer with Rapid Air technology circulates hot air for crispy results using up to 90% less fat. 4.1L capacity, 7 preset programs, digital touchscreen, dishwasher-safe basket.',
+        sku: 'HOME-PH-AF4L',
+        price: 7995,
+        compareAtPrice: 10995,
+        category: cat('kitchen-appliances'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1585771724684-38269d6639fd?w=600',
+        ],
+        inventory: 65,
+        status: 'approved',
+        featured: true,
+        rating: 4.5,
+        numReviews: 512,
+        tags: ['philips', 'airfryer', 'kitchen', 'healthy-cooking'],
+      },
+      {
+        name: 'Instant Pot Duo 7-in-1 Electric Pressure Cooker 6L',
+        description: 'Instant Pot Duo combines 7 kitchen appliances in 1: pressure cooker, slow cooker, rice cooker, steamer, sauté pan, yogurt maker and warmer. 6L capacity with 13 built-in programs.',
+        sku: 'HOME-IP-DUO6L',
+        price: 8999,
+        compareAtPrice: 11999,
+        category: cat('kitchen-appliances'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=600',
+        ],
+        inventory: 40,
+        status: 'approved',
+        featured: false,
+        rating: 4.8,
+        numReviews: 689,
+        tags: ['instant-pot', 'pressure-cooker', 'kitchen', 'multi-cooker'],
+      },
+      {
+        name: 'Dyson V15 Detect Cordless Vacuum Cleaner',
+        description: 'Dyson V15 Detect reveals microscopic dust with its built-in laser. Intelligent suction automatically adapts to hidden debris. Up to 60 minutes fade-free power. HEPA filtration.',
+        sku: 'HOME-DY-V15',
+        price: 52900,
+        compareAtPrice: 62900,
+        category: cat('home-kitchen'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=600',
+        ],
+        inventory: 20,
+        status: 'approved',
+        featured: false,
+        rating: 4.7,
+        numReviews: 203,
+        tags: ['dyson', 'vacuum', 'cordless', 'home-cleaning'],
+      },
+      // ── Home Decor ────────────────────────────────────────────────────────
+      {
+        name: 'Scented Soy Wax Candle Set - Lavender & Vanilla (Pack of 3)',
+        description: 'Hand-poured soy wax candles with premium fragrance oils. Set of 3 — lavender, vanilla, and sandalwood. 40-hour burn time each. Eco-friendly, clean-burning, no toxic chemicals.',
+        sku: 'HOME-DC-CANDLE3',
+        price: 999,
+        compareAtPrice: 1499,
+        category: cat('home-decor'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1602523961358-f9f03dd557db?w=600',
+          'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=600',
+        ],
+        inventory: 180,
+        status: 'approved',
+        featured: false,
+        rating: 4.4,
+        numReviews: 134,
+        tags: ['candle', 'soy-wax', 'home-decor', 'aromatherapy', 'gift'],
+      },
+      // ── Beauty & Skincare ─────────────────────────────────────────────────
+      {
+        name: 'Minimalist 10% Niacinamide + Zinc Face Serum 30ml',
+        description: 'Minimalist niacinamide serum with 10% niacinamide and 1% zinc to visibly reduce pores, control sebum, and even skin tone. Lightweight, water-based formula suitable for all skin types.',
+        sku: 'BEAU-MM-NIAC30',
+        price: 599,
+        compareAtPrice: 799,
+        category: cat('skincare'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1570194065650-d99fb4ee3b4c?w=600',
+          'https://images.unsplash.com/photo-1596462502278-27bfdc403348?w=600',
+        ],
+        inventory: 300,
+        status: 'approved',
+        featured: true,
+        rating: 4.6,
+        numReviews: 892,
+        tags: ['minimalist', 'niacinamide', 'serum', 'skincare', 'pores'],
+      },
+      {
+        name: 'Mamaearth Onion Hair Oil 250ml - Hair Fall Control',
+        description: 'Mamaearth onion hair oil with onion and plant keratin controls hair fall and promotes growth. Enriched with argan oil for deep nourishment. Suitable for all hair types. Toxin-free formula.',
+        sku: 'BEAU-ME-HAIROIL250',
+        price: 349,
+        compareAtPrice: 449,
+        category: cat('beauty'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1526045612212-70caf35c14df?w=600',
+        ],
+        inventory: 250,
+        status: 'approved',
+        featured: false,
+        rating: 4.3,
+        numReviews: 1203,
+        tags: ['mamaearth', 'hair-oil', 'onion', 'hairfall', 'natural'],
+      },
+      {
+        name: 'Lakme 9 to 5 Primer + Matte Lipstick - Ruby Rush',
+        description: 'Lakme 9 to 5 primer and matte lipstick with built-in primer for smooth, even application. Long-lasting 9-hour formula. Creamy yet matte finish. Color: Ruby Rush (bold red).',
+        sku: 'BEAU-LK-LIPSTICK-RR',
+        price: 299,
+        compareAtPrice: 399,
+        category: cat('beauty'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1586495777744-4e6232bf2a53?w=600',
+        ],
+        inventory: 400,
+        status: 'approved',
+        featured: false,
+        rating: 4.2,
+        numReviews: 567,
+        tags: ['lakme', 'lipstick', 'matte', 'makeup'],
+        variants: [{ name: 'Shade', options: ['Ruby Rush', 'Pink Blush', 'Berry Passion', 'Nude Affair'] }],
+      },
+      // ── Sports & Fitness ──────────────────────────────────────────────────
+      {
+        name: 'Boldfit Adjustable Dumbbell Set 20kg (Pair)',
+        description: 'Boldfit adjustable dumbbell set with quick-change weight mechanism. Each dumbbell adjusts from 2kg to 10kg in 2kg increments. Solid steel construction with anti-slip grip. Includes storage tray.',
+        sku: 'SPRT-BF-DUMBBELL20',
+        price: 3499,
+        compareAtPrice: 4999,
+        category: cat('sports'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=600',
+          'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=600',
+        ],
+        inventory: 75,
+        status: 'approved',
+        featured: true,
+        rating: 4.4,
+        numReviews: 345,
+        tags: ['dumbbell', 'fitness', 'gym', 'weight-training', 'home-gym'],
+      },
+      {
+        name: 'Decathlon Artengo TR 190 Tennis Racket',
+        description: 'Decathlon Artengo TR 190 recreational tennis racket for beginners and intermediate players. 100 sq.in head size, aluminium frame for durability, strung with synthetic strings. Weight: 265g.',
+        sku: 'SPRT-DC-TENNIS',
+        price: 1299,
+        compareAtPrice: 1799,
+        category: cat('sports'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=600',
+        ],
+        inventory: 55,
+        status: 'approved',
+        featured: false,
+        rating: 4.1,
+        numReviews: 89,
+        tags: ['decathlon', 'tennis', 'racket', 'sports'],
+      },
+      {
+        name: 'Puma Men Running Track Pants - Black',
+        description: 'Puma men track pants with moisture-wicking dryCELL technology. Side pockets with zipper, elastic waistband with inner drawstring. Lightweight and breathable for training and running.',
+        sku: 'SPRT-PM-TRACKPANT-BLK',
+        price: 1799,
+        compareAtPrice: 2499,
+        category: cat('sports'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1506629082955-511b1aa562c8?w=600',
+        ],
+        inventory: 130,
+        status: 'approved',
+        featured: false,
+        rating: 4.3,
+        numReviews: 156,
+        tags: ['puma', 'trackpant', 'running', 'sportswear'],
+        variants: [{ name: 'Size', options: ['S', 'M', 'L', 'XL', 'XXL'] }],
+      },
+      // ── Books ─────────────────────────────────────────────────────────────
+      {
+        name: 'Atomic Habits by James Clear (Paperback)',
+        description: 'Atomic Habits by James Clear is a practical guide to building good habits and breaking bad ones. Learn how tiny changes can lead to remarkable results. Over 10 million copies sold worldwide.',
+        sku: 'BOOK-JC-ATOMIC',
+        price: 499,
+        compareAtPrice: 699,
+        category: cat('books'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600',
+          'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=600',
+        ],
+        inventory: 500,
+        status: 'approved',
+        featured: true,
+        rating: 4.9,
+        numReviews: 2341,
+        tags: ['book', 'self-help', 'habits', 'productivity', 'james-clear'],
+      },
+      {
+        name: 'The Psychology of Money by Morgan Housel',
+        description: 'Morgan Housel explores the strange ways people think about money and teaches you how to make better sense of one of life\'s most important subjects. A must-read for anyone seeking financial wisdom.',
+        sku: 'BOOK-MH-PSYMONEY',
+        price: 449,
+        compareAtPrice: 599,
+        category: cat('books'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1553729459-efe14ef6055d?w=600',
+        ],
+        inventory: 380,
+        status: 'approved',
+        featured: false,
+        rating: 4.8,
+        numReviews: 1567,
+        tags: ['book', 'finance', 'money', 'personal-finance'],
+      },
+      // ── Grocery & Gourmet ─────────────────────────────────────────────────
+      {
+        name: 'Tata Salt Lite 1kg (Low Sodium)',
+        description: 'Tata Salt Lite with 15% lower sodium compared to regular salt. Iodized for thyroid health. Processed under strict quality standards. Available in easy-pour packaging. Ideal for a healthier lifestyle.',
+        sku: 'GROC-TS-SALTLITE1KG',
+        price: 39,
+        compareAtPrice: 49,
+        category: cat('grocery'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1501432377862-3d0432b87a14?w=600',
+        ],
+        inventory: 1000,
+        status: 'approved',
+        featured: false,
+        rating: 4.4,
+        numReviews: 2890,
+        tags: ['tata', 'salt', 'low-sodium', 'grocery', 'staples'],
+      },
+      {
+        name: 'Yoga Bar Oats + Whey Protein Bar - Choco Almond (Pack of 6)',
+        description: 'Yoga Bar protein bars with 8g protein per bar. Made with whole grain oats, whey protein, and real almonds. No refined sugar. Perfect post-workout snack or healthy breakfast on the go.',
+        sku: 'GROC-YB-PROTBAR6',
+        price: 349,
+        compareAtPrice: 420,
+        category: cat('grocery'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=600',
+        ],
+        inventory: 600,
+        status: 'approved',
+        featured: false,
+        rating: 4.2,
+        numReviews: 734,
+        tags: ['yoga-bar', 'protein-bar', 'snacks', 'healthy', 'oats'],
+      },
+      // ── Health & Nutrition ────────────────────────────────────────────────
+      {
+        name: 'Oziva Protein & Herbs for Women 500g - Chocolate',
+        description: 'OZiva protein blend with whey protein, soy protein, ayurvedic herbs, and multivitamins. 23g protein per serving. Designed for women — supports lean muscle, weight management and hormonal balance.',
+        sku: 'HLTH-OZ-PROTWOMEN500',
+        price: 1299,
+        compareAtPrice: 1799,
+        category: cat('health-nutrition'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1593095948071-474c5cc2989d?w=600',
+        ],
+        inventory: 150,
+        status: 'approved',
+        featured: false,
+        rating: 4.3,
+        numReviews: 456,
+        tags: ['oziva', 'protein', 'women', 'supplement', 'whey'],
+        variants: [{ name: 'Flavor', options: ['Chocolate', 'Vanilla', 'Strawberry'] }],
+      },
+      {
+        name: 'Himalaya Ashwagandha Tablet 60 Tabs - Stress Relief',
+        description: 'Himalaya Ashwagandha pure herb tablets. Clinically proven to reduce stress and anxiety, improve physical endurance, and boost immunity. 1 tablet twice daily after meals. No artificial preservatives.',
+        sku: 'HLTH-HIM-ASHWA60',
+        price: 185,
+        compareAtPrice: 230,
+        category: cat('health-nutrition'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=600',
+        ],
+        inventory: 800,
+        status: 'approved',
+        featured: false,
+        rating: 4.5,
+        numReviews: 1234,
+        tags: ['himalaya', 'ashwagandha', 'ayurvedic', 'stress-relief', 'supplement'],
+      },
+      // ── Toys & Baby ───────────────────────────────────────────────────────
+      {
+        name: 'LEGO Classic Creative Brick Box 484 Pieces',
+        description: 'LEGO Classic creative brick box with 484 pieces in 33 colors. Includes building guide with 5 ideas. Develops creativity, motor skills and problem-solving in children ages 4+. 100% compatible with all LEGO sets.',
+        sku: 'TOYS-LG-CLASSIC484',
+        price: 3199,
+        compareAtPrice: 3999,
+        category: cat('toys-baby'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1587654780291-39c9404d746b?w=600',
+          'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=600',
         ],
         inventory: 90,
         status: 'approved',
+        featured: true,
+        rating: 4.8,
+        numReviews: 678,
+        tags: ['lego', 'toys', 'building', 'kids', 'creative'],
+      },
+      {
+        name: 'Fisher-Price Laugh & Learn Smart Stages Chair',
+        description: 'Fisher-Price baby activity chair with 3 Smart Stages learning levels that grow with baby (6-36 months). 65+ songs, sounds, and phrases. Teaches ABCs, numbers, colours, and more.',
+        sku: 'TOYS-FP-SMARTCHAIR',
+        price: 2499,
+        compareAtPrice: 3499,
+        category: cat('toys-baby'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1515488042361-ee00e0ddd4e4?w=600',
+        ],
+        inventory: 45,
+        status: 'approved',
+        featured: false,
+        rating: 4.6,
+        numReviews: 289,
+        tags: ['fisher-price', 'baby', 'educational', 'learning', 'infant'],
+      },
+      // ── Automotive ────────────────────────────────────────────────────────
+      {
+        name: 'Bosch S4 Car Battery 55Ah 12V - Maintenance Free',
+        description: 'Bosch S4 maintenance-free car battery with 55Ah capacity. Suitable for most petrol and diesel cars. High cycle stability, vibration resistant, and leak-proof design. 24-month warranty.',
+        sku: 'AUTO-BSH-BATT55AH',
+        price: 5499,
+        compareAtPrice: 6999,
+        category: cat('automotive'),
+        seller: seller1._id,
+        images: [
+          'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=600',
+        ],
+        inventory: 35,
+        status: 'approved',
+        featured: false,
         rating: 4.4,
-        numReviews: 11,
-        tags: ['cinnamon', 'flavored', 'spiced'],
+        numReviews: 167,
+        tags: ['bosch', 'car-battery', 'automotive', 'maintenance-free'],
+      },
+      {
+        name: '3M Scotchgard Car Wash Shampoo 500ml',
+        description: '3M Scotchgard car wash shampoo with pH balanced formula that is safe on clear coat and wax finishes. Rich foaming action removes dirt, grime, and road film without stripping wax protection.',
+        sku: 'AUTO-3M-CARWASH500',
+        price: 299,
+        compareAtPrice: 399,
+        category: cat('automotive'),
+        seller: seller2._id,
+        images: [
+          'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=600',
+        ],
+        inventory: 250,
+        status: 'approved',
+        featured: false,
+        rating: 4.3,
+        numReviews: 312,
+        tags: ['3m', 'car-wash', 'shampoo', 'automotive', 'car-care'],
       },
     ];
 
     const createdProducts = await productModel.insertMany(products);
-    this.logger.log(`✅ Created ${createdProducts.length} products`);
+    this.logger.log(`✅ Created ${createdProducts.length} products across ${categories.length} categories`);
     return createdProducts;
   }
 
@@ -436,8 +1050,8 @@ export class SeedService {
     // Register Address model using schema directly
     const addressModel = this.connection.model('Address', AddressSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@honey.com');
-    const customer2 = users.find(u => u.email === 'customer2@honey.com');
+    const customer1 = users.find(u => u.email === 'customer1@honeycom.in');
+    const customer2 = users.find(u => u.email === 'customer2@honeycom.in');
 
     if (!customer1 || !customer2) {
       this.logger.warn('Customer users not found, skipping address seeding');
@@ -526,7 +1140,7 @@ export class SeedService {
     // Register PaymentMethod model using schema directly
     const paymentMethodModel = this.connection.model('PaymentMethod', PaymentMethodSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@honey.com');
+    const customer1 = users.find(u => u.email === 'customer1@honeycom.in');
 
     if (!customer1) {
       this.logger.warn('Customer user not found, skipping payment method seeding');
@@ -649,7 +1263,7 @@ export class SeedService {
     // Register Cart model using schema directly
     const cartModel = this.connection.model('Cart', CartSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@honey.com');
+    const customer1 = users.find(u => u.email === 'customer1@honeycom.in');
 
     const carts = [
       {
@@ -684,8 +1298,8 @@ export class SeedService {
     // Register Order model using schema directly
     const orderModel = this.connection.model('Order', OrderSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@honey.com');
-    const customer2 = users.find(u => u.email === 'customer2@honey.com');
+    const customer1 = users.find(u => u.email === 'customer1@honeycom.in');
+    const customer2 = users.find(u => u.email === 'customer2@honeycom.in');
 
     // Get address IDs - use first address for customer1, second for customer2
     const address1 = addresses && addresses.length > 0 ? addresses[0]._id : null;
@@ -768,15 +1382,15 @@ export class SeedService {
     // Register Review model using schema directly
     const reviewModel = this.connection.model('Review', ReviewSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@honey.com');
-    const customer2 = users.find(u => u.email === 'customer2@honey.com');
+    const customer1 = users.find(u => u.email === 'customer1@honeycom.in');
+    const customer2 = users.find(u => u.email === 'customer2@honeycom.in');
 
     const reviews = [
       {
         product: products[0]._id,
         user: customer1._id,
         rating: 5,
-        comment: 'Amazing quality! The wildflower honey has such a rich flavor. Highly recommend!',
+        comment: 'Excellent product! Arrived well-packaged and exactly as described. Highly recommend!',
         verifiedPurchase: true,
         helpful: 12,
         status: 'approved',
@@ -818,7 +1432,7 @@ export class SeedService {
   private async seedCMS(users: any[]) {
     this.logger.log('Seeding CMS content...');
 
-    const editor = users.find(u => u.email === 'editor@honey.com');
+    const editor = users.find(u => u.email === 'editor@honeycom.in');
 
         // Dynamically import BlogCategory schema only - avoid importing the pre-registered model
         const blogCategoryModule = await import('../../models/BlogCategory.model');
@@ -830,19 +1444,29 @@ export class SeedService {
     // Blog Categories
     const blogCategories = await blogCategoryModel.insertMany([
       {
-        name: 'Honey Benefits',
-        slug: 'honey-benefits',
-        description: 'Learn about the health benefits of honey',
+        name: 'Shopping Tips',
+        slug: 'shopping-tips',
+        description: 'Smart tips to help you shop better and save more',
       },
       {
-        name: 'Recipes',
-        slug: 'recipes',
-        description: 'Delicious recipes using honey',
+        name: 'Tech Reviews',
+        slug: 'tech-reviews',
+        description: 'In-depth reviews of the latest electronics and gadgets',
       },
       {
-        name: 'Beekeeping',
-        slug: 'beekeeping',
-        description: 'Tips and guides for beekeeping',
+        name: 'Fashion & Style',
+        slug: 'fashion-style',
+        description: 'Style guides, trends and fashion advice',
+      },
+      {
+        name: 'Health & Wellness',
+        slug: 'health-wellness',
+        description: 'Tips on healthy living, nutrition and fitness',
+      },
+      {
+        name: 'Seller Guide',
+        slug: 'seller-guide',
+        description: 'Resources and guides for sellers on HoneyCom',
       },
     ]);
 
@@ -861,24 +1485,37 @@ export class SeedService {
       {
         title: 'About Us',
         slug: 'about-us',
-        content: '<h1>About Honey Store</h1><p>We are passionate about bringing you the finest quality honey from trusted beekeepers around the world.</p>',
+        content: '<h1>About HoneyCom</h1><p>HoneyCom is India\'s next-generation multi-seller marketplace connecting millions of buyers with verified sellers across every category — from electronics and fashion to groceries and home decor.</p><p>We believe commerce should be fair, fast, and trustworthy. Every seller on HoneyCom is KYC-verified, every product is reviewed, and every transaction is protected by our buyer guarantee.</p>',
         status: 'published',
-        metaTitle: 'About Us - Honey Store',
-        metaDescription: 'Learn about our mission to provide the best honey products',
+        metaTitle: 'About HoneyCom - India\'s Trusted Marketplace',
+        metaDescription: 'Learn about HoneyCom — connecting buyers with verified sellers across India.',
         author: editor._id,
       },
       {
         title: 'Privacy Policy',
         slug: 'privacy-policy',
-        content: '<h1>Privacy Policy</h1><p>Your privacy is important to us...</p>',
+        content: '<h1>Privacy Policy</h1><p>At HoneyCom, your privacy is our priority. We collect only the data necessary to provide our services and never sell your personal information to third parties.</p><p>Data we collect: name, email, phone number, shipping addresses, and order history. All payment data is handled by Stripe and never stored on our servers.</p>',
         status: 'published',
+        metaTitle: 'Privacy Policy - HoneyCom',
+        metaDescription: 'Read HoneyCom\'s privacy policy to understand how we handle your data.',
         author: editor._id,
       },
       {
         title: 'Terms of Service',
         slug: 'terms-of-service',
-        content: '<h1>Terms of Service</h1><p>Please read these terms carefully...</p>',
+        content: '<h1>Terms of Service</h1><p>By using HoneyCom, you agree to these terms. Our platform connects buyers with independent sellers. HoneyCom is not responsible for the quality of third-party seller products beyond our verification process.</p><p>Buyers are protected by our 10-day return policy on eligible items. Sellers must comply with our seller guidelines and maintain minimum ratings.</p>',
         status: 'published',
+        metaTitle: 'Terms of Service - HoneyCom',
+        metaDescription: 'Read HoneyCom\'s terms of service.',
+        author: editor._id,
+      },
+      {
+        title: 'Shipping Policy',
+        slug: 'shipping-policy',
+        content: '<h1>Shipping Policy</h1><p>Standard delivery: 3-7 business days. Express delivery: 1-2 days (available in select cities). Free shipping on orders above ₹499. Real-time tracking on all orders.</p>',
+        status: 'published',
+        metaTitle: 'Shipping Policy - HoneyCom',
+        metaDescription: 'Learn about HoneyCom\'s shipping and delivery policy.',
         author: editor._id,
       },
     ]);
@@ -886,28 +1523,64 @@ export class SeedService {
     // Blog Posts
     await blogModel.insertMany([
       {
-        title: '10 Amazing Health Benefits of Honey',
-        slug: '10-amazing-health-benefits-of-honey',
-        excerpt: 'Discover the incredible health benefits that honey has to offer',
-        content: '<h1>10 Amazing Health Benefits of Honey</h1><p>Honey has been used for centuries for its medicinal properties...</p>',
-        featuredImage: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?w=800',
+        title: '10 Tips to Find the Best Deals on HoneyCom',
+        slug: '10-tips-find-best-deals-honeycom',
+        excerpt: 'Smart shopping strategies to save more on every order — from using coupons to timing your purchases.',
+        content: '<h1>10 Tips to Find the Best Deals on HoneyCom</h1><p>Shopping smart starts with knowing where to look and when to buy. Here are 10 proven strategies to get the most value on HoneyCom.</p><h2>1. Check Deals of the Day</h2><p>Our homepage features time-limited deals with up to 40% off. Check every morning for new offers.</p><h2>2. Use Coupon Codes</h2><p>New users get 10% off with code WELCOME10. Check your profile for personalized coupons.</p><h2>3. Set Price Alerts</h2><p>Add items to your wishlist and we\'ll notify you when prices drop.</p>',
+        featuredImage: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=800',
         category: blogCategories[0]._id,
         author: editor._id,
-        tags: ['health', 'benefits', 'honey'],
+        tags: ['shopping', 'deals', 'savings', 'coupons'],
         status: 'published',
         publishedAt: new Date(),
       },
       {
-        title: 'Honey Glazed Salmon Recipe',
-        slug: 'honey-glazed-salmon-recipe',
-        excerpt: 'A delicious and easy recipe for honey glazed salmon',
-        content: '<h1>Honey Glazed Salmon Recipe</h1><p>This recipe combines the sweetness of honey with the richness of salmon...</p>',
-        featuredImage: 'https://images.unsplash.com/photo-1558642452-9d2a7deb7f62?w=800',
+        title: 'Samsung Galaxy S24 Ultra vs iPhone 15 Pro: Which Should You Buy?',
+        slug: 'samsung-s24-ultra-vs-iphone-15-pro',
+        excerpt: 'A detailed comparison of 2024\'s two flagship smartphones to help you make the right choice.',
+        content: '<h1>Samsung Galaxy S24 Ultra vs iPhone 15 Pro</h1><p>Both are exceptional smartphones, but they excel in different areas. Here\'s our in-depth comparison.</p><h2>Display</h2><p>The S24 Ultra wins with its larger 6.8-inch LTPO AMOLED display. The iPhone 15 Pro has a slightly smaller but incredibly sharp Super Retina XDR display.</p><h2>Camera</h2><p>S24 Ultra leads with 200MP main sensor. iPhone 15 Pro delivers more natural colors and better video stabilization.</p><h2>Performance</h2><p>Both are blazing fast. The A17 Pro in iPhone is marginally faster in single-core tasks; Snapdragon 8 Gen 3 excels in gaming and multi-core workloads.</p><h2>Verdict</h2><p>Choose iPhone 15 Pro for ecosystem integration and video quality. Choose S24 Ultra for camera versatility and Android flexibility.</p>',
+        featuredImage: 'https://images.unsplash.com/photo-1510557880182-3d4d3cba35a5?w=800',
         category: blogCategories[1]._id,
         author: editor._id,
-        tags: ['recipe', 'salmon', 'cooking'],
+        tags: ['samsung', 'iphone', 'smartphone', 'review', 'comparison'],
         status: 'published',
-        publishedAt: new Date(),
+        publishedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+      },
+      {
+        title: 'Monsoon Fashion 2025: Top Trends to Shop Now',
+        slug: 'monsoon-fashion-2025-top-trends',
+        excerpt: 'Stay stylish this monsoon with our curated guide to the season\'s must-have fashion pieces.',
+        content: '<h1>Monsoon Fashion 2025: Top Trends</h1><p>The monsoon season calls for fashion that is both practical and stylish. Here are the trends dominating 2025.</p><h2>1. Pastel Kurtas</h2><p>Lightweight cotton kurtas in pastel shades are perfect for humid weather. Shop Biba, W, and Fabindia collections on HoneyCom.</p><h2>2. Waterproof Sneakers</h2><p>Rain-ready footwear has gone fashionable. Nike and Adidas both have excellent waterproof options.</p><h2>3. Linen Co-ords</h2><p>Breathable linen co-ord sets in earthy tones are trending across all age groups this season.</p>',
+        featuredImage: 'https://images.unsplash.com/photo-1445205170230-053b83016050?w=800',
+        category: blogCategories[2]._id,
+        author: editor._id,
+        tags: ['fashion', 'monsoon', 'style', 'trends', '2025'],
+        status: 'published',
+        publishedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+      },
+      {
+        title: 'How to Become a Verified Seller on HoneyCom',
+        slug: 'how-to-become-verified-seller-honeycom',
+        excerpt: 'Step-by-step guide for businesses and entrepreneurs to start selling on HoneyCom and reach millions of buyers.',
+        content: '<h1>How to Become a Verified Seller on HoneyCom</h1><p>Joining HoneyCom as a seller gives you access to millions of active shoppers across India. Here\'s how to get started.</p><h2>Step 1: Register</h2><p>Visit /seller/register and fill in your business details — business name, GSTIN, and bank account for payouts.</p><h2>Step 2: KYC Verification</h2><p>Upload your PAN card, Aadhaar/passport, and business proof. Our team reviews and approves within 24-48 hours.</p><h2>Step 3: List Your Products</h2><p>Use our seller dashboard to add products with images, descriptions, pricing, and inventory. Products go live after admin approval.</p><h2>Step 4: Start Selling</h2><p>Receive orders, process them via your dashboard, and get paid within 7 days of delivery confirmation.</p>',
+        featuredImage: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=800',
+        category: blogCategories[4]._id,
+        author: editor._id,
+        tags: ['seller', 'guide', 'ecommerce', 'business', 'honeycom'],
+        status: 'published',
+        publishedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+      },
+      {
+        title: 'Best Home Gym Equipment Under ₹5000 in 2025',
+        slug: 'best-home-gym-equipment-under-5000-2025',
+        excerpt: 'Build an effective home workout setup without breaking the bank. Our top picks under ₹5000.',
+        content: '<h1>Best Home Gym Equipment Under ₹5000</h1><p>You don\'t need an expensive gym membership to stay fit. Here are the best home gym investments under ₹5000.</p><h2>1. Adjustable Dumbbell Set (₹3499)</h2><p>Boldfit adjustable dumbbells replace a full rack of weights and are perfect for beginners and intermediate lifters.</p><h2>2. Resistance Bands Set (₹799)</h2><p>Versatile bands for full-body workouts. Great for warm-ups, stretching, and strength training.</p><h2>3. Yoga Mat (₹599)</h2><p>A 6mm non-slip yoga mat is essential for floor exercises, yoga, and stretching.</p><h2>4. Jump Rope (₹299)</h2><p>One of the best cardio tools available. 10 minutes of jumping rope equals 30 minutes of jogging.</p>',
+        featuredImage: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800',
+        category: blogCategories[3]._id,
+        author: editor._id,
+        tags: ['fitness', 'home-gym', 'sports', 'health', 'equipment'],
+        status: 'published',
+        publishedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
       },
     ]);
 
