@@ -758,7 +758,7 @@ export class AuthService {
     await user.save();
 
     const accountName = user.email || (user.phone ? user.phone : `user-${user._id}`);
-    const issuer = process.env.TOTP_ISSUER || 'HoneyCom';
+    const issuer = process.env.TOTP_ISSUER || 'Dayam';
     const otpauthUrl = buildOtpauthUrl({ secret, accountName, issuer });
 
     return {

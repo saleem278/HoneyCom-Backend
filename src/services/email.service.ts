@@ -77,7 +77,7 @@ export class EmailService {
   async sendVerificationEmail(email: string, token: string): Promise<void> {
     await this.sendEmail({
       to: email,
-      subject: 'Verify Your Email Address - HoneyCom',
+      subject: 'Verify Your Email Address - Dayam',
       html: this.templatesService.getVerificationEmail(token),
     });
   }
@@ -85,7 +85,7 @@ export class EmailService {
   async sendPasswordResetEmail(email: string, token: string): Promise<void> {
     await this.sendEmail({
       to: email,
-      subject: 'Reset Your Password - HoneyCom',
+      subject: 'Reset Your Password - Dayam',
       html: this.templatesService.getPasswordResetEmail(token),
     });
   }
@@ -94,7 +94,7 @@ export class EmailService {
     const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
     await this.sendEmail({
       to: email,
-      subject: `Order Confirmation - #${orderId} - HoneyCom`,
+      subject: `Order Confirmation - #${orderId} - Dayam`,
       html: this.templatesService.getOrderConfirmationEmail(order),
     });
   }
@@ -103,7 +103,7 @@ export class EmailService {
     const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
     await this.sendEmail({
       to: email,
-      subject: `Order Update - #${orderId} - HoneyCom`,
+      subject: `Order Update - #${orderId} - Dayam`,
       html: this.templatesService.getOrderStatusUpdateEmail(order),
     });
   }
@@ -111,7 +111,7 @@ export class EmailService {
   async sendSellerApprovalEmail(email: string, sellerName: string): Promise<void> {
     await this.sendEmail({
       to: email,
-      subject: 'Seller Account Approved - Welcome to HoneyCom!',
+      subject: 'Seller Account Approved - Welcome to Dayam!',
       html: this.templatesService.getSellerApprovalEmail(sellerName),
     });
   }
@@ -119,7 +119,7 @@ export class EmailService {
   async sendSellerRejectionEmail(email: string, sellerName: string, reason?: string): Promise<void> {
     await this.sendEmail({
       to: email,
-      subject: 'Seller Account Application Status - HoneyCom',
+      subject: 'Seller Account Application Status - Dayam',
       html: this.templatesService.getSellerRejectionEmail(sellerName, reason),
     });
   }
@@ -141,7 +141,7 @@ export class EmailService {
       subject: `Your product has been approved`,
       html: `
         <h2>Product approved</h2>
-        <p>Your product <strong>${safeName}</strong> has been approved and is now live on HoneyCom marketplace.</p>
+        <p>Your product <strong>${safeName}</strong> has been approved and is now live on Dayam marketplace.</p>
         <p>Customers can now find and purchase it.</p>
       `,
     });

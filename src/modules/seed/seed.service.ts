@@ -147,7 +147,7 @@ export class SeedService {
     const users = [
       {
         name: 'Super Admin',
-        email: 'superadmin@honeycom.in',
+        email: 'superadmin@dayam.in',
         password: hashedPassword,
         role: 'superadmin',
         status: 'active',
@@ -155,7 +155,7 @@ export class SeedService {
       },
       {
         name: 'Admin User',
-        email: 'admin@honeycom.in',
+        email: 'admin@dayam.in',
         password: hashedPassword,
         role: 'admin',
         status: 'active',
@@ -163,7 +163,7 @@ export class SeedService {
       },
       {
         name: 'Raj Electronics',
-        email: 'seller@honeycom.in',
+        email: 'seller@dayam.in',
         password: hashedPassword,
         role: 'seller',
         status: 'active',
@@ -171,7 +171,7 @@ export class SeedService {
       },
       {
         name: 'Priya Fashion Store',
-        email: 'jane.seller@honeycom.in',
+        email: 'jane.seller@dayam.in',
         password: hashedPassword,
         role: 'seller',
         status: 'active',
@@ -179,7 +179,7 @@ export class SeedService {
       },
       {
         name: 'Ankit Sharma',
-        email: 'customer1@honeycom.in',
+        email: 'customer1@dayam.in',
         password: hashedPassword,
         role: 'customer',
         status: 'active',
@@ -187,7 +187,7 @@ export class SeedService {
       },
       {
         name: 'Meera Patel',
-        email: 'customer2@honeycom.in',
+        email: 'customer2@dayam.in',
         password: hashedPassword,
         role: 'customer',
         status: 'active',
@@ -195,7 +195,7 @@ export class SeedService {
       },
       {
         name: 'Content Editor',
-        email: 'editor@honeycom.in',
+        email: 'editor@dayam.in',
         password: hashedPassword,
         role: 'contentEditor',
         status: 'active',
@@ -438,8 +438,8 @@ export class SeedService {
     const ProductSchema = productModule.ProductSchema;
     const productModel = this.connection.model('Product', ProductSchema);
 
-    const seller1 = users.find(u => u.email === 'seller@honeycom.in');
-    const seller2 = users.find(u => u.email === 'jane.seller@honeycom.in');
+    const seller1 = users.find(u => u.email === 'seller@dayam.in');
+    const seller2 = users.find(u => u.email === 'jane.seller@dayam.in');
 
     // Helper to find category by slug
     const cat = (slug: string) => {
@@ -1058,8 +1058,8 @@ export class SeedService {
     // Register Address model using schema directly
     const addressModel = this.connection.model('Address', AddressSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@honeycom.in');
-    const customer2 = users.find(u => u.email === 'customer2@honeycom.in');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
+    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
 
     if (!customer1 || !customer2) {
       this.logger.warn('Customer users not found, skipping address seeding');
@@ -1148,7 +1148,7 @@ export class SeedService {
     // Register PaymentMethod model using schema directly
     const paymentMethodModel = this.connection.model('PaymentMethod', PaymentMethodSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@honeycom.in');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
 
     if (!customer1) {
       this.logger.warn('Customer user not found, skipping payment method seeding');
@@ -1271,7 +1271,7 @@ export class SeedService {
     // Register Cart model using schema directly
     const cartModel = this.connection.model('Cart', CartSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@honeycom.in');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
 
     const carts = [
       {
@@ -1306,8 +1306,8 @@ export class SeedService {
     // Register Order model using schema directly
     const orderModel = this.connection.model('Order', OrderSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@honeycom.in');
-    const customer2 = users.find(u => u.email === 'customer2@honeycom.in');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
+    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
 
     // Get address IDs - use first address for customer1, second for customer2
     const address1 = addresses && addresses.length > 0 ? addresses[0]._id : null;
@@ -1390,8 +1390,8 @@ export class SeedService {
     // Register Review model using schema directly
     const reviewModel = this.connection.model('Review', ReviewSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@honeycom.in');
-    const customer2 = users.find(u => u.email === 'customer2@honeycom.in');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
+    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
 
     const reviews = [
       {
@@ -1440,7 +1440,7 @@ export class SeedService {
   private async seedCMS(users: any[]) {
     this.logger.log('Seeding CMS content...');
 
-    const editor = users.find(u => u.email === 'editor@honeycom.in');
+    const editor = users.find(u => u.email === 'editor@dayam.in');
 
         // Dynamically import BlogCategory schema only - avoid importing the pre-registered model
         const blogCategoryModule = await import('../../models/BlogCategory.model');
@@ -1474,7 +1474,7 @@ export class SeedService {
       {
         name: 'Seller Guide',
         slug: 'seller-guide',
-        description: 'Resources and guides for sellers on HoneyCom',
+        description: 'Resources and guides for sellers on Dayam',
       },
     ]);
 
@@ -1493,28 +1493,28 @@ export class SeedService {
       {
         title: 'About Us',
         slug: 'about-us',
-        content: '<h1>About HoneyCom</h1><p>HoneyCom is India\'s next-generation multi-seller marketplace connecting millions of buyers with verified sellers across every category — from electronics and fashion to groceries and home decor.</p><p>We believe commerce should be fair, fast, and trustworthy. Every seller on HoneyCom is KYC-verified, every product is reviewed, and every transaction is protected by our buyer guarantee.</p>',
+        content: '<h1>About Dayam</h1><p>Dayam is India\'s next-generation multi-seller marketplace connecting millions of buyers with verified sellers across every category — from electronics and fashion to groceries and home decor.</p><p>We believe commerce should be fair, fast, and trustworthy. Every seller on Dayam is KYC-verified, every product is reviewed, and every transaction is protected by our buyer guarantee.</p>',
         status: 'published',
-        metaTitle: 'About HoneyCom - India\'s Trusted Marketplace',
-        metaDescription: 'Learn about HoneyCom — connecting buyers with verified sellers across India.',
+        metaTitle: 'About Dayam - India\'s Trusted Marketplace',
+        metaDescription: 'Learn about Dayam — connecting buyers with verified sellers across India.',
         author: editor._id,
       },
       {
         title: 'Privacy Policy',
         slug: 'privacy-policy',
-        content: '<h1>Privacy Policy</h1><p>At HoneyCom, your privacy is our priority. We collect only the data necessary to provide our services and never sell your personal information to third parties.</p><p>Data we collect: name, email, phone number, shipping addresses, and order history. All payment data is handled by Stripe and never stored on our servers.</p>',
+        content: '<h1>Privacy Policy</h1><p>At Dayam, your privacy is our priority. We collect only the data necessary to provide our services and never sell your personal information to third parties.</p><p>Data we collect: name, email, phone number, shipping addresses, and order history. All payment data is handled by Stripe and never stored on our servers.</p>',
         status: 'published',
-        metaTitle: 'Privacy Policy - HoneyCom',
-        metaDescription: 'Read HoneyCom\'s privacy policy to understand how we handle your data.',
+        metaTitle: 'Privacy Policy - Dayam',
+        metaDescription: 'Read Dayam\'s privacy policy to understand how we handle your data.',
         author: editor._id,
       },
       {
         title: 'Terms of Service',
         slug: 'terms-of-service',
-        content: '<h1>Terms of Service</h1><p>By using HoneyCom, you agree to these terms. Our platform connects buyers with independent sellers. HoneyCom is not responsible for the quality of third-party seller products beyond our verification process.</p><p>Buyers are protected by our 10-day return policy on eligible items. Sellers must comply with our seller guidelines and maintain minimum ratings.</p>',
+        content: '<h1>Terms of Service</h1><p>By using Dayam, you agree to these terms. Our platform connects buyers with independent sellers. Dayam is not responsible for the quality of third-party seller products beyond our verification process.</p><p>Buyers are protected by our 10-day return policy on eligible items. Sellers must comply with our seller guidelines and maintain minimum ratings.</p>',
         status: 'published',
-        metaTitle: 'Terms of Service - HoneyCom',
-        metaDescription: 'Read HoneyCom\'s terms of service.',
+        metaTitle: 'Terms of Service - Dayam',
+        metaDescription: 'Read Dayam\'s terms of service.',
         author: editor._id,
       },
       {
@@ -1522,8 +1522,8 @@ export class SeedService {
         slug: 'shipping-policy',
         content: '<h1>Shipping Policy</h1><p>Standard delivery: 3-7 business days. Express delivery: 1-2 days (available in select cities). Free shipping on orders above ₹499. Real-time tracking on all orders.</p>',
         status: 'published',
-        metaTitle: 'Shipping Policy - HoneyCom',
-        metaDescription: 'Learn about HoneyCom\'s shipping and delivery policy.',
+        metaTitle: 'Shipping Policy - Dayam',
+        metaDescription: 'Learn about Dayam\'s shipping and delivery policy.',
         author: editor._id,
       },
     ]);
@@ -1531,10 +1531,10 @@ export class SeedService {
     // Blog Posts
     await blogModel.insertMany([
       {
-        title: '10 Tips to Find the Best Deals on HoneyCom',
+        title: '10 Tips to Find the Best Deals on Dayam',
         slug: '10-tips-find-best-deals-honeycom',
         excerpt: 'Smart shopping strategies to save more on every order — from using coupons to timing your purchases.',
-        content: '<h1>10 Tips to Find the Best Deals on HoneyCom</h1><p>Shopping smart starts with knowing where to look and when to buy. Here are 10 proven strategies to get the most value on HoneyCom.</p><h2>1. Check Deals of the Day</h2><p>Our homepage features time-limited deals with up to 40% off. Check every morning for new offers.</p><h2>2. Use Coupon Codes</h2><p>New users get 10% off with code WELCOME10. Check your profile for personalized coupons.</p><h2>3. Set Price Alerts</h2><p>Add items to your wishlist and we\'ll notify you when prices drop.</p>',
+        content: '<h1>10 Tips to Find the Best Deals on Dayam</h1><p>Shopping smart starts with knowing where to look and when to buy. Here are 10 proven strategies to get the most value on Dayam.</p><h2>1. Check Deals of the Day</h2><p>Our homepage features time-limited deals with up to 40% off. Check every morning for new offers.</p><h2>2. Use Coupon Codes</h2><p>New users get 10% off with code WELCOME10. Check your profile for personalized coupons.</p><h2>3. Set Price Alerts</h2><p>Add items to your wishlist and we\'ll notify you when prices drop.</p>',
         featuredImage: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=800',
         category: blogCategories[0]._id,
         author: editor._id,
@@ -1558,7 +1558,7 @@ export class SeedService {
         title: 'Monsoon Fashion 2025: Top Trends to Shop Now',
         slug: 'monsoon-fashion-2025-top-trends',
         excerpt: 'Stay stylish this monsoon with our curated guide to the season\'s must-have fashion pieces.',
-        content: '<h1>Monsoon Fashion 2025: Top Trends</h1><p>The monsoon season calls for fashion that is both practical and stylish. Here are the trends dominating 2025.</p><h2>1. Pastel Kurtas</h2><p>Lightweight cotton kurtas in pastel shades are perfect for humid weather. Shop Biba, W, and Fabindia collections on HoneyCom.</p><h2>2. Waterproof Sneakers</h2><p>Rain-ready footwear has gone fashionable. Nike and Adidas both have excellent waterproof options.</p><h2>3. Linen Co-ords</h2><p>Breathable linen co-ord sets in earthy tones are trending across all age groups this season.</p>',
+        content: '<h1>Monsoon Fashion 2025: Top Trends</h1><p>The monsoon season calls for fashion that is both practical and stylish. Here are the trends dominating 2025.</p><h2>1. Pastel Kurtas</h2><p>Lightweight cotton kurtas in pastel shades are perfect for humid weather. Shop Biba, W, and Fabindia collections on Dayam.</p><h2>2. Waterproof Sneakers</h2><p>Rain-ready footwear has gone fashionable. Nike and Adidas both have excellent waterproof options.</p><h2>3. Linen Co-ords</h2><p>Breathable linen co-ord sets in earthy tones are trending across all age groups this season.</p>',
         featuredImage: 'https://images.unsplash.com/photo-1445205170230-053b83016050?w=800',
         category: blogCategories[2]._id,
         author: editor._id,
@@ -1567,10 +1567,10 @@ export class SeedService {
         publishedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
       },
       {
-        title: 'How to Become a Verified Seller on HoneyCom',
+        title: 'How to Become a Verified Seller on Dayam',
         slug: 'how-to-become-verified-seller-honeycom',
-        excerpt: 'Step-by-step guide for businesses and entrepreneurs to start selling on HoneyCom and reach millions of buyers.',
-        content: '<h1>How to Become a Verified Seller on HoneyCom</h1><p>Joining HoneyCom as a seller gives you access to millions of active shoppers across India. Here\'s how to get started.</p><h2>Step 1: Register</h2><p>Visit /seller/register and fill in your business details — business name, GSTIN, and bank account for payouts.</p><h2>Step 2: KYC Verification</h2><p>Upload your PAN card, Aadhaar/passport, and business proof. Our team reviews and approves within 24-48 hours.</p><h2>Step 3: List Your Products</h2><p>Use our seller dashboard to add products with images, descriptions, pricing, and inventory. Products go live after admin approval.</p><h2>Step 4: Start Selling</h2><p>Receive orders, process them via your dashboard, and get paid within 7 days of delivery confirmation.</p>',
+        excerpt: 'Step-by-step guide for businesses and entrepreneurs to start selling on Dayam and reach millions of buyers.',
+        content: '<h1>How to Become a Verified Seller on Dayam</h1><p>Joining Dayam as a seller gives you access to millions of active shoppers across India. Here\'s how to get started.</p><h2>Step 1: Register</h2><p>Visit /seller/register and fill in your business details — business name, GSTIN, and bank account for payouts.</p><h2>Step 2: KYC Verification</h2><p>Upload your PAN card, Aadhaar/passport, and business proof. Our team reviews and approves within 24-48 hours.</p><h2>Step 3: List Your Products</h2><p>Use our seller dashboard to add products with images, descriptions, pricing, and inventory. Products go live after admin approval.</p><h2>Step 4: Start Selling</h2><p>Receive orders, process them via your dashboard, and get paid within 7 days of delivery confirmation.</p>',
         featuredImage: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=800',
         category: blogCategories[4]._id,
         author: editor._id,
@@ -1734,10 +1734,10 @@ export class SeedService {
     const now = new Date();
     const settings = [
       // ── Branding ───────────────────────────────────────────────────────────
-      { key: 'branding.siteName',       value: 'HoneyCom',                           category: 'branding', description: 'Marketplace display name shown in the header, emails and page titles.' },
+      { key: 'branding.siteName',       value: 'Dayam',                           category: 'branding', description: 'Marketplace display name shown in the header, emails and page titles.' },
       { key: 'branding.tagline',        value: "India's Trusted Multi-Seller Marketplace", category: 'branding', description: 'Short tagline shown in footer and email templates.' },
       { key: 'branding.logoEmoji',      value: '🛒',                                  category: 'branding', description: 'Emoji used as logo placeholder when no image logo is set.' },
-      { key: 'branding.supportEmail',   value: 'support@honeycom.in',                category: 'branding', description: 'Customer-facing support email shown in emails and footer.' },
+      { key: 'branding.supportEmail',   value: 'support@dayam.in',                category: 'branding', description: 'Customer-facing support email shown in emails and footer.' },
       { key: 'branding.supportPhone',   value: '+91 98765 43210',                    category: 'branding', description: 'Customer-facing support phone number.' },
       { key: 'branding.address',        value: '4th Floor, Tech Park Building, Sector 18, Gurugram, Haryana – 122001', category: 'branding', description: 'Company address shown in footer and legal pages.' },
       { key: 'branding.primaryColor',   value: '#F97316',                            category: 'branding', description: 'Primary accent colour (orange). Used in email CTAs and highlights.' },
@@ -1751,7 +1751,7 @@ export class SeedService {
       { key: 'storefront.heroSlogan',   value: 'Shop Everything. Trust Everyone.',   category: 'storefront', description: 'Hero section main slogan.' },
       { key: 'storefront.featuredCount', value: 8,                                   category: 'storefront', description: 'Number of featured products shown on the homepage.' },
       // ── SEO ───────────────────────────────────────────────────────────────
-      { key: 'seo.metaTitle',           value: 'HoneyCom — India\'s Trusted Marketplace', category: 'seo', description: 'Default HTML <title> for the storefront.' },
+      { key: 'seo.metaTitle',           value: 'Dayam — India\'s Trusted Marketplace', category: 'seo', description: 'Default HTML <title> for the storefront.' },
       { key: 'seo.metaDescription',     value: 'Shop electronics, fashion, home, beauty and more from 500+ verified sellers. Best prices, fast delivery, easy returns.', category: 'seo', description: 'Default meta description for SEO.' },
       { key: 'seo.keywords',            value: 'online shopping, marketplace, electronics, fashion, grocery, India', category: 'seo', description: 'Default meta keywords (comma-separated).' },
     ].map(s => ({ ...s, createdAt: now, updatedAt: now }));

@@ -9,14 +9,14 @@ import * as crypto from 'crypto';
 import { User, IUser } from '../../../models/User.model';
 import { Session, ISession } from '../../../models/Session.model';
 
-export const SESSION_COOKIE_NAME = 'honeycom_session';
+export const SESSION_COOKIE_NAME = 'dayam_session';
 /**
  * During an admin impersonation session, the admin's original token is
  * stashed under this name so it can be restored when the admin ends
  * impersonation. The frontend never reads this cookie (it's HttpOnly);
  * the backend just swaps the two cookies in start/end endpoints.
  */
-export const ADMIN_STASH_COOKIE_NAME = 'honeycom_admin_session';
+export const ADMIN_STASH_COOKIE_NAME = 'dayam_admin_session';
 
 /**
  * Reads the JWT from the session cookie. Returns null when missing so

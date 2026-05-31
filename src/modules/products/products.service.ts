@@ -246,7 +246,7 @@ export class ProductsService {
     'res.cloudinary.com',
     'cloudinary.com',
     'images.unsplash.com',
-    'cdn.honeycom.com',
+    'cdn.dayam.in',
   ];
 
   private validateImageUrls(images: unknown[]): void {
