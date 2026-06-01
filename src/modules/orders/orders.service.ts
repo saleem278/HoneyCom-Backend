@@ -98,9 +98,14 @@ export class OrdersService {
     const session = await this.connection.startSession();
 
     try {
-      return await session.withTransaction(async () => {
-        return await this._createWithSession(userId, orderData, session);
+      let result: any;
+      await session.withTransaction(async () => {
+        result = await this._createWithSession(userId, orderData, session);
       });
+      // withTransaction return value is unreliable on standalone MongoDB
+      // (returns session metadata instead of callback result). Always use
+      // the captured variable instead.
+      return result;
     } finally {
       await session.endSession();
     }
