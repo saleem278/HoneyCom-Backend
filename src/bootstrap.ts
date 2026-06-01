@@ -14,9 +14,17 @@ export interface BootstrapOptions {
 }
 
 function parseAllowedOrigins(): string[] {
+  const LOCAL_ORIGINS = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:3002',
+    'http://localhost:8080',
+  ];
   const raw = process.env.FRONTEND_URL;
-  if (!raw) return ['http://localhost:3000', 'http://localhost:3001'];
-  return raw.split(',').map((url) => url.trim()).filter(Boolean);
+  if (!raw) return LOCAL_ORIGINS;
+  const configured = raw.split(',').map((url) => url.trim()).filter(Boolean);
+  // Always include localhost origins so local dev works regardless of FRONTEND_URL.
+  return [...new Set([...configured, ...LOCAL_ORIGINS])];
 }
 
 export function applySecurity(app: INestApplication, opts: BootstrapOptions = {}): void {
