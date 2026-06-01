@@ -64,7 +64,7 @@ export class PaymentsService {
         const order = await this.razorpay.orders.create({
           amount: amountInSmallestUnit,
           currency: normalizedCurrency,
-          receipt: `receipt_${Date.now()}`,
+          receipt: `rcpt_${Date.now().toString(36)}`,
         });
 
         return {
@@ -75,7 +75,13 @@ export class PaymentsService {
           keyId: this.razorpayKeyId,
         };
       } catch (error: any) {
-        throw new BadRequestException(`Razorpay order creation failed: ${error.message}`);
+        // Razorpay SDK wraps API errors as { statusCode, error: { description } }
+        const msg =
+          error?.error?.description ||
+          error?.message ||
+          JSON.stringify(error);
+        this.logger.error(`Razorpay order creation failed: ${msg}`);
+        throw new BadRequestException(`Razorpay order creation failed: ${msg}`);
       }
     }
 
@@ -141,7 +147,8 @@ export class PaymentsService {
           currency: payment.currency,
         };
       } catch (error: any) {
-        throw new BadRequestException(`Payment confirmation failed: ${error.message}`);
+        const msg = error?.error?.description || error?.message || JSON.stringify(error);
+        throw new BadRequestException(`Payment confirmation failed: ${msg}`);
       }
     }
 
@@ -179,7 +186,8 @@ export class PaymentsService {
           razorpayPaymentId,
         };
       } catch (error: any) {
-        throw new BadRequestException(`Refund processing failed: ${error.message}`);
+        const msg = error?.error?.description || error?.message || JSON.stringify(error);
+        throw new BadRequestException(`Refund processing failed: ${msg}`);
       }
     }
 
