@@ -55,6 +55,10 @@ export class SeedService {
       await this.seedOrders(users, products, addresses);
       await this.seedReviews(users, products);
       await this.seedCMS(users);
+      await this.seedBanners();
+      await this.seedBrands();
+      await this.seedWidgets();
+      await this.seedDisputes(users, products);
       await this.seedSettings();
 
       this.logger.log('✅ Database seeding completed successfully!');
@@ -87,6 +91,11 @@ export class SeedService {
       'forms',       // Has validation requiring fields
       'media',       // Has multiple required fields
       'blogcategories', // Has required slug field
+      'banners',
+      'brands',
+      'widgets',
+      'disputes',
+      'notifications',
     ];
 
     for (const collectionName of criticalCollections) {
@@ -468,6 +477,24 @@ export class SeedService {
         rating: 4.7,
         numReviews: 312,
         tags: ['samsung', 'galaxy', 'android', 'flagship', '5g'],
+        specifications: [
+          { label: 'Display', value: '6.8" Dynamic AMOLED 2X, 3088×1440' },
+          { label: 'Processor', value: 'Snapdragon 8 Gen 3' },
+          { label: 'RAM', value: '12 GB' },
+          { label: 'Storage', value: '256 GB' },
+          { label: 'Camera', value: '200MP + 12MP + 10MP + 10MP' },
+          { label: 'Battery', value: '5000 mAh, 45W Fast Charging' },
+          { label: 'OS', value: 'Android 14 (One UI 6.1)' },
+          { label: 'Connectivity', value: '5G, Wi-Fi 7, Bluetooth 5.3' },
+          { label: 'Weight', value: '232g' },
+          { label: 'Color', value: 'Titanium Black' },
+        ],
+        qna: [
+          { q: 'Does the S24 Ultra support 5G in India?', a: 'Yes, it supports both SA and NSA 5G bands including the sub-6GHz bands available in India.' },
+          { q: 'Is the S Pen included in the box?', a: 'Yes, the S Pen is built into the device and included out of the box.' },
+          { q: 'What warranty is provided?', a: '1-year Samsung India warranty with access to 2000+ service centers across India.' },
+          { q: 'Does it support wireless charging?', a: 'Yes, it supports 15W wireless charging and 4.5W reverse wireless charging.' },
+        ],
       },
       {
         name: 'Apple iPhone 15 Pro 128GB Natural Titanium',
@@ -487,6 +514,24 @@ export class SeedService {
         rating: 4.9,
         numReviews: 547,
         tags: ['apple', 'iphone', 'ios', 'flagship', '5g'],
+        specifications: [
+          { label: 'Display', value: '6.1" Super Retina XDR OLED' },
+          { label: 'Processor', value: 'Apple A17 Pro' },
+          { label: 'Storage', value: '128 GB' },
+          { label: 'Camera', value: '48MP Main + 12MP Ultra Wide + 12MP 5x Telephoto' },
+          { label: 'Battery', value: 'Up to 23 hours video playback' },
+          { label: 'Charging', value: 'USB-C, MagSafe, Qi2' },
+          { label: 'OS', value: 'iOS 17' },
+          { label: 'Build', value: 'Titanium frame, textured matte glass back' },
+          { label: 'Weight', value: '187g' },
+          { label: 'Color', value: 'Natural Titanium' },
+        ],
+        qna: [
+          { q: 'Does iPhone 15 Pro support 5G?', a: 'Yes, it supports 5G (sub-6GHz) across all Indian networks.' },
+          { q: 'Can I use two SIMs?', a: 'It supports Dual SIM (nano-SIM + eSIM) in India.' },
+          { q: 'Does it come with a charger in the box?', a: 'Apple includes a USB-C cable but no power adapter. You will need to purchase an adapter separately.' },
+          { q: 'What warranty does this carry?', a: '1-year Apple India limited warranty. You can also purchase AppleCare+ for extended coverage.' },
+        ],
       },
       {
         name: 'OnePlus 12 256GB Flowy Emerald',
@@ -1721,6 +1766,166 @@ export class SeedService {
     ]);
 
     this.logger.log('✅ Created CMS content (pages, blog posts, media, menus, forms)');
+  }
+
+  private async seedBanners() {
+    this.logger.log('Seeding banners...');
+    const bannerModule = await import('../../models/Banner.model');
+    const bannerModel = this.connection.model('Banner', bannerModule.BannerSchema);
+    await bannerModel.insertMany([
+      {
+        title: 'Mega Sale — Up to 50% Off',
+        description: 'Shop the biggest sale of the year across all categories.',
+        image: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=1200&q=80',
+        link: '/products?sort=discount',
+        position: 'top',
+        status: 'active',
+        order: 1,
+      },
+      {
+        title: 'New Arrivals — Fashion 2026',
+        description: 'Discover the latest trends from verified fashion sellers.',
+        image: 'https://images.unsplash.com/photo-1445205170230-053b83016050?w=1200&q=80',
+        link: '/products?category=fashion&sort=newest',
+        position: 'top',
+        status: 'active',
+        order: 2,
+      },
+      {
+        title: 'Electronics Bonanza',
+        description: 'Samsung, Apple, OnePlus — top brands, best prices.',
+        image: 'https://images.unsplash.com/photo-1498049794561-7780e7231661?w=1200&q=80',
+        link: '/products?category=electronics',
+        position: 'top',
+        status: 'active',
+        order: 3,
+      },
+      {
+        title: 'Home & Kitchen Deals',
+        description: 'Upgrade your home with top-rated appliances and decor.',
+        image: 'https://images.unsplash.com/photo-1556909114-f6e7ad7d3136?w=1200&q=80',
+        link: '/products?category=home-kitchen',
+        position: 'middle',
+        status: 'active',
+        order: 1,
+      },
+    ]);
+    this.logger.log('✅ Created 4 banners');
+  }
+
+  private async seedBrands() {
+    this.logger.log('Seeding brands...');
+    const brandModule = await import('../../models/Brand.model');
+    const brandModel = this.connection.model('Brand', brandModule.BrandSchema);
+    await brandModel.insertMany([
+      { name: 'Samsung', slug: 'samsung', description: 'Global leader in consumer electronics and smartphones.', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/24/Samsung_Logo.svg/200px-Samsung_Logo.svg.png', website: 'https://samsung.com', status: 'active' },
+      { name: 'Apple', slug: 'apple', description: 'Premium consumer electronics, software and services.', logo: 'https://upload.wikimedia.org/wikipedia/commons/f/fa/Apple_logo_black.svg', website: 'https://apple.com', status: 'active' },
+      { name: 'Nike', slug: 'nike', description: 'World\'s leading athletic footwear and apparel brand.', logo: 'https://upload.wikimedia.org/wikipedia/commons/a/a6/Logo_NIKE.svg', website: 'https://nike.com', status: 'active' },
+      { name: "Levi's", slug: 'levis', description: 'Iconic American denim brand since 1853.', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f0/Levi%27s_Logo.svg/200px-Levi%27s_Logo.svg.png', website: 'https://levi.com', status: 'active' },
+      { name: 'Philips', slug: 'philips', description: 'Leading health tech and consumer electronics brand.', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/Philips_logo_new.svg/200px-Philips_logo_new.svg.png', website: 'https://philips.com', status: 'active' },
+      { name: 'Himalaya', slug: 'himalaya', description: 'India\'s trusted herbal wellness and skincare brand.', logo: '', website: 'https://himalayawellness.in', status: 'active' },
+      { name: 'OnePlus', slug: 'oneplus', description: 'Premium Android smartphones and accessories.', logo: '', website: 'https://oneplus.com', status: 'active' },
+      { name: 'Bosch', slug: 'bosch', description: 'German engineering leader in home appliances and tools.', logo: '', website: 'https://bosch.com', status: 'active' },
+    ]);
+    this.logger.log('✅ Created 8 brands');
+  }
+
+  private async seedWidgets() {
+    this.logger.log('Seeding widgets...');
+    const widgetModule = await import('../../models/Widget.model');
+    const widgetModel = this.connection.model('Widget', widgetModule.WidgetSchema);
+    await widgetModel.insertMany([
+      {
+        name: 'Homepage Announcement',
+        type: 'html',
+        content: '<div style="background:#F97316;color:#fff;padding:10px;text-align:center;font-weight:600;">🚚 Free delivery on orders above ₹499 | ✅ 500+ Verified Sellers | 🛡️ Buyer Protection</div>',
+        location: 'header',
+        isActive: true,
+      },
+      {
+        name: 'Trust Badges Sidebar',
+        type: 'html',
+        content: '<ul><li>✅ 100% Authentic Products</li><li>🔒 Secure Payments</li><li>↩️ Easy Returns</li><li>🚚 Fast Delivery</li></ul>',
+        location: 'product-sidebar',
+        isActive: true,
+      },
+      {
+        name: 'Newsletter Signup Footer',
+        type: 'text',
+        content: 'Subscribe to get exclusive deals and new arrivals straight to your inbox. No spam, ever.',
+        location: 'footer',
+        isActive: true,
+      },
+      {
+        name: 'Checkout Trust Strip',
+        type: 'html',
+        content: '<div style="display:flex;gap:16px;padding:12px;background:#f9fafb;border-radius:8px;"><span>🔒 SSL Secured</span><span>💳 Multiple Payment Options</span><span>🛡️ Buyer Protection</span></div>',
+        location: 'checkout-sidebar',
+        isActive: true,
+      },
+    ]);
+    this.logger.log('✅ Created 4 widgets');
+  }
+
+  private async seedDisputes(users: any[], products: any[]) {
+    this.logger.log('Seeding disputes...');
+    const disputeModule = await import('../../models/Dispute.model');
+    const disputeModel = this.connection.model('Dispute', disputeModule.DisputeSchema);
+
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
+    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
+    const seller = users.find(u => u.email === 'seller@dayam.in');
+
+    if (!customer1 || !customer2 || !seller) {
+      this.logger.warn('Skipping disputes — required users not found');
+      return;
+    }
+
+    // Use the order model to find a real order
+    const orderModule = await import('../../models/Order.model');
+    const orderModel = this.connection.model('Order', orderModule.OrderSchema);
+    const order = await orderModel.findOne({ customer: customer1._id });
+    if (!order) {
+      this.logger.warn('Skipping disputes — no orders found for customer1');
+      return;
+    }
+
+    await disputeModel.insertMany([
+      {
+        order: order._id,
+        customer: customer1._id,
+        seller: seller._id,
+        type: 'quality',
+        reason: 'Product quality issue',
+        description: 'The product received is different from what was shown in the listing. The color is completely different and the build quality is poor.',
+        status: 'open',
+        attachments: [],
+      },
+      {
+        order: order._id,
+        customer: customer2._id,
+        seller: seller._id,
+        type: 'delivery',
+        reason: 'Late delivery',
+        description: 'Order was supposed to arrive within 3 days but it has been 10 days. No tracking update since the order was shipped.',
+        status: 'in_review',
+        attachments: [],
+      },
+      {
+        order: order._id,
+        customer: customer1._id,
+        type: 'refund',
+        reason: 'Item not as described',
+        description: 'Requested a refund but seller has not responded in 5 days.',
+        status: 'resolved',
+        resolution: 'full_refund',
+        resolutionNotes: 'Full refund processed. Customer has been notified.',
+        resolvedBy: users.find(u => u.role === 'admin')?._id,
+        resolvedAt: new Date(),
+        attachments: [],
+      },
+    ]);
+    this.logger.log('✅ Created 3 disputes');
   }
 
   private async seedSettings() {
