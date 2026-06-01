@@ -29,7 +29,7 @@ export class SeedService {
     // BlogCategory removed from injection - will be loaded dynamically
     // Address, PaymentMethod removed from injection - will be loaded dynamically
     @InjectConnection() private connection: Connection,
-  ) {}
+  ) { }
 
   async seed() {
     this.logger.log('Starting database seeding...');
@@ -45,7 +45,7 @@ export class SeedService {
       if (users.length === 0) {
         throw new Error('No users were created. Cannot proceed with seeding.');
       }
-      
+
       const categories = await this.seedCategories();
       const products = await this.seedProducts(users, categories);
       const addresses = await this.seedAddresses(users);
@@ -68,7 +68,7 @@ export class SeedService {
   private async clearDatabase() {
     this.logger.log('Clearing existing data...');
     const connection = this.userModel.db;
-    
+
     // CRITICAL: Drop collections with required fields FIRST
     // These might have invalid documents that cause validation errors
     const criticalCollections = [
@@ -88,7 +88,7 @@ export class SeedService {
       'media',       // Has multiple required fields
       'blogcategories', // Has required slug field
     ];
-    
+
     for (const collectionName of criticalCollections) {
       try {
         await connection.db.collection(collectionName).drop();
@@ -99,23 +99,23 @@ export class SeedService {
         }
       }
     }
-    
+
     // Then get all other collections and drop them
     const collections = await connection.db.listCollections().toArray();
     this.logger.log(`Found ${collections.length} collections to process`);
-    
+
     // Drop all collections except system collections
     for (const collection of collections) {
       const collectionName = collection.name;
       // Skip system collections and already dropped critical collections
       if (
-        collectionName.startsWith('system.') || 
+        collectionName.startsWith('system.') ||
         collectionName === 'indexes' ||
         criticalCollections.includes(collectionName)
       ) {
         continue;
       }
-      
+
       try {
         await connection.db.collection(collectionName).drop();
         this.logger.log(`✅ Dropped collection: ${collectionName}`);
@@ -126,7 +126,7 @@ export class SeedService {
         }
       }
     }
-    
+
     // Wait a moment to ensure all drops are committed
     await new Promise(resolve => setTimeout(resolve, 100));
     this.logger.log('✅ Database clearing completed');
@@ -206,19 +206,19 @@ export class SeedService {
     try {
       // Don't use deleteMany - it can trigger validation on other models
       // Collections are already dropped in clearDatabase()
-      
+
       const createdUsers = await this.userModel.insertMany(users, {
         ordered: true,
         rawResult: false,
       });
-      
+
       this.logger.log(`✅ Created ${createdUsers.length} users`);
-      
+
       // Debug: Log user IDs to ensure they're accessible
       createdUsers.forEach((user, index) => {
         this.logger.log(`User ${index + 1}: ${user.email} - ID: ${user._id}`);
       });
-      
+
       return createdUsers;
     } catch (error: any) {
       this.logger.error(`Error seeding users: ${error.message}`);
@@ -1054,7 +1054,7 @@ export class SeedService {
     // Dynamically import Address schema only - avoid importing the pre-registered model
     const addressModule = await import('../../models/Address.model');
     const AddressSchema = addressModule.AddressSchema;
-    
+
     // Register Address model using schema directly
     const addressModel = this.connection.model('Address', AddressSchema);
 
@@ -1069,7 +1069,7 @@ export class SeedService {
 
     const user1Id = customer1._id || customer1.id;
     const user2Id = customer2._id || customer2.id;
-    
+
     this.logger.log(`Found customer1: ${customer1.email} with ID: ${user1Id} (type: ${typeof user1Id})`);
     this.logger.log(`Found customer2: ${customer2.email} with ID: ${user2Id} (type: ${typeof user2Id})`);
 
@@ -1125,9 +1125,9 @@ export class SeedService {
     }
 
     try {
-        const createdAddresses = await addressModel.insertMany(addresses, {
+      const createdAddresses = await addressModel.insertMany(addresses, {
         ordered: false,
-        rawResult: false 
+        rawResult: false
       });
       this.logger.log(`✅ Created ${createdAddresses.length} addresses`);
       return createdAddresses;
@@ -1144,7 +1144,7 @@ export class SeedService {
     // Dynamically import PaymentMethod schema only - avoid importing the pre-registered model
     const paymentMethodModule = await import('../../models/PaymentMethod.model');
     const PaymentMethodSchema = paymentMethodModule.PaymentMethodSchema;
-    
+
     // Register PaymentMethod model using schema directly
     const paymentMethodModel = this.connection.model('PaymentMethod', PaymentMethodSchema);
 
@@ -1157,7 +1157,7 @@ export class SeedService {
     }
 
     const user1Id = customer1._id || customer1.id;
-    
+
     this.logger.log(`Found customer1: ${customer1.email} with ID: ${user1Id} (type: ${typeof user1Id})`);
 
     if (!user1Id) {
@@ -1195,9 +1195,9 @@ export class SeedService {
     }
 
     try {
-        const createdPaymentMethods = await paymentMethodModel.insertMany(paymentMethods, {
+      const createdPaymentMethods = await paymentMethodModel.insertMany(paymentMethods, {
         ordered: false,
-        rawResult: false 
+        rawResult: false
       });
       this.logger.log(`✅ Created ${createdPaymentMethods.length} payment methods`);
       return createdPaymentMethods;
@@ -1214,7 +1214,7 @@ export class SeedService {
     // Dynamically import Coupon schema only - avoid importing the pre-registered model
     const couponModule = await import('../../models/Coupon.model');
     const CouponSchema = couponModule.CouponSchema;
-    
+
     // Register Coupon model using schema directly
     const couponModel = this.connection.model('Coupon', CouponSchema);
 
@@ -1267,7 +1267,7 @@ export class SeedService {
     // Dynamically import Cart schema only - avoid importing the pre-registered model
     const cartModule = await import('../../models/Cart.model');
     const CartSchema = cartModule.CartSchema;
-    
+
     // Register Cart model using schema directly
     const cartModel = this.connection.model('Cart', CartSchema);
 
@@ -1302,7 +1302,7 @@ export class SeedService {
     // Dynamically import Order schema only - avoid importing the pre-registered model
     const orderModule = await import('../../models/Order.model');
     const OrderSchema = orderModule.OrderSchema;
-    
+
     // Register Order model using schema directly
     const orderModel = this.connection.model('Order', OrderSchema);
 
@@ -1386,7 +1386,7 @@ export class SeedService {
     // Dynamically import Review schema only - avoid importing the pre-registered model
     const reviewModule = await import('../../models/Review.model');
     const ReviewSchema = reviewModule.ReviewSchema;
-    
+
     // Register Review model using schema directly
     const reviewModel = this.connection.model('Review', ReviewSchema);
 
@@ -1442,12 +1442,12 @@ export class SeedService {
 
     const editor = users.find(u => u.email === 'editor@dayam.in');
 
-        // Dynamically import BlogCategory schema only - avoid importing the pre-registered model
-        const blogCategoryModule = await import('../../models/BlogCategory.model');
-        const BlogCategorySchema = blogCategoryModule.BlogCategorySchema;
-        
-        // Register BlogCategory model using schema directly
-        const blogCategoryModel = this.connection.model('BlogCategory', BlogCategorySchema);
+    // Dynamically import BlogCategory schema only - avoid importing the pre-registered model
+    const blogCategoryModule = await import('../../models/BlogCategory.model');
+    const BlogCategorySchema = blogCategoryModule.BlogCategorySchema;
+
+    // Register BlogCategory model using schema directly
+    const blogCategoryModel = this.connection.model('BlogCategory', BlogCategorySchema);
 
     // Blog Categories
     const blogCategories = await blogCategoryModel.insertMany([
@@ -1478,15 +1478,15 @@ export class SeedService {
       },
     ]);
 
-        // Dynamically import models to avoid global registration during module initialization
-        const pageModule = await import('../../models/Page.model');
-        const blogModule = await import('../../models/Blog.model');
-        const PageSchema = pageModule.PageSchema;
-        const BlogSchema = blogModule.BlogSchema;
-        
-        // Register models using schema directly
-        const pageModel = this.connection.model('Page', PageSchema);
-        const blogModel = this.connection.model('Blog', BlogSchema);
+    // Dynamically import models to avoid global registration during module initialization
+    const pageModule = await import('../../models/Page.model');
+    const blogModule = await import('../../models/Blog.model');
+    const PageSchema = pageModule.PageSchema;
+    const BlogSchema = blogModule.BlogSchema;
+
+    // Register models using schema directly
+    const pageModel = this.connection.model('Page', PageSchema);
+    const blogModel = this.connection.model('Blog', BlogSchema);
 
     // Pages
     await pageModel.insertMany([
@@ -1592,12 +1592,12 @@ export class SeedService {
       },
     ]);
 
-        // Dynamically import Media schema only - avoid importing the pre-registered model
-        const mediaModule = await import('../../models/Media.model');
-        const MediaSchema = mediaModule.MediaSchema;
-        
-        // Register Media model using schema directly
-        const mediaModel = this.connection.model('Media', MediaSchema);
+    // Dynamically import Media schema only - avoid importing the pre-registered model
+    const mediaModule = await import('../../models/Media.model');
+    const MediaSchema = mediaModule.MediaSchema;
+
+    // Register Media model using schema directly
+    const mediaModel = this.connection.model('Media', MediaSchema);
 
     // Media
     await mediaModel.insertMany([
@@ -1619,12 +1619,12 @@ export class SeedService {
       },
     ]);
 
-        // Dynamically import Menu schema only - avoid importing the pre-registered model
-        const menuModule = await import('../../models/Menu.model');
-        const MenuSchema = menuModule.MenuSchema;
-        
-        // Register Menu model using schema directly
-        const menuModel = this.connection.model('Menu', MenuSchema);
+    // Dynamically import Menu schema only - avoid importing the pre-registered model
+    const menuModule = await import('../../models/Menu.model');
+    const MenuSchema = menuModule.MenuSchema;
+
+    // Register Menu model using schema directly
+    const menuModel = this.connection.model('Menu', MenuSchema);
 
     // Menus
     await menuModel.insertMany([
@@ -1679,12 +1679,12 @@ export class SeedService {
       },
     ]);
 
-        // Dynamically import Form schema only - avoid importing the pre-registered model
-        const formModule = await import('../../models/Form.model');
-        const FormSchema = formModule.FormSchema;
-        
-        // Register Form model using schema directly
-        const formModel = this.connection.model('Form', FormSchema);
+    // Dynamically import Form schema only - avoid importing the pre-registered model
+    const formModule = await import('../../models/Form.model');
+    const FormSchema = formModule.FormSchema;
+
+    // Register Form model using schema directly
+    const formModel = this.connection.model('Form', FormSchema);
 
     // Forms
     await formModel.insertMany([
@@ -1733,111 +1733,240 @@ export class SeedService {
     const now = new Date();
     const settings = [
       // ── Branding ────────────────────────────────────────────────────────────
-      { key: 'branding.siteName',       value: 'Dayam',                             category: 'branding', description: 'Marketplace display name in header, emails, page titles.' },
-      { key: 'branding.tagline',        value: "India's Trusted Multi-Seller Marketplace", category: 'branding', description: 'Short tagline in footer and emails.' },
-      { key: 'branding.logoEmoji',      value: '🛒',                                category: 'branding', description: 'Logo emoji beside brand name.' },
-      { key: 'branding.supportEmail',   value: 'support@dayam.in',                  category: 'branding', description: 'Support email in footer and emails.' },
-      { key: 'branding.supportPhone',   value: '+91 98765 43210',                   category: 'branding', description: 'Support phone in footer.' },
-      { key: 'branding.address',        value: '4th Floor, Tech Park, Sector 18, Gurugram, Haryana – 122001', category: 'branding', description: 'Company address.' },
-      { key: 'branding.primaryColor',   value: '#F97316',                           category: 'branding', description: 'Primary accent color (hex).' },
+      { key: 'branding.siteName', value: 'Dayam', category: 'branding', description: 'Marketplace display name in header, emails, page titles.' },
+      { key: 'branding.tagline', value: "India's Trusted Multi-Seller Marketplace", category: 'branding', description: 'Short tagline in footer and emails.' },
+      { key: 'branding.logoEmoji', value: '🛒', category: 'branding', description: 'Logo emoji beside brand name.' },
+      { key: 'branding.supportEmail', value: 'support@dayam.in', category: 'branding', description: 'Support email in footer and emails.' },
+      { key: 'branding.supportPhone', value: '+91 98765 43210', category: 'branding', description: 'Support phone in footer.' },
+      { key: 'branding.address', value: '4th Floor, Tech Park, Sector 18, Gurugram, Haryana – 122001', category: 'branding', description: 'Company address.' },
+      { key: 'branding.primaryColor', value: '#F97316', category: 'branding', description: 'Primary accent color (hex).' },
       // Social links
-      { key: 'branding.socialFacebook', value: 'https://facebook.com/dayam',        category: 'branding', description: 'Facebook page URL.' },
-      { key: 'branding.socialTwitter',  value: 'https://twitter.com/dayam',         category: 'branding', description: 'Twitter/X profile URL.' },
-      { key: 'branding.socialInstagram',value: 'https://instagram.com/dayam',       category: 'branding', description: 'Instagram profile URL.' },
-      { key: 'branding.socialYoutube',  value: 'https://youtube.com/@dayam',        category: 'branding', description: 'YouTube channel URL.' },
-      { key: 'branding.socialWhatsapp', value: 'https://wa.me/919876543210',        category: 'branding', description: 'WhatsApp chat link.' },
+      { key: 'branding.socialFacebook', value: 'https://facebook.com/dayam', category: 'branding', description: 'Facebook page URL.' },
+      { key: 'branding.socialTwitter', value: 'https://twitter.com/dayam', category: 'branding', description: 'Twitter/X profile URL.' },
+      { key: 'branding.socialInstagram', value: 'https://instagram.com/dayam', category: 'branding', description: 'Instagram profile URL.' },
+      { key: 'branding.socialYoutube', value: 'https://youtube.com/@dayam', category: 'branding', description: 'YouTube channel URL.' },
+      { key: 'branding.socialWhatsapp', value: 'https://wa.me/919876543210', category: 'branding', description: 'WhatsApp chat link.' },
 
       // ── Orders ────────────────────────────────────────────────────────────
-      { key: 'order.taxRate',           value: 0.1,    category: 'orders', description: 'Tax rate (decimal). 0.18 = 18% GST.' },
-      { key: 'order.shippingFlat',      value: 99,     category: 'orders', description: 'Flat shipping fee in INR.' },
-      { key: 'order.freeShippingAbove', value: 499,    category: 'orders', description: 'Order subtotal above which shipping is free.' },
+      { key: 'order.taxRate', value: 0.1, category: 'orders', description: 'Tax rate (decimal). 0.18 = 18% GST.' },
+      { key: 'order.shippingFlat', value: 99, category: 'orders', description: 'Flat shipping fee in INR.' },
+      { key: 'order.freeShippingAbove', value: 499, category: 'orders', description: 'Order subtotal above which shipping is free.' },
 
       // ── Storefront — general ──────────────────────────────────────────────
-      { key: 'storefront.announcementBar',    value: '🚚 Free delivery above ₹499 | ✅ 500+ Verified Sellers | 🛡️ Buyer Protection | 💳 EMI available', category: 'storefront', description: 'Ticker bar text. Pipe | separates items.' },
-      { key: 'storefront.heroSlogan',         value: 'Shop Everything. Trust Everyone.', category: 'storefront', description: 'Hero section slogan.' },
-      { key: 'storefront.featuredCount',      value: 8, category: 'storefront', description: 'Products shown in Deals of the Day.' },
-      { key: 'storefront.defaultDeliveryCity',value: 'Mumbai', category: 'storefront', description: 'Default city shown in "Deliver to" header.' },
+      { key: 'storefront.announcementBar', value: '🚚 Free delivery above ₹499 | ✅ 500+ Verified Sellers | 🛡️ Buyer Protection | 💳 EMI available', category: 'storefront', description: 'Ticker bar text. Pipe | separates items.' },
+      { key: 'storefront.heroSlogan', value: 'Shop Everything. Trust Everyone.', category: 'storefront', description: 'Hero section slogan.' },
+      { key: 'storefront.featuredCount', value: 8, category: 'storefront', description: 'Products shown in Deals of the Day.' },
+      { key: 'storefront.defaultDeliveryCity', value: 'Mumbai', category: 'storefront', description: 'Default city shown in "Deliver to" header.' },
       { key: 'storefront.defaultDeliveryPin', value: '400001', category: 'storefront', description: 'Default PIN code shown in header.' },
-      { key: 'storefront.searchPlaceholder',  value: 'Search for phones, fashion, groceries…', category: 'storefront', description: 'Search bar placeholder.' },
-      { key: 'storefront.trendingSearches',   value: 'Samsung Galaxy S24, Nike Air Max, Minimalist Serum, Levi\'s Jeans', category: 'storefront', description: 'Comma-separated trending search terms in search dropdown.' },
+      { key: 'storefront.searchPlaceholder', value: 'Search for phones, fashion, groceries…', category: 'storefront', description: 'Search bar placeholder.' },
+      { key: 'storefront.trendingSearches', value: 'Samsung Galaxy S24, Nike Air Max, Minimalist Serum, Levi\'s Jeans', category: 'storefront', description: 'Comma-separated trending search terms in search dropdown.' },
 
       // ── Storefront — homepage ─────────────────────────────────────────────
-      { key: 'storefront.promoBanner1Title',  value: 'Flash Sale', category: 'storefront', description: 'Left promo banner title.' },
-      { key: 'storefront.promoBanner1Sub',    value: 'Up to 40% Off', category: 'storefront', description: 'Left promo banner subtitle.' },
-      { key: 'storefront.promoBanner1Badge',  value: 'Limited Time', category: 'storefront', description: 'Left promo banner badge text.' },
-      { key: 'storefront.promoBanner1Link',   value: '/products?sort=discount', category: 'storefront', description: 'Left promo banner click URL.' },
-      { key: 'storefront.promoBanner1Emoji',  value: '🛍️', category: 'storefront', description: 'Left promo banner emoji.' },
-      { key: 'storefront.promoBanner1Color',  value: 'from-orange-500 via-amber-500 to-yellow-400', category: 'storefront', description: 'Left banner Tailwind gradient classes.' },
-      { key: 'storefront.promoBanner2Title',  value: 'Trending Fashion Picks', category: 'storefront', description: 'Right promo banner title.' },
-      { key: 'storefront.promoBanner2Sub',    value: 'New Collection', category: 'storefront', description: 'Right promo banner badge.' },
-      { key: 'storefront.promoBanner2Badge',  value: 'New Collection', category: 'storefront', description: 'Right promo banner badge text.' },
-      { key: 'storefront.promoBanner2Link',   value: '/products?category=fashion', category: 'storefront', description: 'Right promo banner click URL.' },
-      { key: 'storefront.promoBanner2Emoji',  value: '👗', category: 'storefront', description: 'Right promo banner emoji.' },
-      { key: 'storefront.promoBanner2Color',  value: 'from-purple-600 via-violet-500 to-indigo-500', category: 'storefront', description: 'Right banner Tailwind gradient classes.' },
+      { key: 'storefront.promoBanner1Title', value: 'Flash Sale', category: 'storefront', description: 'Left promo banner title.' },
+      { key: 'storefront.promoBanner1Sub', value: 'Up to 40% Off', category: 'storefront', description: 'Left promo banner subtitle.' },
+      { key: 'storefront.promoBanner1Badge', value: 'Limited Time', category: 'storefront', description: 'Left promo banner badge text.' },
+      { key: 'storefront.promoBanner1Link', value: '/products?sort=discount', category: 'storefront', description: 'Left promo banner click URL.' },
+      { key: 'storefront.promoBanner1Emoji', value: '🛍️', category: 'storefront', description: 'Left promo banner emoji.' },
+      { key: 'storefront.promoBanner1Color', value: 'from-orange-500 via-amber-500 to-yellow-400', category: 'storefront', description: 'Left banner Tailwind gradient classes.' },
+      { key: 'storefront.promoBanner2Title', value: 'Trending Fashion Picks', category: 'storefront', description: 'Right promo banner title.' },
+      { key: 'storefront.promoBanner2Sub', value: 'New Collection', category: 'storefront', description: 'Right promo banner badge.' },
+      { key: 'storefront.promoBanner2Badge', value: 'New Collection', category: 'storefront', description: 'Right promo banner badge text.' },
+      { key: 'storefront.promoBanner2Link', value: '/products?category=fashion', category: 'storefront', description: 'Right promo banner click URL.' },
+      { key: 'storefront.promoBanner2Emoji', value: '👗', category: 'storefront', description: 'Right promo banner emoji.' },
+      { key: 'storefront.promoBanner2Color', value: 'from-purple-600 via-violet-500 to-indigo-500', category: 'storefront', description: 'Right banner Tailwind gradient classes.' },
 
       // Mid-page feature banner
-      { key: 'storefront.midBannerTitle',     value: 'Latest Smartphones & Laptops', category: 'storefront', description: 'Mid-page dark banner title.' },
-      { key: 'storefront.midBannerSubtitle',  value: 'Up to 40% Off', category: 'storefront', description: 'Mid-page banner highlighted subtitle.' },
-      { key: 'storefront.midBannerDesc',      value: 'Samsung, Apple, OnePlus, Dell and more — top brands at the best prices, delivered in 2 days.', category: 'storefront', description: 'Mid-page banner description.' },
-      { key: 'storefront.midBannerLink',      value: '/products?category=electronics', category: 'storefront', description: 'Mid-page banner click URL.' },
-      { key: 'storefront.midBannerEmoji',     value: '📱', category: 'storefront', description: 'Mid-page banner emoji.' },
-      { key: 'storefront.midBannerCta',       value: 'Shop Now', category: 'storefront', description: 'Mid-page banner CTA button text.' },
-      { key: 'storefront.midBannerNote',      value: 'Free delivery on all orders above ₹499', category: 'storefront', description: 'Mid-page banner small note.' },
+      { key: 'storefront.midBannerTitle', value: 'Latest Smartphones & Laptops', category: 'storefront', description: 'Mid-page dark banner title.' },
+      { key: 'storefront.midBannerSubtitle', value: 'Up to 40% Off', category: 'storefront', description: 'Mid-page banner highlighted subtitle.' },
+      { key: 'storefront.midBannerDesc', value: 'Samsung, Apple, OnePlus, Dell and more — top brands at the best prices, delivered in 2 days.', category: 'storefront', description: 'Mid-page banner description.' },
+      { key: 'storefront.midBannerLink', value: '/products?category=electronics', category: 'storefront', description: 'Mid-page banner click URL.' },
+      { key: 'storefront.midBannerEmoji', value: '📱', category: 'storefront', description: 'Mid-page banner emoji.' },
+      { key: 'storefront.midBannerCta', value: 'Shop Now', category: 'storefront', description: 'Mid-page banner CTA button text.' },
+      { key: 'storefront.midBannerNote', value: 'Free delivery on all orders above ₹499', category: 'storefront', description: 'Mid-page banner small note.' },
 
       // Testimonials (JSON array)
-      { key: 'storefront.testimonials', value: JSON.stringify([
+      {
+        key: 'storefront.testimonials', value: JSON.stringify([
           { name: 'Priya Sharma', location: 'Mumbai', rating: 5, avatar: '👩', text: 'Got my Samsung S24 in 2 days! Packaging was perfect and product is 100% genuine.' },
           { name: 'Rajesh Kumar', location: 'Bangalore', rating: 5, avatar: '👨', text: 'Great selection and fast delivery. The Levi\'s jeans fit perfectly. Will shop again!' },
           { name: 'Anita Patel', location: 'Delhi', rating: 5, avatar: '👩‍🦱', text: 'Minimalist serum arrived quickly and is 100% authentic. Customer support was helpful.' },
           { name: 'Vikram Singh', location: 'Pune', rating: 5, avatar: '🧔', text: 'Best prices for Nike shoes. Easy checkout, fast shipping, hassle-free returns.' },
-        ]), category: 'storefront', description: 'Homepage customer reviews. JSON array of {name, location, rating, avatar, text}.' },
+        ]), category: 'storefront', description: 'Homepage customer reviews. JSON array of {name, location, rating, avatar, text}.'
+      },
 
       // Homepage stats bar
-      { key: 'storefront.stats', value: JSON.stringify([
+      {
+        key: 'storefront.stats', value: JSON.stringify([
           { value: '10K+', label: 'Products', emoji: '📦' },
           { value: '500+', label: 'Sellers', emoji: '🏪' },
           { value: '4.9★', label: 'Avg Rating', emoji: '⭐' },
           { value: '50K+', label: 'Customers', emoji: '🤝' },
-        ]), category: 'storefront', description: 'Homepage stats bar. JSON array of {value, label, emoji}.' },
+        ]), category: 'storefront', description: 'Homepage stats bar. JSON array of {value, label, emoji}.'
+      },
 
       // Newsletter
-      { key: 'storefront.newsletterTitle',    value: 'Stay in the Loop', category: 'storefront', description: 'Newsletter section heading.' },
+      { key: 'storefront.newsletterTitle', value: 'Stay in the Loop', category: 'storefront', description: 'Newsletter section heading.' },
       { key: 'storefront.newsletterSubtitle', value: 'Subscribe for exclusive deals, new arrivals, and tips. No spam, ever.', category: 'storefront', description: 'Newsletter section subtitle.' },
-      { key: 'storefront.newsletterCta',      value: 'Subscribe Free', category: 'storefront', description: 'Newsletter subscribe button text.' },
-      { key: 'storefront.newsletterNote',     value: 'Join 50,000+ happy shoppers. Unsubscribe anytime.', category: 'storefront', description: 'Small note below newsletter form.' },
+      { key: 'storefront.newsletterCta', value: 'Subscribe Free', category: 'storefront', description: 'Newsletter subscribe button text.' },
+      { key: 'storefront.newsletterNote', value: 'Join 50,000+ happy shoppers. Unsubscribe anytime.', category: 'storefront', description: 'Small note below newsletter form.' },
       { key: 'storefront.newsletterPlaceholder', value: 'Enter your email', category: 'storefront', description: 'Newsletter email input placeholder.' },
 
       // About page stats
-      { key: 'storefront.aboutStats', value: JSON.stringify([
+      {
+        key: 'storefront.aboutStats', value: JSON.stringify([
           { label: 'Products Listed', value: '10,000+' },
           { label: 'Verified Sellers', value: '500+' },
           { label: 'Happy Customers', value: '50,000+' },
           { label: 'Cities Served', value: '200+' },
-        ]), category: 'storefront', description: 'About page statistics strip. JSON array of {label, value}.' },
+        ]), category: 'storefront', description: 'About page statistics strip. JSON array of {label, value}.'
+      },
 
       // Footer links
-      { key: 'storefront.footerShopLinks', value: JSON.stringify([
+      {
+        key: 'storefront.footerShopLinks', value: JSON.stringify([
           { label: 'All Products', href: '/products' },
           { label: 'Electronics', href: '/products?category=electronics' },
           { label: 'Fashion', href: '/products?category=fashion' },
           { label: 'Home & Kitchen', href: '/products?category=home-kitchen' },
           { label: 'Deals & Offers', href: '/products?sort=discount' },
           { label: 'New Arrivals', href: '/products?sort=newest' },
-        ]), category: 'storefront', description: 'Footer "Shop" column links. JSON array of {label, href}.' },
+        ]), category: 'storefront', description: 'Footer "Shop" column links. JSON array of {label, href}.'
+      },
 
-      { key: 'storefront.footerHelpLinks', value: JSON.stringify([
+      {
+        key: 'storefront.footerHelpLinks', value: JSON.stringify([
           { label: 'Track My Order', href: '/orders' },
           { label: 'Returns & Refunds', href: '/returns' },
           { label: 'Shipping Info', href: '/shipping' },
           { label: 'FAQ', href: '/faq' },
           { label: 'Contact Us', href: '/contact' },
           { label: 'Sell on Dayam', href: '/seller/register' },
-        ]), category: 'storefront', description: 'Footer "Help" column links. JSON array of {label, href}.' },
+        ]), category: 'storefront', description: 'Footer "Help" column links. JSON array of {label, href}.'
+      },
+
+      // Trust features
+      {
+        key: 'storefront.trustFeatures', value: JSON.stringify([
+          { icon: 'Truck', title: 'Free Delivery', desc: 'On orders above ₹499 across India' },
+          { icon: 'ShieldCheck', title: '100% Authentic', desc: 'Verified sellers, genuine products' },
+          { icon: 'RefreshCw', title: 'Easy Returns', desc: '10-day hassle-free return policy' },
+          { icon: 'Award', title: 'Secure Payments', desc: 'UPI, cards, COD & EMI options' },
+        ]), category: 'storefront', description: 'Trust feature strip on homepage. JSON array of {icon, title, desc}. Icons: Truck, ShieldCheck, RefreshCw, Award.'
+      },
+
+      // Search / delivery
+      { key: 'storefront.searchPlaceholder', value: 'Search for phones, fashion, groceries…', category: 'storefront', description: 'Search input placeholder text.' },
+      { key: 'storefront.trendingSearches', value: "Samsung Galaxy S24, Nike Air Max, Levi's Jeans, Minimalist Serum", category: 'storefront', description: 'Comma-separated trending search terms.' },
+      { key: 'storefront.defaultDeliveryCity', value: 'Mumbai', category: 'storefront', description: '"Deliver to" city shown in the header.' },
+      { key: 'storefront.defaultDeliveryPin', value: '400001', category: 'storefront', description: '"Deliver to" PIN code shown in the header.' },
+      { key: 'storefront.heroCarouselInterval', value: 4500, category: 'storefront', description: 'Hero carousel auto-rotation interval in ms.' },
+
+      // ── Navigation ─────────────────────────────────────────────────────────
+      {
+        key: 'navigation.categories', value: JSON.stringify([
+          { label: 'Electronics', slug: 'electronics', emoji: '📱', sub: ['Smartphones', 'Laptops', 'Audio', 'Cameras', 'Accessories'] },
+          { label: 'Fashion', slug: 'fashion', emoji: '👗', sub: ["Men's Clothing", "Women's Clothing", 'Footwear', 'Accessories', 'Kids'] },
+          { label: 'Home & Kitchen', slug: 'home-kitchen', emoji: '🏠', sub: ['Appliances', 'Cookware', 'Furniture', 'Decor', 'Storage'] },
+          { label: 'Beauty', slug: 'beauty', emoji: '💄', sub: ['Skincare', 'Haircare', 'Makeup', 'Fragrances', 'Personal Care'] },
+          { label: 'Sports', slug: 'sports', emoji: '🏋️', sub: ['Gym Equipment', 'Sportswear', 'Outdoor Gear', 'Cycles', 'Yoga'] },
+          { label: 'Grocery', slug: 'grocery', emoji: '🛒', sub: ['Staples', 'Snacks', 'Beverages', 'Health Foods', 'Organic'] },
+        ]), category: 'navigation', description: 'Header mega-menu categories. JSON array of {label, slug, emoji, sub[]}.'
+      },
+      {
+        key: 'navigation.navLinks', value: JSON.stringify([
+          { label: 'Deals', href: '/products?sort=discount', highlight: true },
+          { label: 'New Arrivals', href: '/products?sort=newest' },
+          { label: 'Best Sellers', href: '/products?sort=popular' },
+          { label: 'Electronics', href: '/products?category=electronics' },
+        ]), category: 'navigation', description: 'Top navigation bar links. JSON array of {label, href, highlight?}.'
+      },
+
+      // ── Footer ─────────────────────────────────────────────────────────────
+      {
+        key: 'footer.paymentMethods', value: JSON.stringify([
+          { label: 'Visa', emoji: '💳' }, { label: 'Mastercard', emoji: '💳' },
+          { label: 'UPI', emoji: '📱' }, { label: 'Net Banking', emoji: '🏦' },
+          { label: 'COD', emoji: '💵' }, { label: 'EMI', emoji: '📋' },
+        ]), category: 'footer', description: 'Accepted payment methods shown in footer. JSON array of {label, emoji}.'
+      },
+      {
+        key: 'footer.trustBadges', value: JSON.stringify([
+          { icon: 'Truck', title: 'Free Delivery', sub: 'On orders above ₹499' },
+          { icon: 'RefreshCw', title: 'Easy Returns', sub: 'On eligible items' },
+          { icon: 'ShieldCheck', title: 'Secure Payment', sub: '100% encrypted checkout' },
+          { icon: 'Award', title: 'Verified Sellers', sub: 'KYC checked & trusted' },
+        ]), category: 'footer', description: 'Trust strip above footer links. JSON array of {icon, title, sub}.'
+      },
+      {
+        key: 'footer.shopLinks', value: JSON.stringify([
+          { label: 'All Products', href: '/products' }, { label: 'Electronics', href: '/products?category=electronics' },
+          { label: 'Fashion', href: '/products?category=fashion' }, { label: 'Home & Kitchen', href: '/products?category=home-kitchen' },
+          { label: 'Deals & Offers', href: '/products?sort=discount' }, { label: 'New Arrivals', href: '/products?sort=newest' },
+        ]), category: 'footer', description: 'Footer "Shop" column links. JSON array of {label, href}.'
+      },
+      {
+        key: 'footer.helpLinks', value: JSON.stringify([
+          { label: 'Track My Order', href: '/orders' }, { label: 'Returns & Refunds', href: '/returns' },
+          { label: 'Shipping Info', href: '/shipping' }, { label: 'FAQ', href: '/faq' },
+          { label: 'Contact Us', href: '/contact' }, { label: 'Sell on Dayam', href: '/seller/register' },
+        ]), category: 'footer', description: 'Footer "Help" column links. JSON array of {label, href}.'
+      },
+      { key: 'footer.securityText', value: 'SSL Secured • PCI DSS Compliant', category: 'footer', description: 'Security badge text in footer bottom bar.' },
+      { key: 'footer.appDownloadText', value: 'Download our app', category: 'footer', description: 'App download section heading in footer.' },
+
+      // ── Support / Contact ──────────────────────────────────────────────────
+      {
+        key: 'support.faqs', value: JSON.stringify([
+          { q: 'How long does delivery take?', a: 'Standard delivery takes 3–7 business days. Express delivery (1–2 days) is available in select cities.' },
+          { q: 'What is the return policy?', a: 'We offer a 10-day hassle-free return window for most products. Items must be unused and in original packaging.' },
+          { q: 'How do I become a seller?', a: 'Register as a seller, complete your KYC, and list your products. Approval typically takes 24–48 hours.' },
+          { q: 'Are the products genuine?', a: 'All sellers are KYC-verified. Products from Brand Verified sellers carry an authenticity guarantee.' },
+          { q: 'How do I track my order?', a: "Go to Orders → select your order → click Track. You'll see real-time updates." },
+          { q: 'What payment methods are accepted?', a: 'We accept all major credit/debit cards, UPI, net banking, and select wallets.' },
+        ]), category: 'support', description: 'FAQ accordion on the Contact page. JSON array of {q, a}.'
+      },
+      { key: 'support.contactSubjects', value: 'Order Question, Product Question, Shipping & Delivery, Returns & Refunds, Seller Support, General Inquiry, Other', category: 'support', description: 'Contact form subject dropdown options (comma-separated).' },
+      {
+        key: 'support.businessHours', value: JSON.stringify([
+          { day: 'Mon–Sat', hours: '9 AM – 7 PM IST' },
+          { day: 'Sunday', hours: 'Closed (email only)' },
+        ]), category: 'support', description: 'Business hours on the Contact page. JSON array of {day, hours}.'
+      },
+      { key: 'support.whatsappLink', value: 'https://wa.me/919876543210', category: 'support', description: 'WhatsApp chat link for the Live Chat contact card.' },
+      { key: 'support.emergencySupportText', value: 'Emergency support available 24/7 via WhatsApp', category: 'support', description: 'Green note below business hours on the Contact page.' },
+
+      // ── About Page ─────────────────────────────────────────────────────────
+      { key: 'about.heroTagline', value: "India's Next-Gen Marketplace", category: 'about', description: 'Large headline on the About page hero.' },
+      { key: 'about.mission', value: 'was born from a simple belief — that shopping online should be safe, transparent, and empowering for both buyers and sellers.', category: 'about', description: 'Mission statement paragraph on the About page.' },
+      {
+        key: 'about.stats', value: JSON.stringify([
+          { label: 'Products Listed', value: '10,000+' }, { label: 'Verified Sellers', value: '500+' },
+          { label: 'Happy Customers', value: '50,000+' }, { label: 'Cities Served', value: '200+' },
+        ]), category: 'about', description: 'Stats strip on the About page. JSON array of {label, value}.'
+      },
+      {
+        key: 'about.values', value: JSON.stringify([
+          { title: 'Quality First', desc: 'Every seller is verified and every product reviewed before it reaches your hands.', color: 'from-green-500 to-emerald-500' },
+          { title: 'Buyer Protection', desc: 'Full purchase protection, easy returns, and secure payments on every order.', color: 'from-blue-500 to-indigo-500' },
+          { title: 'Seller Empowerment', desc: 'We give small businesses and artisans the tools to reach millions of customers.', color: 'from-purple-500 to-pink-500' },
+          { title: 'Reliable Delivery', desc: 'Pan-India logistics with real-time tracking and same-day shipping from select sellers.', color: 'from-orange-500 to-amber-500' },
+        ]), category: 'about', description: 'Core values cards on the About page. JSON array of {title, desc, color}.'
+      },
+      {
+        key: 'about.whyUs', value: JSON.stringify([
+          { title: 'Verified Sellers', desc: 'Every seller undergoes KYC and quality checks before listing.' },
+          { title: 'Secure Payments', desc: '256-bit SSL encryption and multiple payment options including UPI, cards, and COD.' },
+          { title: 'Fast Shipping', desc: 'Express delivery available in 100+ cities. Track your order live.' },
+          { title: '24/7 Support', desc: 'Our support team is available around the clock to help with orders, returns, and more.' },
+          { title: 'Easy Returns', desc: '10-day hassle-free return policy on eligible products.' },
+          { title: 'Eco Packaging', desc: 'We encourage sellers to use eco-friendly packaging materials.' },
+        ]), category: 'about', description: 'Why-us grid on the About page. JSON array of {title, desc}.'
+      },
 
       // ── SEO ────────────────────────────────────────────────────────────────
-      { key: 'seo.metaTitle',       value: "Dayam — India's Trusted Marketplace", category: 'seo', description: 'Default page <title>.' },
+      { key: 'seo.metaTitle', value: "Dayam — India's Trusted Marketplace", category: 'seo', description: 'Default page <title>.' },
       { key: 'seo.metaDescription', value: 'Shop electronics, fashion, home, beauty and more from 500+ verified sellers. Best prices, fast delivery, easy returns.', category: 'seo', description: 'Default meta description.' },
-      { key: 'seo.keywords',        value: 'online shopping, marketplace, electronics, fashion, grocery, India', category: 'seo', description: 'Meta keywords (comma-separated).' },
+      { key: 'seo.keywords', value: 'online shopping, marketplace, electronics, fashion, grocery, India', category: 'seo', description: 'Meta keywords (comma-separated).' },
     ].map(s => ({ ...s, createdAt: now, updatedAt: now }));
 
     await settingsCollection.insertMany(settings);
