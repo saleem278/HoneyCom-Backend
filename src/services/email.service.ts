@@ -58,20 +58,28 @@ export class EmailService {
     return this.templates.getSiteName();
   }
 
+  /** Read email settings (subjects, CTAs) from DB — 5-min cache via templates service. */
+  private async emailSubject(key: string, fallback: string): Promise<string> {
+    // Delegate to the templates service which already owns the email settings cache
+    return this.templates.getEmailSetting(key, fallback);
+  }
+
   async sendVerificationEmail(email: string, token: string): Promise<void> {
     const name = await this.siteName();
+    const subject = await this.emailSubject('verifySubject', `Verify Your Email Address — ${name}`);
     await this.sendEmail({
       to: email,
-      subject: `Verify Your Email Address — ${name}`,
+      subject: subject.replace('{{siteName}}', name),
       html: await this.templates.getVerificationEmail(token),
     });
   }
 
   async sendPasswordResetEmail(email: string, token: string): Promise<void> {
     const name = await this.siteName();
+    const subject = await this.emailSubject('resetSubject', `Reset Your Password — ${name}`);
     await this.sendEmail({
       to: email,
-      subject: `Reset Your Password — ${name}`,
+      subject: subject.replace('{{siteName}}', name),
       html: await this.templates.getPasswordResetEmail(token),
     });
   }
@@ -79,9 +87,10 @@ export class EmailService {
   async sendOrderConfirmationEmail(email: string, order: any): Promise<void> {
     const name = await this.siteName();
     const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
+    const subjectTpl = await this.emailSubject('orderConfirmSubject', `Order Confirmed #{{orderNumber}} — ${name}`);
     await this.sendEmail({
       to: email,
-      subject: `Order Confirmed #${orderId} — ${name}`,
+      subject: subjectTpl.replace('{{orderNumber}}', orderId).replace('{{siteName}}', name),
       html: await this.templates.getOrderConfirmationEmail(order),
     });
   }
@@ -89,27 +98,30 @@ export class EmailService {
   async sendOrderStatusUpdateEmail(email: string, order: any): Promise<void> {
     const name = await this.siteName();
     const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
+    const subjectTpl = await this.emailSubject('shippingSubject', `Order Update #{{orderNumber}} — ${name}`);
     await this.sendEmail({
       to: email,
-      subject: `Order Update #${orderId} — ${name}`,
+      subject: subjectTpl.replace('{{orderNumber}}', orderId).replace('{{siteName}}', name),
       html: await this.templates.getOrderStatusUpdateEmail(order),
     });
   }
 
   async sendSellerApprovalEmail(email: string, sellerName: string): Promise<void> {
     const name = await this.siteName();
+    const subject = await this.emailSubject('sellerApprovedSubject', `Seller Account Approved — Welcome to ${name}!`);
     await this.sendEmail({
       to: email,
-      subject: `Seller Account Approved — Welcome to ${name}!`,
+      subject: subject.replace('{{siteName}}', name),
       html: await this.templates.getSellerApprovalEmail(sellerName),
     });
   }
 
   async sendSellerRejectionEmail(email: string, sellerName: string, reason?: string): Promise<void> {
     const name = await this.siteName();
+    const subject = await this.emailSubject('sellerRejectedSubject', `Seller Account Application Status — ${name}`);
     await this.sendEmail({
       to: email,
-      subject: `Seller Account Application Status — ${name}`,
+      subject: subject.replace('{{siteName}}', name),
       html: await this.templates.getSellerRejectionEmail(sellerName, reason),
     });
   }

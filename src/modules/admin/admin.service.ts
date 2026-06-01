@@ -11,7 +11,6 @@ import {
   IImpersonationEvent,
 } from '../../models/ImpersonationEvent.model';
 import { INotification } from '../../models/Notification.model';
-import { IOrder } from '../../models/Order.model';
 import { PaymentsService } from '../payments/payments.service';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService, Currency } from '../../services/exchange-rate.service';
@@ -29,7 +28,6 @@ export class AdminService {
     @InjectModel('Category') private categoryModel: Model<ICategory>,
     @InjectModel('ImpersonationEvent') private impersonationModel: Model<IImpersonationEvent>,
     @InjectModel('Notification') private notificationModel: Model<INotification>,
-    @InjectModel('Order') private orderModel: Model<IOrder>,
     private paymentsService: PaymentsService,
     private emailService: EmailService,
     private jwtService: JwtService,

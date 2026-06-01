@@ -5,6 +5,11 @@ export interface IProductVariant {
   options: string[];
 }
 
+export interface IProductQnA {
+  q: string;
+  a: string;
+}
+
 export interface IProduct extends Document {
   name: string;
   description: string;
@@ -28,6 +33,8 @@ export interface IProduct extends Document {
   rating: number;
   numReviews: number;
   tags: string[];
+  qna?: IProductQnA[];
+  specifications?: Array<{ label: string; value: string }>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -137,6 +144,18 @@ const ProductSchema: Schema = new Schema(
       {
         type: String,
         trim: true,
+      },
+    ],
+    qna: [
+      {
+        q: { type: String, trim: true, maxlength: 500 },
+        a: { type: String, trim: true, maxlength: 2000 },
+      },
+    ],
+    specifications: [
+      {
+        label: { type: String, trim: true, maxlength: 100 },
+        value: { type: String, trim: true, maxlength: 500 },
       },
     ],
   },

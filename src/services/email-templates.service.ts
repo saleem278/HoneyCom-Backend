@@ -45,6 +45,28 @@ export class EmailTemplatesService {
   invalidateCache() {
     this.brandCache = null;
     this.brandCacheAt = 0;
+    this.emailCache = null;
+    this.emailCacheAt = 0;
+  }
+
+  // ── Email template settings cache ─────────────────────────────────────────
+  private emailCache: Record<string, string> | null = null;
+  private emailCacheAt = 0;
+
+  private async emailSettings(): Promise<Record<string, string>> {
+    const now = Date.now();
+    if (this.emailCache && now - this.emailCacheAt < EmailTemplatesService.CACHE_TTL_MS) {
+      return this.emailCache;
+    }
+    const rows = await this.settingsModel.find({ category: 'email' }).lean();
+    const map: Record<string, string> = {};
+    for (const r of rows) {
+      const k = r.key.replace(/^email\./, '');
+      map[k] = String(r.value ?? '');
+    }
+    this.emailCache = map;
+    this.emailCacheAt = now;
+    return map;
   }
 
   // ── HTML escaping ──────────────────────────────────────────────────────────
@@ -134,6 +156,12 @@ export class EmailTemplatesService {
 
   // ── Public template methods (all async now) ────────────────────────────────
 
+  /** Expose email setting to email.service.ts for subject line overrides. */
+  async getEmailSetting(key: string, fallback: string): Promise<string> {
+    const et = await this.emailSettings();
+    return et[key] || fallback;
+  }
+
   async getSiteName(): Promise<string> {
     const b = await this.brand();
     return b.siteName || 'Our Store';
@@ -143,6 +171,9 @@ export class EmailTemplatesService {
     const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
     const verificationUrl = `${frontendUrl}/verify-email?token=${token}`;
     const siteName = this.h(await this.getSiteName());
+    const et = await this.emailSettings();
+    const ctaText = this.h(et.verifyCta || 'Verify Email Address');
+    const intro = this.h(et.verifyIntro || `Welcome to ${siteName}! Please verify your email to start shopping.`);
 
     const content = `
       <div style="text-align:center;margin-bottom:30px;">
@@ -150,7 +181,7 @@ export class EmailTemplatesService {
           <span style="font-size:40px;">✉️</span>
         </div>
         <h2 style="margin:0 0 10px;color:#1f2937;font-size:28px;font-weight:700;">Welcome to ${siteName}!</h2>
-        <p style="margin:0;color:#6b7280;font-size:16px;">We&apos;re excited to have you join us</p>
+        <p style="margin:0;color:#6b7280;font-size:16px;">${intro}</p>
       </div>
       <div style="background-color:#fffbeb;border-left:4px solid #f59e0b;padding:20px;border-radius:8px;margin-bottom:30px;">
         <p style="margin:0;color:#78350f;font-size:15px;line-height:1.6;">
@@ -159,7 +190,7 @@ export class EmailTemplatesService {
       </div>
       <div style="text-align:center;margin:30px 0;">
         <a href="${verificationUrl}" style="display:inline-block;padding:16px 32px;background:linear-gradient(135deg,#f59e0b 0%,#f97316 100%);color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;font-size:16px;">
-          Verify Email Address
+          ${ctaText}
         </a>
       </div>
       <div style="margin-top:30px;padding-top:30px;border-top:1px solid #e5e7eb;">

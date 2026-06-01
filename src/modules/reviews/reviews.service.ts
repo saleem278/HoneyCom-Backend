@@ -61,12 +61,32 @@ export class ReviewsService {
 
     const reviews = await this.reviewModel
       .find(filter)
-      .populate('user', 'name email')
+      .populate('user', 'name email avatar')
       .sort({ createdAt: -1 });
+
+    // Real rating distribution from actual review data
+    const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const approvedReviews = reviews.filter((r) => r.status === 'approved' || r.status === undefined);
+    for (const r of approvedReviews) {
+      const star = Math.round(r.rating);
+      if (star >= 1 && star <= 5) distribution[star]++;
+    }
+    const total = approvedReviews.length;
+    const ratingDistribution: Record<number, number> = {};
+    for (let s = 1; s <= 5; s++) {
+      ratingDistribution[s] = total > 0 ? Math.round((distribution[s] / total) * 100) : 0;
+    }
+
+    const avgRating = total > 0
+      ? approvedReviews.reduce((sum, r) => sum + r.rating, 0) / total
+      : 0;
 
     return {
       success: true,
-      reviews,
+      reviews: approvedReviews,
+      averageRating: Math.round(avgRating * 10) / 10,
+      ratingDistribution,
+      totalReviews: total,
     };
   }
 
