@@ -163,13 +163,14 @@ export class DisputesService {
         );
       }
 
-      if (order.paymentIntentId) {
+      const razorpayPaymentId = (order as any).razorpayPaymentId;
+      if (razorpayPaymentId) {
         try {
-          await this.paymentsService.processRefund(order.paymentIntentId, refundAmount, resolutionData.notes);
+          await this.paymentsService.processRefund(razorpayPaymentId, refundAmount, resolutionData.notes);
         } catch (error: any) {
           // Roll back the status claim so admin can retry
           await this.disputeModel.findByIdAndUpdate(id, { $set: { status: 'in_review' } });
-          throw new BadRequestException(`Stripe refund failed: ${error.message || error}. Dispute status reset to in_review.`);
+          throw new BadRequestException(`Razorpay refund failed: ${error.message || error}. Dispute status reset to in_review.`);
         }
       }
 

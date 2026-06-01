@@ -39,7 +39,8 @@ export interface IOrder extends Document {
   billingAddress?: mongoose.Types.ObjectId;
   paymentMethod: string;
   paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
-  paymentIntentId?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
   currency: string; // Currency code (USD, INR, EUR, etc.)
   exchangeRate?: number; // Exchange rate at time of order (if conversion was applied)
   subtotal: number;
@@ -136,14 +137,17 @@ const OrderSchema: Schema = new Schema(
     paymentMethod: {
       type: String,
       required: true,
-      enum: ['stripe', 'paypal', 'cash_on_delivery'],
+      enum: ['razorpay', 'paypal', 'cash_on_delivery'],
     },
     paymentStatus: {
       type: String,
       enum: ['pending', 'paid', 'failed', 'refunded'],
       default: 'pending',
     },
-    paymentIntentId: {
+    razorpayOrderId: {
+      type: String,
+    },
+    razorpayPaymentId: {
       type: String,
     },
     currency: {

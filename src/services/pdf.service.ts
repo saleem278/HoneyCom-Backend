@@ -175,6 +175,120 @@ export class PdfService {
     }
   }
 
+  /**
+   * Same as generateInvoice but always returns the buffer alongside the
+   * Cloudinary URL (which may be null when Cloudinary isn't configured).
+   * The caller can then stream the buffer directly when no URL is available.
+   */
+  async generateInvoiceWithBuffer(
+    invoiceData: any,
+  ): Promise<{ url: string | null; buffer: Buffer }> {
+    if (invoiceData?.items?.length > PdfService.MAX_INVOICE_ITEMS) {
+      throw new Error(
+        `Invoice cannot contain more than ${PdfService.MAX_INVOICE_ITEMS} line items`,
+      );
+    }
+    const doc = new PDFDocument({ margin: 50 });
+    const bufferPromise = this.renderToBuffer(doc);
+
+    // ── Same layout as generateInvoice ──────────────────────────────────
+    doc.fontSize(20).text('INVOICE', { align: 'center' });
+    doc.moveDown();
+    doc.fontSize(12);
+    doc.text(`Invoice Number: ${invoiceData.invoiceNumber || 'N/A'}`);
+    doc.text(`Order Number: ${invoiceData.orderNumber || 'N/A'}`);
+    doc.text(`Date: ${new Date(invoiceData.date).toLocaleDateString()}`);
+    doc.moveDown();
+
+    doc.fontSize(14).text('Bill To:', { underline: true });
+    doc.fontSize(12);
+    doc.text(invoiceData.customer?.name || 'N/A');
+    doc.text(invoiceData.customer?.email || 'N/A');
+    doc.text(invoiceData.customer?.phone || 'N/A');
+    doc.moveDown();
+
+    if (invoiceData.shippingAddress) {
+      doc.fontSize(14).text('Ship To:', { underline: true });
+      doc.fontSize(12);
+      const addr = invoiceData.shippingAddress;
+      if (typeof addr === 'object') {
+        doc.text(`${addr.firstName || ''} ${addr.lastName || ''}`.trim() || addr.fullName || 'N/A');
+        doc.text(addr.addressLine1 || addr.address || 'N/A');
+        if (addr.addressLine2) doc.text(addr.addressLine2);
+        doc.text(`${addr.city || ''}, ${addr.state || ''} ${addr.zipCode || addr.postalCode || ''}`.trim());
+        doc.text(addr.country || 'N/A');
+      }
+      doc.moveDown();
+    }
+
+    doc.fontSize(14).text('Items:', { underline: true });
+    doc.moveDown(0.5);
+    const tableTop = doc.y;
+    doc.fontSize(10);
+    doc.text('Item', 50, tableTop);
+    doc.text('Quantity', 250, tableTop);
+    doc.text('Price', 350, tableTop, { width: 100, align: 'right' });
+    doc.text('Total', 450, tableTop, { width: 100, align: 'right' });
+
+    let yPos = tableTop + 20;
+    (invoiceData.items || []).forEach((item: any) => {
+      const name = item.name || item.product?.name || 'N/A';
+      doc.text(name, 50, yPos, { width: 200 });
+      doc.text(String(item.quantity || 0), 250, yPos);
+      doc.text(`$${(item.price || 0).toFixed(2)}`, 350, yPos, { width: 100, align: 'right' });
+      doc.text(`$${((item.price || 0) * (item.quantity || 0)).toFixed(2)}`, 450, yPos, { width: 100, align: 'right' });
+      yPos += 20;
+    });
+
+    yPos += 10;
+    doc.moveTo(50, yPos).lineTo(550, yPos).stroke();
+    yPos += 10;
+    doc.text('Subtotal:', 350, yPos, { width: 100, align: 'right' });
+    doc.text(`$${(invoiceData.subtotal || 0).toFixed(2)}`, 450, yPos, { width: 100, align: 'right' });
+    yPos += 20;
+    doc.text('Tax:', 350, yPos, { width: 100, align: 'right' });
+    doc.text(`$${(invoiceData.tax || 0).toFixed(2)}`, 450, yPos, { width: 100, align: 'right' });
+    yPos += 20;
+    doc.text('Shipping:', 350, yPos, { width: 100, align: 'right' });
+    doc.text(`$${(invoiceData.shipping || 0).toFixed(2)}`, 450, yPos, { width: 100, align: 'right' });
+    yPos += 20;
+    if (invoiceData.discount && invoiceData.discount > 0) {
+      doc.text('Discount:', 350, yPos, { width: 100, align: 'right' });
+      doc.text(`-$${(invoiceData.discount || 0).toFixed(2)}`, 450, yPos, { width: 100, align: 'right' });
+      yPos += 20;
+    }
+    doc.moveTo(50, yPos).lineTo(550, yPos).stroke();
+    yPos += 10;
+    doc.fontSize(12).font('Helvetica-Bold');
+    doc.text('Total:', 350, yPos, { width: 100, align: 'right' });
+    doc.text(`$${(invoiceData.total || 0).toFixed(2)}`, 450, yPos, { width: 100, align: 'right' });
+    yPos += 40;
+    doc.font('Helvetica').fontSize(10);
+    doc.text(`Payment Method: ${invoiceData.paymentMethod || 'N/A'}`, 50, yPos);
+    doc.text(`Payment Status: ${invoiceData.paymentStatus || 'N/A'}`, 50, yPos + 15);
+
+    doc.end();
+    const buffer = await bufferPromise;
+
+    // Try Cloudinary upload; fall back to null URL so the controller
+    // can stream the buffer directly.
+    const publicId = `invoice-${invoiceData.invoiceNumber || invoiceData.orderNumber || Date.now()}`;
+    try {
+      const { url } = await uploadBufferToCloudinary(buffer, {
+        folder: 'honey-ecommerce/invoices',
+        publicId,
+      });
+      return { url, buffer };
+    } catch (err) {
+      this.logger.warn(
+        `Cloudinary upload skipped for ${publicId} — streaming buffer directly. Reason: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return { url: null, buffer };
+    }
+  }
+
   async generateShippingLabel(orderData: any, trackingNumber?: string): Promise<string> {
     const doc = new PDFDocument({ size: [400, 600], margin: 20 });
     const bufferPromise = this.renderToBuffer(doc);

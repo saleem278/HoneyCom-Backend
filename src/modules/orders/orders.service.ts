@@ -255,12 +255,12 @@ export class OrdersService {
         isDefault: false,
       }], { session });
 
-      // Map payment method: 'card' -> 'stripe'
+      // Map payment method: 'card' -> 'razorpay'
       let paymentMethod = orderData.paymentMethod;
       if (paymentMethod === 'card') {
-        paymentMethod = 'stripe';
+        paymentMethod = 'razorpay';
       }
-      if (!['stripe', 'paypal', 'cash_on_delivery'].includes(paymentMethod)) {
+      if (!['razorpay', 'paypal', 'cash_on_delivery'].includes(paymentMethod)) {
         throw new BadRequestException(`Invalid payment method: ${paymentMethod}`);
       }
 
@@ -407,7 +407,8 @@ export class OrdersService {
         discount,
         total,
         couponCode: cart?.couponCode,
-        paymentIntentId: orderData.paymentIntentId,
+        razorpayOrderId: orderData.razorpayOrderId,
+        razorpayPaymentId: orderData.razorpayPaymentId,
         status: 'pending',
         paymentStatus: 'pending',
       }], { session });
@@ -437,18 +438,12 @@ export class OrdersService {
 
     // Cart-clear policy:
     //  - cash_on_delivery: no async confirmation, safe to clear now.
-    //  - stripe with paymentIntentId: defer until the webhook fires
-    //    payment_intent.succeeded so the user doesn't lose their cart if
-    //    payment fails. updatePaymentStatusByIntentId() clears the cart on
-    //    'paid' and restores inventory on 'failed'.
-    //  - stripe without paymentIntentId (older clients that haven't migrated
-    //    yet): clear immediately to preserve previous behavior. These orders
-    //    won't get webhook updates, so the cart stays in sync with what the
-    //    user expects.
-    //  - paypal: same as the no-intent path — clear now until PayPal sync
-    //    confirmation is wired up.
+    //  - razorpay with razorpayOrderId: defer until the webhook fires
+    //    payment.captured so the user doesn't lose their cart if payment fails.
+    //    updatePaymentStatusByRazorpayOrderId() clears the cart on 'paid'.
+    //  - paypal: clear now until PayPal sync confirmation is wired up.
     const deferCartClear =
-      order.paymentMethod === 'stripe' && !!orderData.paymentIntentId;
+      order.paymentMethod === 'razorpay' && !!orderData.razorpayOrderId;
     if (cart && !deferCartClear) {
       cart.items = [];
       cart.couponCode = undefined;
@@ -589,13 +584,13 @@ export class OrdersService {
     // Validate transition (covers both terminal-state and skip-state attempts).
     assertOrderTransition(order.status, 'cancelled');
 
-    // Process Stripe refund if it is a paid Stripe order
-    if (order.paymentMethod === 'stripe' && order.paymentIntentId && order.paymentStatus === 'paid') {
+    // Process Razorpay refund if it is a paid Razorpay order
+    if (order.paymentMethod === 'razorpay' && (order as any).razorpayPaymentId && order.paymentStatus === 'paid') {
       try {
-        await this.paymentsService.processRefund(order.paymentIntentId, order.total, 'Order cancellation');
+        await this.paymentsService.processRefund((order as any).razorpayPaymentId, order.total, 'Order cancellation');
         order.paymentStatus = 'refunded';
       } catch (refundError: any) {
-        this.logger.warn(`Failed to process Stripe refund for cancellation on order ${order._id}: ${refundError.message}`);
+        this.logger.warn(`Failed to process Razorpay refund for cancellation on order ${order._id}: ${refundError.message}`);
       }
     }
 
@@ -644,26 +639,22 @@ export class OrdersService {
     }
 
     // Process refund based on payment method.
-    // Only Stripe (paymentIntentId present) supports automatic refunds.
-    // For PayPal and cash_on_delivery, reject the return request so the
-    // customer is not incorrectly shown a "refund processed" message —
+    // Razorpay (razorpayPaymentId present) supports automatic refunds.
+    // For PayPal and cash_on_delivery, skip automatic refund —
     // those methods require manual admin action via the admin panel.
-    if (order.paymentMethod === 'stripe') {
-      if (!order.paymentIntentId) {
+    if (order.paymentMethod === 'razorpay') {
+      if (!(order as any).razorpayPaymentId) {
         throw new BadRequestException(
-          'Cannot automatically refund this Stripe order: payment intent ID is missing. Please contact support.',
+          'Cannot automatically refund this order: payment ID is missing. Please contact support.',
         );
       }
       try {
-        await this.paymentsService.processRefund(order.paymentIntentId, order.total, 'Customer return request');
+        await this.paymentsService.processRefund((order as any).razorpayPaymentId, order.total, 'Customer return request');
       } catch (refundError: any) {
-        this.logger.warn(`Failed to process Stripe refund for return on order ${order._id}: ${refundError.message}`);
-        // Admin can trigger a manual refund from the admin panel.
+        this.logger.warn(`Failed to process Razorpay refund for return on order ${order._id}: ${refundError.message}`);
       }
     } else if (order.paymentMethod === 'paypal' || order.paymentMethod === 'cash_on_delivery') {
-      // Non-Stripe payments require manual admin refund processing.
-      // We still proceed with the return so inventory is restored and
-      // admin is notified, but we do NOT mark paymentStatus as 'refunded' yet.
+      // Non-Razorpay payments require manual admin refund processing.
       this.logger.log(`Return for order ${order._id} (${order.paymentMethod}): awaiting manual admin refund.`);
     }
 
@@ -681,11 +672,11 @@ export class OrdersService {
       this.logger.warn(`Failed to replenish inventory on return for order ${order._id}: ${inventoryError.message}`);
     }
 
-    // Update order statuses. For non-Stripe payments, paymentStatus stays
+    // Update order statuses. For non-Razorpay payments, paymentStatus stays
     // 'pending' until an admin manually processes the refund.
     assertOrderTransition(order.status, 'refunded');
     order.status = 'refunded';
-    if (order.paymentMethod === 'stripe') {
+    if (order.paymentMethod === 'razorpay') {
       order.paymentStatus = 'refunded';
     }
     await order.save();
@@ -824,19 +815,24 @@ export class OrdersService {
       status: convertedOrder.status,
     };
 
-    // Generate PDF invoice
-    let pdfUrl = null;
+    // Generate PDF invoice. Try Cloudinary first; fall back to returning
+    // the raw buffer so the controller can stream it directly.
+    let pdfUrl: string | null = null;
+    let pdfBuffer: Buffer | null = null;
     try {
-      pdfUrl = await this.pdfService.generateInvoice(invoice);
+      const result = await this.pdfService.generateInvoiceWithBuffer(invoice);
+      pdfUrl = result.url;
+      if (!pdfUrl) pdfBuffer = result.buffer;
     } catch (error) {
-      // Error generating PDF invoice
-      // Continue without PDF if generation fails
+      // PDF generation failed entirely — controller will return invoice
+      // data only (no download link).
     }
 
     return {
       success: true,
       invoice,
       pdfUrl,
+      pdfBuffer,
     };
   }
 
@@ -875,18 +871,23 @@ export class OrdersService {
   }
 
   /**
-   * Update order payment status by payment intent ID
-   * Used by webhook handlers
+   * Update order payment status by Razorpay order ID — called by webhook handler.
    */
-  async updatePaymentStatusByIntentId(
-    paymentIntentId: string,
+  async updatePaymentStatusByRazorpayOrderId(
+    razorpayOrderId: string,
+    razorpayPaymentId: string | null,
     paymentStatus: 'paid' | 'failed' | 'refunded',
     orderStatus?: 'processing' | 'cancelled' | 'refunded',
   ) {
-    const order = await this.orderModel.findOne({ paymentIntentId });
+    const order = await this.orderModel.findOne({ razorpayOrderId });
 
     if (!order) {
-      throw new NotFoundException('Order not found for payment intent');
+      throw new NotFoundException('Order not found for Razorpay order ID');
+    }
+
+    // Store the payment ID when it arrives (webhook fires after capture)
+    if (razorpayPaymentId) {
+      (order as any).razorpayPaymentId = razorpayPaymentId;
     }
 
     // Idempotency: webhooks can fire more than once. Skip if we've already

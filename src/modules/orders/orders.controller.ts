@@ -8,7 +8,9 @@ import {
   Query,
   UseGuards,
   Request,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -77,9 +79,32 @@ export class OrdersController {
 
   @Get(':id/invoice')
   @ApiOperation({ summary: 'Generate invoice for order' })
-  @ApiResponse({ status: 200, description: 'Invoice data' })
-  async getInvoice(@Param('id') id: string, @Request() req: AuthedRequest) {
-    return this.ordersService.generateInvoice(id, req.user.id, req.user.role);
+  @ApiResponse({ status: 200, description: 'Invoice PDF or URL' })
+  async getInvoice(
+    @Param('id') id: string,
+    @Request() req: AuthedRequest,
+    @Res() res: Response,
+  ) {
+    const result = await this.ordersService.generateInvoice(id, req.user.id, req.user.role);
+
+    // When Cloudinary is configured the service returns a public URL — let
+    // the frontend open it directly.
+    if (result.pdfUrl) {
+      return res.json({ success: true, invoice: result.invoice, pdfUrl: result.pdfUrl });
+    }
+
+    // Cloudinary not configured or upload failed — stream the PDF buffer
+    // directly so the download still works in local/dev without needing
+    // Cloudinary credentials.
+    if (result.pdfBuffer) {
+      const filename = `invoice-${result.invoice.invoiceNumber || id}.pdf`;
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', result.pdfBuffer.length);
+      return res.send(result.pdfBuffer);
+    }
+
+    return res.json({ success: true, invoice: result.invoice, pdfUrl: null });
   }
 
   @Get(':id/shipping-label')
