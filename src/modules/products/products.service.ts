@@ -319,7 +319,7 @@ export class ProductsService {
     let allowedFields = [
       'name', 'description', 'sku', 'price', 'compareAtPrice',
       'category', 'images', 'inventory', 'variants', 'weight',
-      'dimensions', 'featured', 'tags'
+      'dimensions', 'featured', 'tags', 'specifications', 'qna',
     ];
     
     // Admins can also update status and rejection fields
@@ -553,4 +553,3 @@ export class ProductsService {
     };
   }
 }
-
