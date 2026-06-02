@@ -9,6 +9,8 @@ import {
   UseGuards,
   Request,
   Res,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import {
@@ -17,6 +19,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -32,6 +35,8 @@ export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Create new order' })
   @ApiResponse({ status: 201, description: 'Order created successfully' })
   async create(@Request() req: AuthedRequest, @Body() orderData: any, @Currency() currency: string) {
@@ -57,6 +62,7 @@ export class OrdersController {
   }
 
   @Put(':id/cancel')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Cancel order' })
   @ApiResponse({ status: 200, description: 'Order cancelled' })
   async cancel(@Param('id') id: string, @Request() req: AuthedRequest) {
@@ -64,6 +70,7 @@ export class OrdersController {
   }
 
   @Post(':id/return')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Request order return' })
   @ApiResponse({ status: 200, description: 'Return request submitted' })
   async requestReturn(@Param('id') id: string, @Body() body: any, @Request() req: AuthedRequest) {
@@ -114,4 +121,3 @@ export class OrdersController {
     return this.ordersService.generateShippingLabel(id, req.user.id, req.user.role);
   }
 }
-

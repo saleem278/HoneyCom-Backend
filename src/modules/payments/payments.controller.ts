@@ -9,9 +9,12 @@ import {
   Res,
   Inject,
   forwardRef,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrdersService } from '../orders/orders.service';
@@ -33,9 +36,11 @@ export class PaymentsController {
    */
   @Post('create-order')
   @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Create Razorpay order' })
-  @ApiResponse({ status: 200, description: 'Razorpay order created' })
+  @ApiResponse({ status: 201, description: 'Razorpay order created' })
   async createOrder(@Body() body: { amount: number; currency?: string }) {
     return this.paymentsService.createOrder(body.amount, body.currency);
   }
@@ -47,6 +52,7 @@ export class PaymentsController {
    */
   @Post('verify')
   @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Verify Razorpay payment signature' })
   @ApiResponse({ status: 200, description: 'Payment verified' })
@@ -74,6 +80,7 @@ export class PaymentsController {
    * 4. Events: payment.authorized, payment.captured, payment.failed, refund.created
    */
   @Post('webhook')
+  @Throttle({ default: { limit: 100, ttl: 60000 } })
   @ApiOperation({ summary: 'Handle Razorpay webhook events (public endpoint)' })
   @ApiResponse({ status: 200, description: 'Webhook processed' })
   async handleWebhook(

@@ -15,6 +15,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CartService } from './cart.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Currency } from '../../common/decorators/currency.decorator';
@@ -35,6 +36,7 @@ export class CartController {
   }
 
   @Post()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Add item to cart' })
   @ApiResponse({ status: 200, description: 'Item added to cart' })
   async addToCart(
@@ -48,6 +50,7 @@ export class CartController {
   }
 
   @Put(':itemId')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Update cart item quantity' })
   @ApiResponse({ status: 200, description: 'Cart item updated' })
   async updateCartItem(
@@ -60,6 +63,7 @@ export class CartController {
   }
 
   @Delete(':itemId')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Remove item from cart' })
   @ApiResponse({ status: 200, description: 'Item removed from cart' })
   async removeFromCart(
@@ -71,6 +75,7 @@ export class CartController {
   }
 
   @Delete()
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Clear entire cart' })
   @ApiResponse({ status: 200, description: 'Cart cleared' })
   async clearCart(@Request() req: AuthedRequest) {
@@ -78,6 +83,7 @@ export class CartController {
   }
 
   @Post('coupon')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Apply coupon code' })
   @ApiResponse({ status: 200, description: 'Coupon applied successfully' })
   @ApiResponse({ status: 400, description: 'Invalid coupon code' })
@@ -89,4 +95,3 @@ export class CartController {
     return this.cartService.applyCoupon(req.user.id, body.code, currency);
   }
 }
-
