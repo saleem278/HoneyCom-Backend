@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, isValidObjectId } from 'mongoose';
 import { Store, IStore } from '../../models/Store.model';
 import { User, IUser } from '../../models/User.model';
 
@@ -55,6 +55,65 @@ export class StoresService {
       success: true,
       store,
     };
+  }
+
+  // Public browse: list active stores, paginated and limited. Optional city
+  // filter (case-insensitive, regex-escaped to avoid ReDoS).
+  async getAllStores(filters?: { city?: string; page?: number; limit?: number }) {
+    const query: Record<string, unknown> = { status: 'active' };
+    if (filters?.city) {
+      const safe = String(filters.city).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
+      query['address.city'] = { $regex: safe, $options: 'i' };
+    }
+    const page = Math.max(1, Number(filters?.page) || 1);
+    const limit = Math.min(Math.max(1, Number(filters?.limit) || 20), 100);
+    const skip = (page - 1) * limit;
+    const [stores, total] = await Promise.all([
+      this.storeModel
+        .find(query)
+        .populate('seller', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      this.storeModel.countDocuments(query),
+    ]);
+    return {
+      success: true,
+      stores,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    };
+  }
+
+  // Best-effort "nearby": the Store model carries no geo coordinates, so a true
+  // $near query is not possible. Return active stores (optionally narrowed by
+  // city) so the client can still browse; the mobile screen degrades gracefully
+  // when a store has no coordinates.
+  async getNearbyStores(filters?: { city?: string; limit?: number }) {
+    const query: Record<string, unknown> = { status: 'active' };
+    if (filters?.city) {
+      const safe = String(filters.city).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
+      query['address.city'] = { $regex: safe, $options: 'i' };
+    }
+    const limit = Math.min(Math.max(1, Number(filters?.limit) || 50), 100);
+    const stores = await this.storeModel
+      .find(query)
+      .populate('seller', 'name email')
+      .sort({ createdAt: -1 })
+      .limit(limit);
+    return { success: true, stores };
+  }
+
+  async getStoreById(id: string) {
+    if (!isValidObjectId(id)) {
+      throw new NotFoundException('Store not found');
+    }
+    const store = await this.storeModel
+      .findOne({ _id: id, status: 'active' })
+      .populate('seller', 'name email');
+    if (!store) {
+      throw new NotFoundException('Store not found');
+    }
+    return { success: true, store };
   }
 
   async updateStore(sellerId: string, updateData: any) {

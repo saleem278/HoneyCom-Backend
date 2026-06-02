@@ -1,4 +1,5 @@
-import { Controller, Get, Put, Body, UseGuards, Request, Param } from '@nestjs/common';
+import { Controller, Get, Put, Body, UseGuards, Request, Param, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { StoresService } from './stores.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -18,6 +19,38 @@ export class StoresController {
   @ApiResponse({ status: 200, description: 'Store details' })
   async getStoreBySlug(@Param('slug') slug: string) {
     return this.storesService.getStoreBySlug(slug);
+  }
+
+  @Get()
+  @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @ApiOperation({ summary: 'List active stores (public)' })
+  @ApiResponse({ status: 200, description: 'Paginated list of active stores' })
+  async getAllStores(
+    @Query('city') city?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.storesService.getAllStores({
+      city,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  @Get('nearby')
+  @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @ApiOperation({ summary: 'List nearby active stores (best-effort, no geo data)' })
+  @ApiResponse({ status: 200, description: 'List of active stores' })
+  async getNearbyStores(
+    @Query('city') city?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.storesService.getNearbyStores({
+      city,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
   }
 
   @Get('my-store')
@@ -49,5 +82,13 @@ export class StoresController {
   async updateStoreSettings(@Request() req: AuthedRequest, @Body() settings: any) {
     return this.storesService.updateStoreSettings(req.user.id, settings);
   }
-}
 
+  @Get(':id')
+  @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @ApiOperation({ summary: 'Get store by id (public)' })
+  @ApiResponse({ status: 200, description: 'Store details' })
+  async getStoreById(@Param('id') id: string) {
+    return this.storesService.getStoreById(id);
+  }
+}
