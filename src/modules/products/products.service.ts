@@ -166,9 +166,21 @@ export class ProductsService {
     }
   }
 
-  async findOne(id: string, currency: string = 'INR') {
+  async findOne(id: string, currency: string = 'INR', userRole?: string, userId?: string) {
+    const filter: any = { _id: id };
+
+    if (userRole === 'admin') {
+      // Admin can view any product regardless of status
+    } else if (userRole === 'seller' && userId) {
+      // Sellers can view their own products (any status) and others' approved products
+      filter.$or = [{ status: 'approved' }, { seller: userId }];
+    } else {
+      // Customers and unauthenticated users only see approved products
+      filter.status = 'approved';
+    }
+
     const product = await this.productModel
-      .findById(id)
+      .findOne(filter)
       .populate({
         path: 'category',
         select: 'name slug',
@@ -319,7 +331,7 @@ export class ProductsService {
     let allowedFields = [
       'name', 'description', 'sku', 'price', 'compareAtPrice',
       'category', 'images', 'inventory', 'variants', 'weight',
-      'dimensions', 'featured', 'tags'
+      'dimensions', 'featured', 'tags', 'specifications', 'qna',
     ];
     
     // Admins can also update status and rejection fields
@@ -553,4 +565,3 @@ export class ProductsService {
     };
   }
 }
-

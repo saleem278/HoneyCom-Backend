@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Review, IReview } from '../../models/Review.model';
@@ -38,11 +38,22 @@ export class ReviewsService {
       throw new BadRequestException('You have already reviewed this product');
     }
 
-    const review = await this.reviewModel.create({
-      ...reviewData,
-      product: productId,
-      user: userId,
-    });
+    let review: IReview;
+    try {
+      review = await this.reviewModel.create({
+        ...reviewData,
+        product: productId,
+        user: userId,
+      });
+    } catch (error: any) {
+      // MongoDB unique index on (product, user) prevents duplicates. The
+      // pre-flight check above handles the common case; this catch handles the
+      // race where two concurrent requests both pass the check.
+      if (error?.code === 11000) {
+        throw new ConflictException('You have already reviewed this product');
+      }
+      throw error;
+    }
 
     // Update product rating
     await this.updateProductRating(productId);

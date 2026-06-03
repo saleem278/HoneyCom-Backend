@@ -222,8 +222,10 @@ export class DisputesService {
       throw new NotFoundException('Dispute not found');
     }
 
-    // Only admin or the customer can close
-    if (userRole !== 'admin' && dispute.customer.toString() !== userId) {
+    // Only admin or the customer who raised the dispute can close it.
+    // Sellers are explicitly excluded even if their userId somehow matched the
+    // customer field (defense-in-depth).
+    if (userRole === 'seller' || (userRole !== 'admin' && dispute.customer.toString() !== userId)) {
       throw new ForbiddenException('Not authorized to close this dispute');
     }
 

@@ -109,6 +109,10 @@ export class PaymentsService {
    *
    * Razorpay signs: `razorpay_order_id|razorpay_payment_id`
    */
+  isRazorpayConfigured(): boolean {
+    return !!this.razorpay;
+  }
+
   verifyPaymentSignature(
     razorpayOrderId: string,
     razorpayPaymentId: string,
@@ -152,7 +156,18 @@ export class PaymentsService {
       }
     }
 
-    // Placeholder mode
+    // Placeholder / dev mode (Razorpay not configured)
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    if (isProd) {
+      throw new BadRequestException('Razorpay is not configured. Cannot confirm payments in production.');
+    }
+    // Even in dev/staging, verify the HMAC if a key secret is available
+    if (this.razorpayKeySecret) {
+      const valid = this.verifyPaymentSignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
+      if (!valid) {
+        throw new BadRequestException('Payment signature verification failed');
+      }
+    }
     return {
       success: true,
       message: 'Payment confirmed (placeholder mode)',

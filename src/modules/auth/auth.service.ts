@@ -344,6 +344,9 @@ export class AuthService {
     // launch-blocker.
     const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
     const overrideExpose = (process.env.EXPOSE_OTP_IN_RESPONSE || '').toLowerCase() === 'true';
+    if (overrideExpose && isProd) {
+      throw new Error('EXPOSE_OTP_IN_RESPONSE must not be enabled in production. Remove this env var before launch.');
+    }
     const exposeOtp = overrideExpose || (!isProd && !smsDelivered);
 
     if (exposeOtp) {

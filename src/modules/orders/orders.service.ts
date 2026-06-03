@@ -34,20 +34,29 @@ export class OrdersService {
   ) {}
 
   /**
-   * Read tax rate and flat shipping from the Settings collection.
-   * Falls back to safe defaults (10% tax, ₹500 shipping) if not configured.
+   * Read order-related settings from the Settings collection.
+   * Fallbacks match cart.service.ts so both services agree on the same numbers.
    * Admin can update these via PUT /settings/bulk without a deploy.
    */
-  private async getOrderSettings(): Promise<{ taxRate: number; shippingFlat: number }> {
+  private async getOrderSettings(): Promise<{
+    taxRate: number;
+    shippingFlat: number;
+    freeShippingAbove: number;
+    returnWindowDays: number;
+  }> {
     const rows = await this.settingsModel
-      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat'] } })
+      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat', 'order.freeShippingAbove', 'order.returnWindowDays'] } })
       .lean();
     const map = new Map(rows.map((r: any) => [r.key, r.value]));
-    const taxRate = Number(map.get('order.taxRate') ?? 0.1);
-    const shippingFlat = Number(map.get('order.shippingFlat') ?? 500);
+    const taxRate = Number(map.get('order.taxRate') ?? 0.18);
+    const shippingFlat = Number(map.get('order.shippingFlat') ?? 99);
+    const freeShippingAbove = Number(map.get('order.freeShippingAbove') ?? 499);
+    const returnWindowDays = Number(map.get('order.returnWindowDays') ?? 30);
     return {
-      taxRate: Number.isFinite(taxRate) && taxRate >= 0 ? taxRate : 0.1,
-      shippingFlat: Number.isFinite(shippingFlat) && shippingFlat >= 0 ? shippingFlat : 500,
+      taxRate: Number.isFinite(taxRate) && taxRate >= 0 ? taxRate : 0.18,
+      shippingFlat: Number.isFinite(shippingFlat) && shippingFlat >= 0 ? shippingFlat : 99,
+      freeShippingAbove: Number.isFinite(freeShippingAbove) && freeShippingAbove >= 0 ? freeShippingAbove : 499,
+      returnWindowDays: Number.isFinite(returnWindowDays) && returnWindowDays > 0 ? returnWindowDays : 30,
     };
   }
 
@@ -225,9 +234,9 @@ export class OrdersService {
       );
     };
 
-    const { taxRate, shippingFlat } = await this.getOrderSettings();
+    const { taxRate, shippingFlat, freeShippingAbove } = await this.getOrderSettings();
     const tax = subtotal * taxRate;
-    const shipping = subtotal > 0 ? shippingFlat : 0;
+    const shipping = subtotal > 0 && subtotal < freeShippingAbove ? shippingFlat : 0;
     let discount = 0;
     let total = 0;
 
@@ -255,7 +264,7 @@ export class OrdersService {
         city: shippingAddressData.city || '',
         state: shippingAddressData.state || '',
         zipCode: shippingAddressData.postalCode || shippingAddressData.zipCode || '',
-        country: shippingAddressData.country || 'United States',
+        country: shippingAddressData.country || 'India',
         phone: shippingAddressData.phone || '0000000000',
         isDefault: false,
       }], { session });
@@ -267,6 +276,39 @@ export class OrdersService {
       }
       if (!['razorpay', 'paypal', 'cash_on_delivery'].includes(paymentMethod)) {
         throw new BadRequestException(`Invalid payment method: ${paymentMethod}`);
+      }
+
+      // SECURITY: Two Razorpay order-creation patterns coexist:
+      //
+      //  A. Pre-payment (web/frontend): order is created first with only
+      //     razorpayOrderId (payment not yet completed). Payment status is
+      //     confirmed later via the Razorpay webhook. No signature available yet.
+      //
+      //  B. Post-payment (mobile): order is created after the Razorpay SDK
+      //     completes, forwarding razorpayOrderId + razorpayPaymentId +
+      //     razorpaySignature. Signature MUST be verified server-side here
+      //     because this path doesn't rely on the webhook for payment confirmation.
+      //
+      // Rule: when both razorpayOrderId AND razorpayPaymentId are present we
+      // are on path B — require and verify the signature. When only
+      // razorpayOrderId is present we are on path A — allow, webhook handles it.
+      if (paymentMethod === 'razorpay' && orderData.razorpayOrderId && orderData.razorpayPaymentId) {
+        const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+        const razorpayConfigured = this.paymentsService.isRazorpayConfigured();
+
+        if (razorpayConfigured || isProd) {
+          if (!orderData.razorpaySignature) {
+            throw new BadRequestException('razorpaySignature is required when razorpayPaymentId is provided');
+          }
+          const signatureValid = this.paymentsService.verifyPaymentSignature(
+            orderData.razorpayOrderId,
+            orderData.razorpayPaymentId,
+            orderData.razorpaySignature,
+          );
+          if (!signatureValid) {
+            throw new BadRequestException('Razorpay payment signature verification failed');
+          }
+        }
       }
 
       // SECURITY: Reject exchangeRate if sent by client - must be calculated server-side
@@ -635,13 +677,17 @@ export class OrdersService {
       throw new BadRequestException('Order is not eligible for return. Only delivered orders can be returned.');
     }
 
-    // Enforce 30-day return window from delivery/updated timestamp
-    const returnWindowDays = 30;
+    const { returnWindowDays } = await this.getOrderSettings();
     const deliveryDate = order.updatedAt;
     const daysSinceDelivery = (Date.now() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24);
     if (daysSinceDelivery > returnWindowDays) {
       throw new BadRequestException(`Return window of ${returnWindowDays} days has expired for this order.`);
     }
+
+    // Validate the status transition FIRST so we don't initiate a refund and
+    // then fail to update the order (refund without status update is worse than
+    // the transition error surfacing cleanly before any money moves).
+    assertOrderTransition(order.status, 'refunded');
 
     // Process refund based on payment method.
     // Razorpay (razorpayPaymentId present) supports automatic refunds.
@@ -679,7 +725,7 @@ export class OrdersService {
 
     // Update order statuses. For non-Razorpay payments, paymentStatus stays
     // 'pending' until an admin manually processes the refund.
-    assertOrderTransition(order.status, 'refunded');
+    // assertOrderTransition already called above — skip duplicate call.
     order.status = 'refunded';
     if (order.paymentMethod === 'razorpay') {
       order.paymentStatus = 'refunded';
@@ -890,11 +936,6 @@ export class OrdersService {
       throw new NotFoundException('Order not found for Razorpay order ID');
     }
 
-    // Store the payment ID when it arrives (webhook fires after capture)
-    if (razorpayPaymentId) {
-      (order as any).razorpayPaymentId = razorpayPaymentId;
-    }
-
     // Idempotency: webhooks can fire more than once. Skip if we've already
     // applied the same paymentStatus, otherwise we'd e.g. re-clear the cart or
     // re-restore inventory on the second delivery of payment_intent.succeeded.
@@ -903,11 +944,20 @@ export class OrdersService {
     }
 
     const updateData: any = { paymentStatus };
+    // Persist the payment ID from the webhook so refunds can use it later.
+    if (razorpayPaymentId) {
+      updateData.razorpayPaymentId = razorpayPaymentId;
+    }
     if (orderStatus) {
       updateData.status = orderStatus;
     }
     if (paymentStatus === 'paid' && !orderStatus) {
       updateData.status = 'processing';
+    }
+    // Cancel the order atomically in the same write as the paymentStatus update
+    // so there is no window where inventory is restored but status is still pending.
+    if (paymentStatus === 'failed' && !orderStatus) {
+      updateData.status = 'cancelled';
     }
 
     const updatedOrder = await this.orderModel.findByIdAndUpdate(
@@ -932,8 +982,8 @@ export class OrdersService {
         );
       }
     } else if (paymentStatus === 'failed') {
-      // Payment failed — release the inventory we reserved at order-create time
-      // and mark the order cancelled so it doesn't sit as a zombie.
+      // Payment failed — release the inventory we reserved at order-create time.
+      // Order status is already set to 'cancelled' in updateData above.
       try {
         await Promise.all(
           order.items.map((item: any) =>
@@ -942,10 +992,6 @@ export class OrdersService {
               { $inc: { inventory: item.quantity } },
             ),
           ),
-        );
-        await this.orderModel.updateOne(
-          { _id: order._id },
-          { status: 'cancelled' },
         );
       } catch (err: any) {
         this.logger.warn(
