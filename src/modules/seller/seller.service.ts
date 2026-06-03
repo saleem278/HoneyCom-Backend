@@ -141,18 +141,27 @@ export class SellerService {
       throw new BadRequestException('Not authorized to view this order');
     }
 
-    // Transform items to match frontend expectations
+    // Transform items and filter to this seller's items only.
+    // Returning all items in a multi-seller order would expose other sellers'
+    // product lines and prices. Shipping address is still included so the
+    // seller can fulfil their items.
     const orderObj = order as any;
     if (orderObj.items) {
-      orderObj.items = orderObj.items.map((item: any) => ({
-        ...item,
-        product: item.product || {
-          _id: item.product,
-          name: item.name,
-          images: item.image ? [item.image] : [],
-          price: item.price,
-        },
-      }));
+      const productIdSet = new Set(productIds.map((pid: any) => pid.toString()));
+      orderObj.items = (orderObj.items as any[])
+        .filter((item: any) => {
+          const pid = item.product?._id?.toString() ?? item.product?.toString();
+          return productIdSet.has(pid);
+        })
+        .map((item: any) => ({
+          ...item,
+          product: item.product || {
+            _id: item.product,
+            name: item.name,
+            images: item.image ? [item.image] : [],
+            price: item.price,
+          },
+        }));
     }
 
     return {

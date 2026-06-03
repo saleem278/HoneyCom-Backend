@@ -6,6 +6,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 NestJS 11 + MongoDB (Mongoose 7) backend for the HoneyCom e-commerce platform. Serves both the Next.js web frontend ([../frontend/](../frontend/)) and the React Native mobile app ([../HoneyHive/](../HoneyHive/)). Single API surface, role-driven (`customer` / `seller` / `admin` / `contentEditor`), with a mobile-specific module for device/notification concerns.
 
+## Pre-PR checklist (MANDATORY)
+
+Before opening or pushing to any PR, run both of these and confirm they pass:
+
+```bash
+npx tsc --noEmit   # type check (ignore pre-existing env errors about @types/node / @types/jest)
+npm run build      # Nest CLI compile → dist/
+```
+
+CI will fail if the build is broken. The `npm run lint` command currently errors on this repo due to an ESLint config format mismatch (pre-existing, not introduced by our changes) — use `npx tsc --noEmit` + `npm run build` instead.
+
+## Status
+
+Web / mobile / backend **feature parity is complete** as of June 2026. The current focus is bug resolution. Do not add new features until the bug backlog is cleared.
+
 ## Common commands
 
 | Task | Command |
