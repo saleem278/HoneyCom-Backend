@@ -23,6 +23,7 @@ import { SeedModule } from './modules/seed/seed.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { HealthModule } from './modules/health/health.module';
 import { PayoutsModule } from './modules/payouts/payouts.module';
+import { FlashSalesModule } from './modules/flash-sales/flash-sales.module';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { PayoutsModule } from './modules/payouts/payouts.module';
     SettingsModule,
     CouponsModule,
     PayoutsModule,
+    FlashSalesModule,
     SeedModule,
   ],
 })
