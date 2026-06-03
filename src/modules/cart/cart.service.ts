@@ -212,6 +212,10 @@ export class CartService {
   }
 
   async addToCart(userId: string, productId: string, quantity: number, variants?: any, currency: string = 'INR') {
+    if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity <= 0) {
+      throw new BadRequestException('Quantity must be a positive integer');
+    }
+
     const product = await this.productModel.findById(productId);
     if (!product || product.status !== 'approved') {
       throw new BadRequestException('Product not available');
@@ -253,6 +257,10 @@ export class CartService {
   }
 
   async updateCartItem(userId: string, itemId: string, quantity: number, currency: string = 'INR') {
+    if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity < 0) {
+      throw new BadRequestException('Quantity must be a non-negative integer');
+    }
+
     const cart = await this.cartModel.findOne({ user: userId });
     if (!cart) {
       throw new NotFoundException('Cart not found');

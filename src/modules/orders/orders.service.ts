@@ -278,6 +278,34 @@ export class OrdersService {
         throw new BadRequestException(`Invalid payment method: ${paymentMethod}`);
       }
 
+      // SECURITY: For Razorpay payments, re-verify the HMAC signature server-side.
+      // The client forwards razorpayOrderId + razorpayPaymentId + razorpaySignature
+      // from the Razorpay SDK response. We must not trust them without verification.
+      if (paymentMethod === 'razorpay') {
+        const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+        const razorpayConfigured = this.paymentsService.isRazorpayConfigured();
+
+        if (!orderData.razorpayOrderId) {
+          throw new BadRequestException('razorpayOrderId is required for Razorpay payments');
+        }
+
+        // Require and verify signature when Razorpay is configured or in production.
+        // In dev/staging without keys the check is skipped (placeholder mode).
+        if (razorpayConfigured || isProd) {
+          if (!orderData.razorpayPaymentId || !orderData.razorpaySignature) {
+            throw new BadRequestException('razorpayPaymentId and razorpaySignature are required for Razorpay payments');
+          }
+          const signatureValid = this.paymentsService.verifyPaymentSignature(
+            orderData.razorpayOrderId,
+            orderData.razorpayPaymentId,
+            orderData.razorpaySignature,
+          );
+          if (!signatureValid) {
+            throw new BadRequestException('Razorpay payment signature verification failed');
+          }
+        }
+      }
+
       // SECURITY: Reject exchangeRate if sent by client - must be calculated server-side
       if (orderData.exchangeRate !== undefined) {
         throw new BadRequestException(
