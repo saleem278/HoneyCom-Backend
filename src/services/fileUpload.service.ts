@@ -1,6 +1,10 @@
 import multer from 'multer';
+import type { Request } from 'express';
 import { v2 as cloudinary } from 'cloudinary';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
+// multer-storage-cloudinary exports a factory (module.exports = fn), not a class.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — no type defs published.
+import createCloudinaryStorage from 'multer-storage-cloudinary';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -12,10 +16,11 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Configure storage
-const storage = new CloudinaryStorage({
+// Configure storage. `req`/`file` are unused but the signature must match what
+// multer-storage-cloudinary expects.
+const storage = createCloudinaryStorage({
   cloudinary: cloudinary,
-  params: async (req, file) => {
+  params: async (_req: Request, _file: Express.Multer.File) => {
     return {
       folder: 'honey-ecommerce',
       allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'pdf'],
@@ -24,25 +29,44 @@ const storage = new CloudinaryStorage({
   },
 });
 
-// Multer upload configuration
+// Multer upload configuration.
+//
+// fileFilter sanity-checks both the claimed MIME type AND the file extension.
+// `mimetype` alone is client-supplied and trivial to spoof, so we cross-check
+// the extension. The *real* security boundary is Cloudinary's `allowed_formats`
+// (params above), which sniffs the actual file bytes server-side. This filter
+// is a fast first-line that rejects obviously bogus uploads before they reach
+// Cloudinary and use bandwidth.
+const ALLOWED_TYPES: Record<string, string[]> = {
+  'image/jpeg': ['.jpg', '.jpeg'],
+  'image/jpg': ['.jpg', '.jpeg'],
+  'image/png': ['.png'],
+  'image/gif': ['.gif'],
+  'application/pdf': ['.pdf'],
+};
+
 export const upload = multer({
   storage,
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB
   },
   fileFilter: (req, file, cb) => {
-    const allowedMimes = [
-      'image/jpeg',
-      'image/jpg',
-      'image/png',
-      'image/gif',
-      'application/pdf',
-    ];
-    if (allowedMimes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only JPEG, PNG, GIF, and PDF are allowed.'));
+    const allowedExtensions = ALLOWED_TYPES[file.mimetype];
+    if (!allowedExtensions) {
+      return cb(
+        new Error('Invalid file type. Only JPEG, PNG, GIF, and PDF are allowed.'),
+      );
     }
+    const lowerName = (file.originalname || '').toLowerCase();
+    const extensionMatches = allowedExtensions.some((ext) => lowerName.endsWith(ext));
+    if (!extensionMatches) {
+      // MIME header says image but filename doesn't end in an image extension —
+      // typical sign of a renamed/spoofed upload. Reject early.
+      return cb(
+        new Error('File extension does not match its declared type.'),
+      );
+    }
+    cb(null, true);
   },
 });
 
@@ -65,5 +89,45 @@ export const deleteFile = async (publicId: string): Promise<void> => {
 // Get file URL from Cloudinary public ID
 export const getFileUrl = (publicId: string): string => {
   return cloudinary.url(publicId);
+};
+
+/**
+ * Upload an in-memory buffer to Cloudinary. Used by the PDF service
+ * for generated invoices/labels that don't exist on disk — Render's
+ * filesystem is ephemeral so we cannot write the file out and serve
+ * it back via /uploads/* the way `pdf.service.ts` originally did.
+ *
+ * `resource_type: 'raw'` is required for non-image binaries (PDFs).
+ * `folder` defaults to honey-ecommerce/pdfs so they're isolated from
+ * product image uploads. Returns the secure HTTPS URL.
+ */
+export const uploadBufferToCloudinary = (
+  buffer: Buffer,
+  options: { folder?: string; publicId?: string; resourceType?: 'raw' | 'image' | 'auto' } = {},
+): Promise<{ url: string; publicId: string }> => {
+  const folder = options.folder ?? 'honey-ecommerce/pdfs';
+  const resourceType = options.resourceType ?? 'raw';
+
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: resourceType,
+        public_id: options.publicId,
+        // public_id controls the file path; overwrite lets a regenerated
+        // invoice replace the previous version for the same order.
+        use_filename: false,
+        overwrite: true,
+      },
+      (err, result) => {
+        if (err || !result) {
+          reject(err || new Error('Cloudinary upload returned no result'));
+          return;
+        }
+        resolve({ url: result.secure_url, publicId: result.public_id });
+      },
+    );
+    stream.end(buffer);
+  });
 };
 

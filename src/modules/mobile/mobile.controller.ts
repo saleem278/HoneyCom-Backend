@@ -2,6 +2,7 @@ import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Request } f
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { MobileService } from './mobile.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('Mobile')
 @Controller('mobile')
@@ -14,21 +15,21 @@ export class MobileController {
   @Post('devices')
   @ApiOperation({ summary: 'Register device for push notifications' })
   @ApiResponse({ status: 200, description: 'Device registered' })
-  async registerDevice(@Body() body: { deviceToken: string; platform: 'ios' | 'android'; appVersion: string }, @Request() req) {
+  async registerDevice(@Body() body: { deviceToken: string; platform: 'ios' | 'android'; appVersion: string }, @Request() req: AuthedRequest) {
     return this.mobileService.registerDevice(req.user.id, body);
   }
 
   @Get('devices')
   @ApiOperation({ summary: 'Get user devices' })
   @ApiResponse({ status: 200, description: 'List of devices' })
-  async getUserDevices(@Request() req) {
+  async getUserDevices(@Request() req: AuthedRequest) {
     return this.mobileService.getUserDevices(req.user.id);
   }
 
   @Delete('devices/:id')
   @ApiOperation({ summary: 'Unregister device' })
   @ApiResponse({ status: 200, description: 'Device unregistered' })
-  async unregisterDevice(@Param('id') id: string, @Request() req) {
+  async unregisterDevice(@Param('id') id: string, @Request() req: AuthedRequest) {
     return this.mobileService.unregisterDevice(id, req.user.id);
   }
 
@@ -36,28 +37,28 @@ export class MobileController {
   @Get('notifications')
   @ApiOperation({ summary: 'Get user notifications' })
   @ApiResponse({ status: 200, description: 'List of notifications' })
-  async getNotifications(@Request() req, @Body() body?: { page?: number; limit?: number }) {
+  async getNotifications(@Request() req: AuthedRequest, @Body() body?: { page?: number; limit?: number }) {
     return this.mobileService.getNotifications(req.user.id, body?.page, body?.limit);
   }
 
   @Put('notifications/:id/read')
   @ApiOperation({ summary: 'Mark notification as read' })
   @ApiResponse({ status: 200, description: 'Notification marked as read' })
-  async markAsRead(@Param('id') id: string, @Request() req) {
+  async markAsRead(@Param('id') id: string, @Request() req: AuthedRequest) {
     return this.mobileService.markAsRead(id, req.user.id);
   }
 
   @Put('notifications/read-all')
   @ApiOperation({ summary: 'Mark all notifications as read' })
   @ApiResponse({ status: 200, description: 'All notifications marked as read' })
-  async markAllAsRead(@Request() req) {
+  async markAllAsRead(@Request() req: AuthedRequest) {
     return this.mobileService.markAllAsRead(req.user.id);
   }
 
   @Delete('notifications/:id')
   @ApiOperation({ summary: 'Delete notification' })
   @ApiResponse({ status: 200, description: 'Notification deleted' })
-  async deleteNotification(@Param('id') id: string, @Request() req) {
+  async deleteNotification(@Param('id') id: string, @Request() req: AuthedRequest) {
     return this.mobileService.deleteNotification(id, req.user.id);
   }
 }
