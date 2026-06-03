@@ -1953,9 +1953,10 @@ export class SeedService {
       { key: 'branding.socialWhatsapp', value: 'https://wa.me/919876543210', category: 'branding', description: 'WhatsApp chat link.' },
 
       // ── Orders ────────────────────────────────────────────────────────────
-      { key: 'order.taxRate', value: 0.1, category: 'orders', description: 'Tax rate (decimal). 0.18 = 18% GST.' },
+      { key: 'order.taxRate', value: 0.18, category: 'orders', description: 'Tax rate (decimal). 0.18 = 18% GST.' },
       { key: 'order.shippingFlat', value: 99, category: 'orders', description: 'Flat shipping fee in INR.' },
       { key: 'order.freeShippingAbove', value: 499, category: 'orders', description: 'Order subtotal above which shipping is free.' },
+      { key: 'order.returnWindowDays', value: 30, category: 'orders', description: 'Number of days after delivery within which returns are accepted.' },
 
       // ── Storefront — general ──────────────────────────────────────────────
       { key: 'storefront.announcementBar', value: '🚚 Free delivery above ₹499 | ✅ 500+ Verified Sellers | 🛡️ Buyer Protection | 💳 EMI available', category: 'storefront', description: 'Ticker bar text. Pipe | separates items.' },
