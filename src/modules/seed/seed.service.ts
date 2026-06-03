@@ -1945,6 +1945,7 @@ export class SeedService {
       { key: 'branding.supportPhone', value: '+91 98765 43210', category: 'branding', description: 'Support phone in footer.' },
       { key: 'branding.address', value: '4th Floor, Tech Park, Sector 18, Gurugram, Haryana – 122001', category: 'branding', description: 'Company address.' },
       { key: 'branding.primaryColor', value: '#F97316', category: 'branding', description: 'Primary accent color (hex).' },
+      { key: 'branding.currency', value: 'INR', category: 'branding', description: 'Default currency code.' },
       // Social links
       { key: 'branding.socialFacebook', value: 'https://facebook.com/dayam', category: 'branding', description: 'Facebook page URL.' },
       { key: 'branding.socialTwitter', value: 'https://twitter.com/dayam', category: 'branding', description: 'Twitter/X profile URL.' },
@@ -2059,11 +2060,6 @@ export class SeedService {
         ]), category: 'storefront', description: 'Trust feature strip on homepage. JSON array of {icon, title, desc}. Icons: Truck, ShieldCheck, RefreshCw, Award.'
       },
 
-      // Search / delivery
-      { key: 'storefront.searchPlaceholder', value: 'Search for phones, fashion, groceries…', category: 'storefront', description: 'Search input placeholder text.' },
-      { key: 'storefront.trendingSearches', value: "Samsung Galaxy S24, Nike Air Max, Levi's Jeans, Minimalist Serum", category: 'storefront', description: 'Comma-separated trending search terms.' },
-      { key: 'storefront.defaultDeliveryCity', value: 'Mumbai', category: 'storefront', description: '"Deliver to" city shown in the header.' },
-      { key: 'storefront.defaultDeliveryPin', value: '400001', category: 'storefront', description: '"Deliver to" PIN code shown in the header.' },
       { key: 'storefront.heroCarouselInterval', value: 4500, category: 'storefront', description: 'Hero carousel auto-rotation interval in ms.' },
 
       // ── Navigation ─────────────────────────────────────────────────────────
@@ -2172,6 +2168,16 @@ export class SeedService {
       { key: 'seo.metaTitle', value: "Dayam — India's Trusted Marketplace", category: 'seo', description: 'Default page <title>.' },
       { key: 'seo.metaDescription', value: 'Shop electronics, fashion, home, beauty and more from 500+ verified sellers. Best prices, fast delivery, easy returns.', category: 'seo', description: 'Default meta description.' },
       { key: 'seo.keywords', value: 'online shopping, marketplace, electronics, fashion, grocery, India', category: 'seo', description: 'Meta keywords (comma-separated).' },
+
+      // ── Products ────────────────────────────────────────────────────────────
+      { key: 'products.reviewsEnabled', value: true, category: 'products', description: 'Allow customers to leave product reviews.' },
+      { key: 'products.maxImagesPerProduct', value: 8, category: 'products', description: 'Maximum number of images allowed per product listing.' },
+      { key: 'products.lowStockThreshold', value: 10, category: 'products', description: 'Show "Low stock" badge when inventory is at or below this number.' },
+
+      // ── Notifications ───────────────────────────────────────────────────────
+      { key: 'notifications.orderConfirmationEnabled', value: true, category: 'notifications', description: 'Send email on order placement.' },
+      { key: 'notifications.shipmentUpdateEnabled', value: true, category: 'notifications', description: 'Send email when order ships.' },
+      { key: 'notifications.promotionalEmailsEnabled', value: true, category: 'notifications', description: 'Allow promotional / newsletter emails.' },
     ].map(s => ({ ...s, createdAt: now, updatedAt: now }));
 
     await settingsCollection.insertMany(settings);
