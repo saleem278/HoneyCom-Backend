@@ -5,6 +5,7 @@ import { CartService } from './cart.service';
 import { Cart, CartSchema } from '../../models/Cart.model';
 import { Product, ProductSchema } from '../../models/Product.model';
 import { Coupon, CouponSchema } from '../../models/Coupon.model';
+import { SettingsSchema } from '../../models/Settings.model';
 import { AuthModule } from '../auth/auth.module';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 
@@ -14,6 +15,7 @@ import { ExchangeRateService } from '../../services/exchange-rate.service';
       { name: 'Cart', schema: CartSchema },
       { name: 'Product', schema: ProductSchema },
       { name: 'Coupon', schema: CouponSchema },
+      { name: 'Settings', schema: SettingsSchema },
     ]),
     AuthModule,
   ],

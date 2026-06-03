@@ -1,33 +1,132 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { InjectModel, InjectConnection } from '@nestjs/mongoose';
+import { Model, Connection } from 'mongoose';
+import * as crypto from 'crypto';
 import { Order, IOrder } from '../../models/Order.model';
 import { Cart, ICart } from '../../models/Cart.model';
 import { Product, IProduct } from '../../models/Product.model';
 import { Address, IAddress } from '../../models/Address.model';
+import { Coupon, ICoupon } from '../../models/Coupon.model';
+import { Settings, ISettings } from '../../models/Settings.model';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
+import { assertOrderTransition } from './order-status';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @InjectModel('Order') private orderModel: Model<IOrder>,
     @InjectModel('Cart') private cartModel: Model<ICart>,
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Address') private addressModel: Model<IAddress>,
+    @InjectModel('Coupon') private couponModel: Model<ICoupon>,
+    @InjectModel('Settings') private settingsModel: Model<ISettings>,
+    @InjectConnection() private connection: Connection,
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
     private pdfService: PdfService,
+    @Inject(forwardRef(() => PaymentsService))
+    private paymentsService: PaymentsService,
   ) {}
 
+  /**
+   * Read order-related settings from the Settings collection.
+   * Fallbacks match cart.service.ts so both services agree on the same numbers.
+   * Admin can update these via PUT /settings/bulk without a deploy.
+   */
+  private async getOrderSettings(): Promise<{
+    taxRate: number;
+    shippingFlat: number;
+    freeShippingAbove: number;
+    returnWindowDays: number;
+  }> {
+    const rows = await this.settingsModel
+      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat', 'order.freeShippingAbove', 'order.returnWindowDays'] } })
+      .lean();
+    const map = new Map(rows.map((r: any) => [r.key, r.value]));
+    const taxRate = Number(map.get('order.taxRate') ?? 0.18);
+    const shippingFlat = Number(map.get('order.shippingFlat') ?? 99);
+    const freeShippingAbove = Number(map.get('order.freeShippingAbove') ?? 499);
+    const returnWindowDays = Number(map.get('order.returnWindowDays') ?? 30);
+    return {
+      taxRate: Number.isFinite(taxRate) && taxRate >= 0 ? taxRate : 0.18,
+      shippingFlat: Number.isFinite(shippingFlat) && shippingFlat >= 0 ? shippingFlat : 99,
+      freeShippingAbove: Number.isFinite(freeShippingAbove) && freeShippingAbove >= 0 ? freeShippingAbove : 499,
+      returnWindowDays: Number.isFinite(returnWindowDays) && returnWindowDays > 0 ? returnWindowDays : 30,
+    };
+  }
+
+  /**
+   * Extract the customer ID string from an order, regardless of whether
+   * the `customer` field has been populated to a User object or remains an ObjectId.
+   */
+  private extractCustomerId(customer: unknown): string {
+    if (customer && typeof customer === 'object' && '_id' in customer) {
+      return String((customer as { _id: { toString(): string } })._id);
+    }
+    return String(customer);
+  }
+
+  private convertOrderCurrency(order: any): any {
+    if (!order) return order;
+
+    // If order has toObject (is a Mongoose document), convert to plain object
+    const orderObj = typeof order.toObject === 'function' ? order.toObject() : order;
+
+    const rate = orderObj.exchangeRate || 1.0;
+
+    orderObj.subtotal = Number((orderObj.subtotal * rate).toFixed(2));
+    orderObj.tax = Number((orderObj.tax * rate).toFixed(2));
+    orderObj.shipping = Number((orderObj.shipping * rate).toFixed(2));
+    orderObj.discount = Number((orderObj.discount * rate).toFixed(2));
+    orderObj.total = Number((orderObj.total * rate).toFixed(2));
+
+    if (orderObj.items) {
+      orderObj.items = orderObj.items.map((item: any) => {
+        const itemObj = { ...item };
+        itemObj.price = Number((itemObj.price * rate).toFixed(2));
+        return itemObj;
+      });
+    }
+
+    return orderObj;
+  }
+
   async create(userId: string, orderData: any) {
+    // Wrap the entire order creation in a MongoDB session so inventory
+    // decrements, coupon redemption, address creation, and order insert
+    // are all atomic. If any step fails the session aborts and all writes
+    // are rolled back — no stranded reservations or orphaned coupons.
+    // Note: transactions require a replica set (or Atlas). On standalone
+    // MongoDB (local dev) the session is opened but transactions aren't
+    // enforced — the rollback logic below handles that case manually.
+    const session = await this.connection.startSession();
+
+    try {
+      let result: any;
+      await session.withTransaction(async () => {
+        result = await this._createWithSession(userId, orderData, session);
+      });
+      // withTransaction return value is unreliable on standalone MongoDB
+      // (returns session metadata instead of callback result). Always use
+      // the captured variable instead.
+      return result;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  private async _createWithSession(userId: string, orderData: any, session: any) {
     // Use cart items from orderData if provided, otherwise get from cart
     let itemsToProcess = orderData.items;
     let cart: any = null;
 
     if (!itemsToProcess || itemsToProcess.length === 0) {
-      cart = await this.cartModel.findOne({ user: userId }).populate('items.product');
+      cart = await this.cartModel.findOne({ user: userId }).populate('items.product').session(session);
       if (!cart || cart.items.length === 0) {
         throw new BadRequestException('Cart is empty');
       }
@@ -35,152 +134,398 @@ export class OrdersService {
     }
 
     let subtotal = 0;
-    const items = [];
+    const items: Array<{
+      product: any;
+      seller: any;
+      name: string;
+      quantity: number;
+      price: number;
+      image: string;
+      variants: any;
+    }> = [];
 
-    for (const item of itemsToProcess) {
-      let product: any;
-      
-      if (item.productId) {
-        // If productId is provided, fetch the product
-        product = await this.productModel.findById(item.productId);
-      } else {
-        // Otherwise, use the populated product from cart
-        product = item.product as any;
+    // Reserve inventory atomically, item by item. Each `$inc` is conditional on
+    // sufficient stock, so concurrent orders cannot oversell. If any reservation
+    // fails (out of stock or product gone), we restore previously-reserved items
+    // so we don't leave stranded reservations behind.
+    const reserved: Array<{ productId: any; quantity: number }> = [];
+
+    try {
+      for (const item of itemsToProcess) {
+        const productId = item.productId || (item.product as any)?._id;
+        if (!productId) {
+          throw new BadRequestException('Product ID missing on order item');
+        }
+
+        // Conditional $inc: only succeeds if there's enough stock left and the
+        // product is approved. `findOneAndUpdate` returns null if the predicate
+        // doesn't match — we treat that as out-of-stock.
+        const product = await this.productModel.findOneAndUpdate(
+          {
+            _id: productId,
+            status: 'approved',
+            inventory: { $gte: item.quantity },
+          },
+          { $inc: { inventory: -item.quantity } },
+          { new: true, session },
+        );
+
+        if (!product) {
+          // Either product doesn't exist, isn't approved, or doesn't have stock.
+          // Read the row to give a precise error message.
+          const probe = await this.productModel.findById(productId).select('name inventory status');
+          if (!probe) {
+            throw new BadRequestException(`Product ${productId} not found`);
+          }
+          if (probe.status !== 'approved') {
+            throw new BadRequestException(`Product ${probe.name} is not available`);
+          }
+          throw new BadRequestException(
+            `Insufficient inventory for ${probe.name} (requested ${item.quantity}, available ${probe.inventory})`,
+          );
+        }
+
+        reserved.push({ productId: product._id, quantity: item.quantity });
+
+        const itemTotal = product.price * item.quantity;
+        subtotal += itemTotal;
+
+        items.push({
+          product: product._id,
+          // Snapshot the seller onto the line item so seller-side
+          // queries don't need to join through Product (and so future
+          // reassignment of a product's seller doesn't rewrite past
+          // order history).
+          seller: (product as any).seller,
+          name: product.name,
+          quantity: item.quantity,
+          price: product.price,
+          image: product.images?.[0] || '',
+          variants: item.variants || {},
+        });
+      }
+    } catch (err) {
+      // Roll back any reservations we already made before the failure.
+      // The transaction abort handles this on replica sets; this is the
+      // manual fallback for standalone dev MongoDB.
+      await Promise.all(
+        reserved.map((r) =>
+          this.productModel.updateOne(
+            { _id: r.productId },
+            { $inc: { inventory: r.quantity } },
+            { session },
+          ),
+        ),
+      );
+      throw err;
+    }
+
+    // Helper: roll back any inventory reservations made above. Used in catches
+    // below so that downstream failures don't leave stranded reserved stock.
+    const restoreReservations = async () => {
+      await Promise.all(
+        reserved.map((r) =>
+          this.productModel.updateOne(
+            { _id: r.productId },
+            { $inc: { inventory: r.quantity } },
+            { session },
+          ),
+        ),
+      );
+    };
+
+    const { taxRate, shippingFlat, freeShippingAbove } = await this.getOrderSettings();
+    const tax = subtotal * taxRate;
+    const shipping = subtotal > 0 && subtotal < freeShippingAbove ? shippingFlat : 0;
+    let discount = 0;
+    let total = 0;
+
+    let order;
+    try {
+      // Create shipping address document
+      const shippingAddressData = orderData.shippingAddress;
+      if (!shippingAddressData) {
+        throw new BadRequestException('Shipping address is required');
       }
 
-      if (!product || product.status !== 'approved') {
-        throw new BadRequestException(`Product ${product?.name || 'Unknown'} is not available`);
+      // Parse fullName into firstName and lastName
+      const nameParts = (shippingAddressData.fullName || '').trim().split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || firstName;
+
+      // Create address document
+      const [address] = await this.addressModel.create([{
+        user: userId,
+        type: 'shipping',
+        firstName,
+        lastName,
+        addressLine1: shippingAddressData.address || '',
+        addressLine2: shippingAddressData.addressLine2 || '',
+        city: shippingAddressData.city || '',
+        state: shippingAddressData.state || '',
+        zipCode: shippingAddressData.postalCode || shippingAddressData.zipCode || '',
+        country: shippingAddressData.country || 'India',
+        phone: shippingAddressData.phone || '0000000000',
+        isDefault: false,
+      }], { session });
+
+      // Map payment method: 'card' -> 'razorpay'
+      let paymentMethod = orderData.paymentMethod;
+      if (paymentMethod === 'card') {
+        paymentMethod = 'razorpay';
       }
-      if (product.inventory < item.quantity) {
-        throw new BadRequestException(`Insufficient inventory for ${product.name}`);
+      if (!['razorpay', 'paypal', 'cash_on_delivery'].includes(paymentMethod)) {
+        throw new BadRequestException(`Invalid payment method: ${paymentMethod}`);
       }
 
-      const itemTotal = product.price * item.quantity;
-      subtotal += itemTotal;
+      // SECURITY: Reject exchangeRate if sent by client - must be calculated server-side
+      if (orderData.exchangeRate !== undefined) {
+        throw new BadRequestException(
+          'Exchange rate cannot be set by client. It is calculated server-side based on currency.',
+        );
+      }
 
-      items.push({
-        product: product._id,
-        name: product.name,
-        quantity: item.quantity,
-        price: product.price,
-        image: product.images?.[0] || '',
-        variants: item.variants || {},
-      });
+      const currency = (orderData.currency || 'INR').toUpperCase() as
+        | 'USD' | 'EUR' | 'GBP' | 'INR' | 'CAD' | 'AUD' | 'JPY';
+
+      const supportedCurrencies = this.exchangeRateService.getSupportedCurrencies();
+      if (!supportedCurrencies.includes(currency)) {
+        throw new BadRequestException(
+          `Unsupported currency: ${currency}. Supported currencies: ${supportedCurrencies.join(', ')}`,
+        );
+      }
+
+      // Block until live rates have been fetched at least once so orders
+      // are never priced on stale static-fallback rates.
+      await this.exchangeRateService.ensureRatesLoaded();
+      const exchangeRate = this.exchangeRateService.getExchangeRate(currency);
+
+      // Conditionally redeem the coupon BEFORE creating the order.
+      // The previous flow `$inc`-ed usedCount after order create which
+      // had two bugs:
+      //   1. Race condition — two concurrent orders both passed the
+      //      `usedCount < usageLimit` check in applyCoupon, then both
+      //      incremented, blowing past the limit.
+      //   2. If the increment failed (Mongo write error) we logged and
+      //      moved on, meaning the order had a coupon discount that was
+      //      never counted against the limit.
+      //
+      // The conditional `findOneAndUpdate` below either redeems atomically
+      // OR returns null. If null, the coupon hit its cap *during* this
+      // request — refuse the order so the user can retry without the
+      // expired coupon. Reservation rollback happens in the outer catch.
+      if (cart?.couponCode) {
+        const now = new Date();
+        const redeemed = await this.couponModel.findOneAndUpdate(
+          {
+            code: cart.couponCode.toUpperCase(),
+            status: 'active',
+            validFrom: { $lte: now },
+            validUntil: { $gte: now },
+            // Either no limit, OR current usage strictly below limit.
+            $or: [
+              { usageLimit: { $exists: false } },
+              { usageLimit: null },
+              { $expr: { $lt: ['$usedCount', '$usageLimit'] } },
+            ],
+          },
+          { $inc: { usedCount: 1 } },
+          { new: true, session },
+        );
+        if (!redeemed) {
+          throw new BadRequestException(
+            'Coupon is invalid, expired, or has reached its usage limit.',
+          );
+        }
+
+        // Validate minimum purchase
+        if (redeemed.minPurchase && subtotal < redeemed.minPurchase) {
+          throw new BadRequestException(
+            `Minimum purchase of ${redeemed.minPurchase} required for coupon ${redeemed.code}`,
+          );
+        }
+
+        // Calculate discount based on eligible products/categories.
+        // Batch-fetch all products in a single query instead of one per item
+        // to avoid N+1 performance issues on large orders.
+        let eligibleSubtotal = 0;
+        const needsProductDetails =
+          (redeemed.applicableProducts && redeemed.applicableProducts.length > 0) ||
+          (redeemed.applicableCategories && redeemed.applicableCategories.length > 0);
+
+        let productsMap: Map<string, any> = new Map();
+        if (needsProductDetails) {
+          const productIds = items.map((i) => i.product);
+          const products = await this.productModel
+            .find({ _id: { $in: productIds } })
+            .select('_id category')
+            .lean();
+          products.forEach((p: any) => productsMap.set(p._id.toString(), p));
+        }
+
+        for (const item of items) {
+          let isEligible = true;
+          if (needsProductDetails) {
+            const product = productsMap.get(item.product.toString());
+            if (!product) { isEligible = false; }
+            else {
+              if (redeemed.applicableProducts && redeemed.applicableProducts.length > 0) {
+                isEligible = redeemed.applicableProducts.some(
+                  (pId) => pId.toString() === product._id.toString()
+                );
+              }
+              if (isEligible && redeemed.applicableCategories && redeemed.applicableCategories.length > 0) {
+                isEligible = redeemed.applicableCategories.some(
+                  (cId) => cId.toString() === product.category?.toString()
+                );
+              }
+            }
+          }
+          if (isEligible) {
+            eligibleSubtotal += item.price * item.quantity;
+          }
+        }
+
+        let calculatedDiscount = 0;
+        if (redeemed.type === 'percentage') {
+          calculatedDiscount = (eligibleSubtotal * redeemed.value) / 100;
+          if (redeemed.maxDiscount) {
+            calculatedDiscount = Math.min(calculatedDiscount, redeemed.maxDiscount);
+          }
+        } else {
+          if (eligibleSubtotal > 0) {
+            calculatedDiscount = Math.min(redeemed.value, eligibleSubtotal);
+          }
+        }
+
+        discount = Math.min(calculatedDiscount, subtotal);
+      }
+
+      total = Math.max(0, subtotal + tax + shipping - discount);
+
+      const orderCount = await this.orderModel.countDocuments();
+      const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+      const orderNumber = `ORD-${String(Date.now()).slice(-8)}-${String(orderCount + 1).padStart(4, '0')}-${randomSuffix}`;
+
+      const [createdOrder] = await this.orderModel.create([{
+        orderNumber,
+        customer: userId,
+        items,
+        shippingAddress: address._id,
+        paymentMethod,
+        currency,
+        exchangeRate,
+        subtotal,
+        tax,
+        shipping,
+        discount,
+        total,
+        couponCode: cart?.couponCode,
+        razorpayOrderId: orderData.razorpayOrderId,
+        razorpayPaymentId: orderData.razorpayPaymentId,
+        status: 'pending',
+        paymentStatus: 'pending',
+      }], { session });
+      order = createdOrder;
+    } catch (err) {
+      // Transaction abort handles rollback on replica sets. The calls below
+      // are the manual fallback for standalone dev MongoDB where transactions
+      // are no-ops. They're idempotent so safe to run either way.
+      await restoreReservations();
+      if (cart?.couponCode) {
+        try {
+          await this.couponModel.updateOne(
+            { code: cart.couponCode.toUpperCase(), usedCount: { $gt: 0 } },
+            { $inc: { usedCount: -1 } },
+            { session },
+          );
+        } catch (decErr) {
+          this.logger.warn(
+            `Failed to roll back coupon ${cart.couponCode} after order create failed: ${
+              decErr instanceof Error ? decErr.message : String(decErr)
+            }`,
+          );
+        }
+      }
+      throw err;
     }
 
-    const tax = subtotal * 0.1;
-    const shipping = subtotal > 0 ? 10 : 0;
-    const discount = cart?.couponDiscount || 0;
-    const total = subtotal + tax + shipping - discount;
-
-    // Create shipping address document
-    const shippingAddressData = orderData.shippingAddress;
-    if (!shippingAddressData) {
-      throw new BadRequestException('Shipping address is required');
-    }
-
-    // Parse fullName into firstName and lastName
-    const nameParts = (shippingAddressData.fullName || '').trim().split(' ');
-    const firstName = nameParts[0] || '';
-    const lastName = nameParts.slice(1).join(' ') || firstName;
-
-    // Create address document
-    const address = await this.addressModel.create({
-      user: userId,
-      type: 'shipping',
-      firstName,
-      lastName,
-      addressLine1: shippingAddressData.address || '',
-      addressLine2: shippingAddressData.addressLine2 || '',
-      city: shippingAddressData.city || '',
-      state: shippingAddressData.state || '',
-      zipCode: shippingAddressData.postalCode || shippingAddressData.zipCode || '',
-      country: shippingAddressData.country || 'United States',
-      phone: shippingAddressData.phone || '0000000000', // Default phone if not provided
-      isDefault: false,
-    });
-
-    // Map payment method: 'card' -> 'stripe'
-    let paymentMethod = orderData.paymentMethod;
-    if (paymentMethod === 'card') {
-      paymentMethod = 'stripe';
-    }
-    if (!['stripe', 'paypal', 'cash_on_delivery'].includes(paymentMethod)) {
-      throw new BadRequestException(`Invalid payment method: ${paymentMethod}`);
-    }
-
-    // SECURITY: Reject exchangeRate if sent by client - it must be calculated server-side
-    if (orderData.exchangeRate !== undefined) {
-      throw new BadRequestException('Exchange rate cannot be set by client. It is calculated server-side based on currency.');
-    }
-
-    // Get currency from orderData or default to INR
-    const currency = (orderData.currency || 'INR').toUpperCase() as 'USD' | 'EUR' | 'GBP' | 'INR' | 'CAD' | 'AUD' | 'JPY';
-    
-    // Validate currency
-    const supportedCurrencies = this.exchangeRateService.getSupportedCurrencies();
-    if (!supportedCurrencies.includes(currency)) {
-      throw new BadRequestException(`Unsupported currency: ${currency}. Supported currencies: ${supportedCurrencies.join(', ')}`);
-    }
-
-    // Calculate exchange rate server-side based on currency
-    // Exchange rate represents: 1 INR (base) = exchangeRate * targetCurrency
-    // For INR, exchangeRate = 1.0 (no conversion)
-    const exchangeRate = this.exchangeRateService.getExchangeRate(currency);
-
-    // Generate order number
-    const orderCount = await this.orderModel.countDocuments();
-    const orderNumber = `ORD-${String(Date.now()).slice(-8)}-${String(orderCount + 1).padStart(4, '0')}`;
-
-    const order = await this.orderModel.create({
-      orderNumber,
-      customer: userId,
-      items,
-      shippingAddress: address._id,
-      paymentMethod,
-      currency,
-      exchangeRate,
-      subtotal,
-      tax,
-      shipping,
-      discount,
-      total,
-      status: 'pending',
-      paymentStatus: 'pending',
-    });
-
-    // Clear cart if it exists
-    if (cart) {
+    // Cart-clear policy:
+    //  - cash_on_delivery: no async confirmation, safe to clear now.
+    //  - razorpay with razorpayOrderId: defer until the webhook fires
+    //    payment.captured so the user doesn't lose their cart if payment fails.
+    //    updatePaymentStatusByRazorpayOrderId() clears the cart on 'paid'.
+    //  - paypal: clear now until PayPal sync confirmation is wired up.
+    const deferCartClear =
+      order.paymentMethod === 'razorpay' && !!orderData.razorpayOrderId;
+    if (cart && !deferCartClear) {
       cart.items = [];
       cart.couponCode = undefined;
       cart.couponDiscount = undefined;
-      await cart.save();
+      await cart.save({ session });
     }
 
-    // Send confirmation email
-    try {
-      const orderWithUser = await this.orderModel.findById(order._id).populate('customer');
-      await this.emailService.sendOrderConfirmationEmail((orderWithUser as any).customer.email, order);
-    } catch (error) {
-      // Error sending email
-    }
+    // Send confirmation email outside the transaction — SMTP is not
+    // transactional and we don't want a mail failure to roll back a valid order.
+    // Fire-and-forget after the transaction commits.
+    setImmediate(async () => {
+      try {
+        const orderWithUser = await this.orderModel.findById(order._id).populate('customer');
+        const customerEmail = (orderWithUser as any)?.customer?.email;
+        if (customerEmail) {
+          await this.emailService.sendOrderConfirmationEmail(customerEmail, order);
+        }
+      } catch (emailErr: any) {
+        this.logger.warn(
+          `Order confirmation email failed for order ${order._id}: ${emailErr?.message || emailErr}`,
+        );
+      }
+    });
 
     return {
       success: true,
-      order,
+      order: this.convertOrderCurrency(order),
     };
   }
 
-  async findAll(userId: string, userRole: string) {
+  async findAll(userId: string, userRole: string, page: number = 1, limit: number = 20, status?: string) {
+    // Clamp to safe ranges to prevent memory exhaustion.
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.min(Math.max(1, limit), 100);
     const filter: any = {};
-    if (userRole !== 'admin') {
+    if (userRole === 'seller') {
+      // Sellers see orders that contain at least one of their products.
+      // Snapshot the seller ID onto each order line item so this join is cheap.
+      filter['items.seller'] = userId;
+    } else if (userRole !== 'admin') {
       filter.customer = userId;
     }
+    if (status) {
+      filter.status = status;
+    }
 
-    const orders = await this.orderModel.find(filter).sort({ createdAt: -1 });
+    const skip = (safePage - 1) * safeLimit;
+    const orders = await this.orderModel
+      .find(filter)
+      .populate('customer', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(safeLimit)
+      .lean();
+    
+    const total = await this.orderModel.countDocuments(filter);
+    
+    const convertedOrders = orders.map((o) => this.convertOrderCurrency(o));
+
     return {
       success: true,
-      orders,
+      orders: convertedOrders,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        pages: Math.ceil(total / safeLimit),
+      },
     };
   }
 
@@ -195,14 +540,35 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
-    if (userRole !== 'admin' && (order.customer as any)?._id?.toString() !== userId) {
-      throw new BadRequestException('Not authorized');
+    if (userRole === 'admin') {
+      // Admin can view any order — no further check needed.
+    } else if (userRole === 'seller') {
+      // Sellers may only view orders that contain at least one of their products.
+      const sellerProducts = await this.productModel
+        .find({ seller: userId })
+        .select('_id')
+        .lean();
+      const sellerProductIds = new Set(sellerProducts.map((p: any) => p._id.toString()));
+      const hasSellerItem = (order.items as any[]).some((item: any) => {
+        const pid = item.seller?.toString() ?? item.product?.toString();
+        return pid && sellerProductIds.has(pid);
+      });
+      if (!hasSellerItem) {
+        throw new BadRequestException('Not authorized');
+      }
+    } else {
+      // Customer: must own the order.
+      if ((order.customer as any)?._id?.toString() !== userId) {
+        throw new BadRequestException('Not authorized');
+      }
     }
 
+    // Convert order and its item prices first
+    const convertedOrder = this.convertOrderCurrency(order);
+
     // Transform items to match frontend expectations
-    const orderObj = order as any;
-    if (orderObj.items) {
-      orderObj.items = orderObj.items.map((item: any) => ({
+    if (convertedOrder.items) {
+      convertedOrder.items = convertedOrder.items.map((item: any) => ({
         ...item,
         product: {
           _id: item.product,
@@ -215,7 +581,7 @@ export class OrdersService {
 
     return {
       success: true,
-      order: orderObj,
+      order: convertedOrder,
     };
   }
 
@@ -225,20 +591,42 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
-    if (userRole !== 'admin' && order.customer.toString() !== userId) {
+    if (userRole !== 'admin' && order.customer?.toString() !== userId) {
       throw new BadRequestException('Not authorized');
     }
 
-    if (['delivered', 'cancelled'].includes(order.status)) {
-      throw new BadRequestException('Cannot cancel this order');
+    // Validate transition (covers both terminal-state and skip-state attempts).
+    assertOrderTransition(order.status, 'cancelled');
+
+    // Process Razorpay refund if it is a paid Razorpay order
+    if (order.paymentMethod === 'razorpay' && (order as any).razorpayPaymentId && order.paymentStatus === 'paid') {
+      try {
+        await this.paymentsService.processRefund((order as any).razorpayPaymentId, order.total, 'Order cancellation');
+        order.paymentStatus = 'refunded';
+      } catch (refundError: any) {
+        this.logger.warn(`Failed to process Razorpay refund for cancellation on order ${order._id}: ${refundError.message}`);
+      }
     }
 
+    // Persist the cancellation first, then restore inventory. If a downstream
+    // worker double-cancels, the assertion above short-circuits (idempotent).
     order.status = 'cancelled';
     await order.save();
 
+    // Return reserved stock to the catalog. We use $inc rather than recompute
+    // so concurrent updates to inventory aren't clobbered.
+    await Promise.all(
+      order.items.map((item: any) =>
+        this.productModel.updateOne(
+          { _id: item.product },
+          { $inc: { inventory: item.quantity } },
+        ),
+      ),
+    );
+
     return {
       success: true,
-      order,
+      order: this.convertOrderCurrency(order),
     };
   }
 
@@ -252,19 +640,64 @@ export class OrdersService {
       throw new BadRequestException('Not authorized');
     }
 
-    if (!['delivered', 'shipped'].includes(order.status)) {
-      throw new BadRequestException('Order is not eligible for return');
+    if (order.status !== 'delivered') {
+      throw new BadRequestException('Order is not eligible for return. Only delivered orders can be returned.');
     }
 
-    // For now, just update order status to 'refunded'
-    // In a full implementation, you'd create a ReturnRequest document
+    const { returnWindowDays } = await this.getOrderSettings();
+    const deliveryDate = order.updatedAt;
+    const daysSinceDelivery = (Date.now() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceDelivery > returnWindowDays) {
+      throw new BadRequestException(`Return window of ${returnWindowDays} days has expired for this order.`);
+    }
+
+    // Process refund based on payment method.
+    // Razorpay (razorpayPaymentId present) supports automatic refunds.
+    // For PayPal and cash_on_delivery, skip automatic refund —
+    // those methods require manual admin action via the admin panel.
+    if (order.paymentMethod === 'razorpay') {
+      if (!(order as any).razorpayPaymentId) {
+        throw new BadRequestException(
+          'Cannot automatically refund this order: payment ID is missing. Please contact support.',
+        );
+      }
+      try {
+        await this.paymentsService.processRefund((order as any).razorpayPaymentId, order.total, 'Customer return request');
+      } catch (refundError: any) {
+        this.logger.warn(`Failed to process Razorpay refund for return on order ${order._id}: ${refundError.message}`);
+      }
+    } else if (order.paymentMethod === 'paypal' || order.paymentMethod === 'cash_on_delivery') {
+      // Non-Razorpay payments require manual admin refund processing.
+      this.logger.log(`Return for order ${order._id} (${order.paymentMethod}): awaiting manual admin refund.`);
+    }
+
+    // Replenish product inventory for all returned items
+    try {
+      await Promise.all(
+        order.items.map((item: any) =>
+          this.productModel.updateOne(
+            { _id: item.product },
+            { $inc: { inventory: item.quantity } },
+          ),
+        ),
+      );
+    } catch (inventoryError: any) {
+      this.logger.warn(`Failed to replenish inventory on return for order ${order._id}: ${inventoryError.message}`);
+    }
+
+    // Update order statuses. For non-Razorpay payments, paymentStatus stays
+    // 'pending' until an admin manually processes the refund.
+    assertOrderTransition(order.status, 'refunded');
     order.status = 'refunded';
+    if (order.paymentMethod === 'razorpay') {
+      order.paymentStatus = 'refunded';
+    }
     await order.save();
 
     return {
       success: true,
       message: 'Return request submitted successfully',
-      order,
+      order: this.convertOrderCurrency(order),
     };
   }
 
@@ -276,9 +709,7 @@ export class OrdersService {
 
     // Authorization check: admin can access any order, users can only access their own
     if (userRole !== 'admin') {
-      const customerId = typeof order.customer === 'object' && order.customer !== null
-        ? (order.customer as any)._id?.toString()
-        : order.customer?.toString();
+      const customerId = this.extractCustomerId(order.customer);
       
       if (customerId !== userId) {
         throw new BadRequestException('Not authorized');
@@ -340,6 +771,7 @@ export class OrdersService {
     const order = await this.orderModel.findById(id)
       .populate('customer', 'name email phone')
       .populate('shippingAddress')
+      .populate('items.product', '_id')
       .lean();
 
     if (!order) {
@@ -347,51 +779,73 @@ export class OrdersService {
     }
 
     // Authorization check
-    if (userRole !== 'admin') {
-      const customerId = typeof order.customer === 'object' && order.customer !== null
-        ? (order.customer as any)._id?.toString()
-        : order.customer?.toString();
+    if (userRole !== 'admin' && userRole !== 'seller') {
+      const customerId = this.extractCustomerId(order.customer);
       
       if (customerId !== userId) {
         throw new BadRequestException('Not authorized');
       }
     }
 
+    // For sellers, verify they own products in this order
+    if (userRole === 'seller') {
+      const products = await this.productModel.find({ seller: userId }).select('_id').lean();
+      const productIds = products.map((p: any) => p._id.toString());
+      const orderHasSellerProducts = (order.items as any[]).some((item: any) => {
+        const itemProductId = typeof item.product === 'object' && item.product !== null
+          ? item.product._id?.toString()
+          : item.product?.toString();
+        return productIds.includes(itemProductId);
+      });
+
+      if (!orderHasSellerProducts) {
+        throw new BadRequestException('Not authorized to view this order');
+      }
+    }
+
+    // Convert currency first
+    const convertedOrder = this.convertOrderCurrency(order);
+
     // Generate invoice data
     const invoice = {
-      invoiceNumber: `INV-${order.orderNumber}`,
-      orderNumber: order.orderNumber,
-      date: order.createdAt,
+      invoiceNumber: `INV-${convertedOrder.orderNumber}`,
+      orderNumber: convertedOrder.orderNumber,
+      date: convertedOrder.createdAt,
       customer: {
-        name: typeof order.customer === 'object' ? (order.customer as any).name : 'N/A',
-        email: typeof order.customer === 'object' ? (order.customer as any).email : 'N/A',
-        phone: typeof order.customer === 'object' ? (order.customer as any).phone : 'N/A',
+        name: typeof convertedOrder.customer === 'object' ? (convertedOrder.customer as any).name : 'N/A',
+        email: typeof convertedOrder.customer === 'object' ? (convertedOrder.customer as any).email : 'N/A',
+        phone: typeof convertedOrder.customer === 'object' ? (convertedOrder.customer as any).phone : 'N/A',
       },
-      shippingAddress: order.shippingAddress,
-      items: order.items,
-      subtotal: order.subtotal,
-      tax: order.tax,
-      shipping: order.shipping,
-      discount: order.discount,
-      total: order.total,
-      paymentMethod: order.paymentMethod,
-      paymentStatus: order.paymentStatus,
-      status: order.status,
+      shippingAddress: convertedOrder.shippingAddress,
+      items: convertedOrder.items,
+      subtotal: convertedOrder.subtotal,
+      tax: convertedOrder.tax,
+      shipping: convertedOrder.shipping,
+      discount: convertedOrder.discount,
+      total: convertedOrder.total,
+      paymentMethod: convertedOrder.paymentMethod,
+      paymentStatus: convertedOrder.paymentStatus,
+      status: convertedOrder.status,
     };
 
-    // Generate PDF invoice
-    let pdfUrl = null;
+    // Generate PDF invoice. Try Cloudinary first; fall back to returning
+    // the raw buffer so the controller can stream it directly.
+    let pdfUrl: string | null = null;
+    let pdfBuffer: Buffer | null = null;
     try {
-      pdfUrl = await this.pdfService.generateInvoice(invoice);
+      const result = await this.pdfService.generateInvoiceWithBuffer(invoice);
+      pdfUrl = result.url;
+      if (!pdfUrl) pdfBuffer = result.buffer;
     } catch (error) {
-      // Error generating PDF invoice
-      // Continue without PDF if generation fails
+      // PDF generation failed entirely — controller will return invoice
+      // data only (no download link).
     }
 
     return {
       success: true,
       invoice,
       pdfUrl,
+      pdfBuffer,
     };
   }
 
@@ -406,9 +860,7 @@ export class OrdersService {
 
     // Authorization check
     if (userRole !== 'admin' && userRole !== 'seller') {
-      const customerId = typeof order.customer === 'object' && order.customer !== null
-        ? (order.customer as any)._id?.toString()
-        : order.customer?.toString();
+      const customerId = this.extractCustomerId(order.customer);
       
       if (customerId !== userId) {
         throw new BadRequestException('Not authorized');
@@ -429,6 +881,88 @@ export class OrdersService {
       pdfUrl,
       message: 'Shipping label generated successfully',
     };
+  }
+
+  /**
+   * Update order payment status by Razorpay order ID — called by webhook handler.
+   */
+  async updatePaymentStatusByRazorpayOrderId(
+    razorpayOrderId: string,
+    razorpayPaymentId: string | null,
+    paymentStatus: 'paid' | 'failed' | 'refunded',
+    orderStatus?: 'processing' | 'cancelled' | 'refunded',
+  ) {
+    const order = await this.orderModel.findOne({ razorpayOrderId });
+
+    if (!order) {
+      throw new NotFoundException('Order not found for Razorpay order ID');
+    }
+
+    // Store the payment ID when it arrives (webhook fires after capture)
+    if (razorpayPaymentId) {
+      (order as any).razorpayPaymentId = razorpayPaymentId;
+    }
+
+    // Idempotency: webhooks can fire more than once. Skip if we've already
+    // applied the same paymentStatus, otherwise we'd e.g. re-clear the cart or
+    // re-restore inventory on the second delivery of payment_intent.succeeded.
+    if (order.paymentStatus === paymentStatus) {
+      return { success: true, order };
+    }
+
+    const updateData: any = { paymentStatus };
+    if (orderStatus) {
+      updateData.status = orderStatus;
+    }
+    if (paymentStatus === 'paid' && !orderStatus) {
+      updateData.status = 'processing';
+    }
+
+    const updatedOrder = await this.orderModel.findByIdAndUpdate(
+      order._id,
+      updateData,
+      { new: true },
+    );
+
+    if (paymentStatus === 'paid') {
+      // Now that payment is confirmed, clear the user's cart.
+      try {
+        const cart = await this.cartModel.findOne({ user: order.customer });
+        if (cart) {
+          cart.items = [];
+          cart.couponCode = undefined;
+          cart.couponDiscount = undefined;
+          await cart.save();
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to clear cart for order ${order._id} after payment success: ${err?.message || err}`,
+        );
+      }
+    } else if (paymentStatus === 'failed') {
+      // Payment failed — release the inventory we reserved at order-create time
+      // and mark the order cancelled so it doesn't sit as a zombie.
+      try {
+        await Promise.all(
+          order.items.map((item: any) =>
+            this.productModel.updateOne(
+              { _id: item.product },
+              { $inc: { inventory: item.quantity } },
+            ),
+          ),
+        );
+        await this.orderModel.updateOne(
+          { _id: order._id },
+          { status: 'cancelled' },
+        );
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to release inventory for failed payment on order ${order._id}: ${err?.message || err}`,
+        );
+      }
+    }
+
+    return { success: true, order: updatedOrder };
   }
 }
 

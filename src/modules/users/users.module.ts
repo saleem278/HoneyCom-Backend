@@ -6,6 +6,7 @@ import { User, UserSchema } from '../../models/User.model';
 import { Address, AddressSchema } from '../../models/Address.model';
 import { PaymentMethod, PaymentMethodSchema } from '../../models/PaymentMethod.model';
 import { Product, ProductSchema } from '../../models/Product.model';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { Product, ProductSchema } from '../../models/Product.model';
       { name: 'PaymentMethod', schema: PaymentMethodSchema },
       { name: 'Product', schema: ProductSchema },
     ]),
+    PaymentsModule,
   ],
   controllers: [UsersController],
   providers: [UsersService],

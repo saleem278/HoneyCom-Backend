@@ -4,6 +4,9 @@ import { CmsService } from './cms.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import { Public } from '../auth/decorators/public.decorator';
+import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('CMS')
 @Controller('cms')
@@ -13,11 +16,20 @@ import { Roles } from '../auth/decorators/roles.decorator';
 export class CmsController {
   constructor(private readonly cmsService: CmsService) {}
 
+  // ========== DASHBOARD ==========
+  @Get('dashboard')
+  @ApiOperation({ summary: 'Get CMS dashboard statistics' })
+  async getDashboard() {
+    return this.cmsService.getDashboard();
+  }
+
   // ========== PAGES ==========
   @Get('pages')
   @ApiOperation({ summary: 'Get all pages' })
-  async getPages(@Query('status') status?: string) {
-    return this.cmsService.getPages(status);
+  async getPages(@Query('status') status?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+    const pageNum = parseInt(page || '', 10) || 1;
+    const limitNum = parseInt(limit || '', 10) || 20;
+    return this.cmsService.getPages(status, pageNum, limitNum);
   }
 
   @Get('pages/:id')
@@ -28,7 +40,7 @@ export class CmsController {
 
   @Post('pages')
   @ApiOperation({ summary: 'Create page' })
-  async createPage(@Body() data: any, @Request() req) {
+  async createPage(@Body() data: any, @Request() req: AuthedRequest) {
     return this.cmsService.createPage(data, req.user.id);
   }
 
@@ -47,8 +59,10 @@ export class CmsController {
   // ========== BLOG ==========
   @Get('blog')
   @ApiOperation({ summary: 'Get all blog posts' })
-  async getBlogPosts(@Query('status') status?: string, @Query('category') category?: string) {
-    return this.cmsService.getBlogPosts(status, category);
+  async getBlogPosts(@Query('status') status?: string, @Query('category') category?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+    const pageNum = parseInt(page || '', 10) || 1;
+    const limitNum = parseInt(limit || '', 10) || 20;
+    return this.cmsService.getBlogPosts(status, category, pageNum, limitNum);
   }
 
   @Get('blog/:id')
@@ -59,7 +73,7 @@ export class CmsController {
 
   @Post('blog')
   @ApiOperation({ summary: 'Create blog post' })
-  async createBlogPost(@Body() data: any, @Request() req) {
+  async createBlogPost(@Body() data: any, @Request() req: AuthedRequest) {
     return this.cmsService.createBlogPost(data, req.user.id);
   }
 
@@ -78,8 +92,10 @@ export class CmsController {
   // ========== MEDIA ==========
   @Get('media')
   @ApiOperation({ summary: 'Get all media' })
-  async getMedia(@Query('type') type?: string, @Query('folder') folder?: string) {
-    return this.cmsService.getMedia(type, folder);
+  async getMedia(@Query('type') type?: string, @Query('folder') folder?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+    const pageNum = parseInt(page || '', 10) || 1;
+    const limitNum = parseInt(limit || '', 10) || 20;
+    return this.cmsService.getMedia(type, folder, pageNum, limitNum);
   }
 
   @Get('media/:id')
@@ -90,7 +106,7 @@ export class CmsController {
 
   @Post('media')
   @ApiOperation({ summary: 'Upload media' })
-  async uploadMedia(@Body() data: any, @Request() req) {
+  async uploadMedia(@Body() data: any, @Request() req: AuthedRequest) {
     return this.cmsService.uploadMedia(data, req.user.id);
   }
 
@@ -176,9 +192,124 @@ export class CmsController {
   }
 
   @Post('forms/:id/submit')
+  @Public()
   @ApiOperation({ summary: 'Submit form data' })
   async submitForm(@Param('id') id: string, @Body() data: any) {
     return this.cmsService.submitForm(id, data);
+  }
+
+  // ========== BLOG CATEGORIES ==========
+  @Get('blog-categories')
+  @ApiOperation({ summary: 'Get all blog categories' })
+  async getBlogCategories() {
+    return this.cmsService.getBlogCategories();
+  }
+
+  @Get('blog-categories/:id')
+  @ApiOperation({ summary: 'Get blog category by ID' })
+  async getBlogCategory(@Param('id') id: string) {
+    return this.cmsService.getBlogCategory(id);
+  }
+
+  @Post('blog-categories')
+  @ApiOperation({ summary: 'Create blog category' })
+  async createBlogCategory(@Body() data: any) {
+    return this.cmsService.createBlogCategory(data);
+  }
+
+  @Put('blog-categories/:id')
+  @ApiOperation({ summary: 'Update blog category' })
+  async updateBlogCategory(@Param('id') id: string, @Body() data: any) {
+    return this.cmsService.updateBlogCategory(id, data);
+  }
+
+  @Delete('blog-categories/:id')
+  @ApiOperation({ summary: 'Delete blog category' })
+  async deleteBlogCategory(@Param('id') id: string) {
+    return this.cmsService.deleteBlogCategory(id);
+  }
+
+  // ========== SITEMAP ==========
+  @Get('sitemap')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard) // Public endpoint for SEO
+  @ApiOperation({ summary: 'Generate sitemap.xml (public)' })
+  @ApiResponse({ status: 200, description: 'Sitemap XML' })
+  async generateSitemap() {
+    return this.cmsService.generateSitemap();
+  }
+
+  // ========== ROBOTS.TXT ==========
+  @Get('robots-txt')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard) // Public endpoint for SEO
+  @ApiOperation({ summary: 'Get robots.txt content (public)' })
+  @ApiResponse({ status: 200, description: 'Robots.txt content' })
+  async getRobotsTxt() {
+    return this.cmsService.getRobotsTxt();
+  }
+
+  @Put('robots-txt')
+  @ApiOperation({ summary: 'Update robots.txt content' })
+  async updateRobotsTxt(@Body() body: { content: string }) {
+    return this.cmsService.updateRobotsTxt(body.content);
+  }
+
+  // ========== VERSION CONTROL ==========
+  @Post('versions/:contentType/:contentId')
+  @ApiOperation({ summary: 'Create version snapshot' })
+  async createVersion(
+    @Param('contentType') contentType: 'page' | 'blog',
+    @Param('contentId') contentId: string,
+    @Request() req: AuthedRequest,
+  ) {
+    return this.cmsService.createVersion(contentType, contentId, req.user.id);
+  }
+
+  @Get('versions/:contentType/:contentId')
+  @ApiOperation({ summary: 'Get all versions for content' })
+  async getVersions(
+    @Param('contentType') contentType: 'page' | 'blog',
+    @Param('contentId') contentId: string,
+  ) {
+    return this.cmsService.getVersions(contentType, contentId);
+  }
+
+  @Post('versions/:id/restore')
+  @ApiOperation({ summary: 'Restore a version' })
+  async restoreVersion(@Param('id') id: string, @Request() req: AuthedRequest) {
+    return this.cmsService.restoreVersion(id, req.user.id);
+  }
+
+  // ========== WIDGETS ==========
+  @Get('widgets')
+  @ApiOperation({ summary: 'Get all widgets' })
+  async getWidgets(@Query('location') location?: string) {
+    return this.cmsService.getWidgets(location);
+  }
+
+  @Get('widgets/:id')
+  @ApiOperation({ summary: 'Get widget by ID' })
+  async getWidget(@Param('id') id: string) {
+    return this.cmsService.getWidget(id);
+  }
+
+  @Post('widgets')
+  @ApiOperation({ summary: 'Create widget' })
+  async createWidget(@Body() data: any) {
+    return this.cmsService.createWidget(data);
+  }
+
+  @Put('widgets/:id')
+  @ApiOperation({ summary: 'Update widget' })
+  async updateWidget(@Param('id') id: string, @Body() data: any) {
+    return this.cmsService.updateWidget(id, data);
+  }
+
+  @Delete('widgets/:id')
+  @ApiOperation({ summary: 'Delete widget' })
+  async deleteWidget(@Param('id') id: string) {
+    return this.cmsService.deleteWidget(id);
   }
 }
 

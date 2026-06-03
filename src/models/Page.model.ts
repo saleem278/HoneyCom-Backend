@@ -7,9 +7,10 @@ export interface IPage extends Document {
   metaTitle?: string;
   metaDescription?: string;
   keywords?: string[];
-  status: 'draft' | 'published';
+  status: 'draft' | 'published' | 'scheduled';
   author: mongoose.Types.ObjectId;
   publishedAt?: Date;
+  scheduledAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,7 +49,7 @@ const PageSchema: Schema = new Schema(
     },
     status: {
       type: String,
-      enum: ['draft', 'published'],
+      enum: ['draft', 'published', 'scheduled'],
       default: 'draft',
     },
     author: {
@@ -57,6 +58,9 @@ const PageSchema: Schema = new Schema(
       required: true,
     },
     publishedAt: {
+      type: Date,
+    },
+    scheduledAt: {
       type: Date,
     },
   },

@@ -1,129 +1,155 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import * as nodemailer from 'nodemailer';
+import { ISettings } from '../models/Settings.model';
+import { EmailTemplatesService } from './email-templates.service';
 
 @Injectable()
 export class EmailService {
-  private transporter: nodemailer.Transporter;
+  private readonly logger = new Logger(EmailService.name);
+  private transporter: nodemailer.Transporter | null = null;
+  private readonly templates: EmailTemplatesService;
 
-  constructor(private configService: ConfigService) {
-    this.transporter = nodemailer.createTransport({
-      host: configService.get<string>('SMTP_HOST') || 'smtp.gmail.com',
-      port: parseInt(configService.get<string>('SMTP_PORT') || '587'),
-      secure: false,
-      auth: {
-        user: configService.get<string>('SMTP_USER'),
-        pass: configService.get<string>('SMTP_PASSWORD'),
-      },
-    });
-  }
+  constructor(
+    private configService: ConfigService,
+    @InjectModel('Settings') private settingsModel: Model<ISettings>,
+  ) {
+    this.templates = new EmailTemplatesService(configService, settingsModel);
 
-  async sendEmail(options: {
-    to: string;
-    subject: string;
-    html: string;
-    text?: string;
-  }): Promise<void> {
-    try {
-      await this.transporter.sendMail({
-        from: this.configService.get<string>('SMTP_FROM') || this.configService.get<string>('SMTP_USER'),
-        to: options.to,
-        subject: options.subject,
-        html: options.html,
-        text: options.text,
+    const smtpHost     = configService.get<string>('SMTP_HOST') || 'smtp.gmail.com';
+    const smtpPort     = parseInt(configService.get<string>('SMTP_PORT') || '587');
+    const smtpUser     = configService.get<string>('SMTP_USER');
+    const smtpPassword = configService.get<string>('SMTP_PASSWORD');
+
+    if (smtpUser && smtpPassword) {
+      this.transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: { user: smtpUser, pass: smtpPassword },
       });
-    } catch (error) {
-      // Error sending email
-      throw error;
+      this.transporter.verify((error) => {
+        if (error) this.logger.error(`SMTP connection failed: ${error.message}`);
+        else this.logger.log('SMTP server is ready to send emails');
+      });
+    } else {
+      this.logger.warn('SMTP not configured. Set SMTP_USER and SMTP_PASSWORD.');
     }
   }
 
+  async sendEmail(options: { to: string; subject: string; html: string; text?: string }): Promise<void> {
+    const smtpUser = this.configService.get<string>('SMTP_USER');
+    const smtpPassword = this.configService.get<string>('SMTP_PASSWORD');
+    if (!smtpUser || !smtpPassword || !this.transporter) {
+      throw new Error('SMTP not configured');
+    }
+    const fromEmail = this.configService.get<string>('SMTP_FROM') || smtpUser;
+    const info = await this.transporter.sendMail({
+      from: fromEmail, to: options.to, subject: options.subject,
+      html: options.html, text: options.text,
+    });
+    this.logger.log(`Email sent to ${options.to} (messageId=${info.messageId})`);
+  }
+
+  /** Read brand name from settings for email subjects. */
+  private async siteName(): Promise<string> {
+    return this.templates.getSiteName();
+  }
+
+  /** Read email settings (subjects, CTAs) from DB — 5-min cache via templates service. */
+  private async emailSubject(key: string, fallback: string): Promise<string> {
+    // Delegate to the templates service which already owns the email settings cache
+    return this.templates.getEmailSetting(key, fallback);
+  }
+
   async sendVerificationEmail(email: string, token: string): Promise<void> {
-    const verificationUrl = `${this.configService.get<string>('FRONTEND_URL')}/verify-email?token=${token}`;
+    const name = await this.siteName();
+    const subject = await this.emailSubject('verifySubject', `Verify Your Email Address — ${name}`);
     await this.sendEmail({
       to: email,
-      subject: 'Verify Your Email Address',
-      html: `
-        <h1>Welcome to Honey Store!</h1>
-        <p>Please click the link below to verify your email address:</p>
-        <a href="${verificationUrl}">Verify Email</a>
-        <p>If you didn't create an account, please ignore this email.</p>
-      `,
+      subject: subject.replace('{{siteName}}', name),
+      html: await this.templates.getVerificationEmail(token),
     });
   }
 
   async sendPasswordResetEmail(email: string, token: string): Promise<void> {
-    const resetUrl = `${this.configService.get<string>('FRONTEND_URL')}/reset-password?token=${token}`;
+    const name = await this.siteName();
+    const subject = await this.emailSubject('resetSubject', `Reset Your Password — ${name}`);
     await this.sendEmail({
       to: email,
-      subject: 'Reset Your Password',
-      html: `
-        <h1>Password Reset Request</h1>
-        <p>Click the link below to reset your password:</p>
-        <a href="${resetUrl}">Reset Password</a>
-        <p>This link will expire in 1 hour.</p>
-        <p>If you didn't request this, please ignore this email.</p>
-      `,
+      subject: subject.replace('{{siteName}}', name),
+      html: await this.templates.getPasswordResetEmail(token),
     });
   }
 
   async sendOrderConfirmationEmail(email: string, order: any): Promise<void> {
-    // Use orderNumber if available, otherwise use last 8 chars of _id
+    const name = await this.siteName();
     const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
-    
+    const subjectTpl = await this.emailSubject('orderConfirmSubject', `Order Confirmed #{{orderNumber}} — ${name}`);
     await this.sendEmail({
       to: email,
-      subject: `Order Confirmation - #${orderId}`,
-      html: `
-        <h1>Thank You for Your Order!</h1>
-        <p>Your order #${orderId} has been confirmed.</p>
-        <h2>Order Summary</h2>
-        <p>Total: $${order.total?.toFixed(2) || '0.00'}</p>
-        <p>We'll send you another email when your order ships.</p>
-      `,
+      subject: subjectTpl.replace('{{orderNumber}}', orderId).replace('{{siteName}}', name),
+      html: await this.templates.getOrderConfirmationEmail(order),
     });
   }
 
   async sendOrderStatusUpdateEmail(email: string, order: any): Promise<void> {
-    // Use orderNumber if available, otherwise use last 8 chars of _id
+    const name = await this.siteName();
     const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
-    
+    const subjectTpl = await this.emailSubject('shippingSubject', `Order Update #{{orderNumber}} — ${name}`);
     await this.sendEmail({
       to: email,
-      subject: `Order Update - #${orderId}`,
-      html: `
-        <h1>Order Status Updated</h1>
-        <p>Your order #${orderId} status has been updated to: ${order.status}</p>
-        ${order.trackingNumber ? `<p>Tracking Number: ${order.trackingNumber}</p>` : ''}
-      `,
+      subject: subjectTpl.replace('{{orderNumber}}', orderId).replace('{{siteName}}', name),
+      html: await this.templates.getOrderStatusUpdateEmail(order),
     });
   }
 
   async sendSellerApprovalEmail(email: string, sellerName: string): Promise<void> {
+    const name = await this.siteName();
+    const subject = await this.emailSubject('sellerApprovedSubject', `Seller Account Approved — Welcome to ${name}!`);
     await this.sendEmail({
       to: email,
-      subject: 'Seller Account Approved - Welcome to Honey Store!',
-      html: `
-        <h1>Congratulations, ${sellerName}!</h1>
-        <p>Your seller account has been approved. You can now start listing products on Honey Store.</p>
-        <p><a href="${this.configService.get<string>('FRONTEND_URL')}/seller">Access Your Seller Dashboard</a></p>
-        <p>If you have any questions, please contact our support team.</p>
-      `,
+      subject: subject.replace('{{siteName}}', name),
+      html: await this.templates.getSellerApprovalEmail(sellerName),
     });
   }
 
   async sendSellerRejectionEmail(email: string, sellerName: string, reason?: string): Promise<void> {
+    const name = await this.siteName();
+    const subject = await this.emailSubject('sellerRejectedSubject', `Seller Account Application Status — ${name}`);
     await this.sendEmail({
       to: email,
-      subject: 'Seller Account Application Status',
-      html: `
-        <h1>Seller Account Application</h1>
-        <p>Dear ${sellerName},</p>
-        <p>We regret to inform you that your seller account application has not been approved at this time.</p>
-        ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ''}
-        <p>If you believe this is an error or would like to reapply with additional information, please contact our support team.</p>
-        <p>Thank you for your interest in selling on Honey Store.</p>
-      `,
+      subject: subject.replace('{{siteName}}', name),
+      html: await this.templates.getSellerRejectionEmail(sellerName, reason),
+    });
+  }
+
+  private h(str: unknown): string {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
+  }
+
+  async sendProductApprovalEmail(email: string, productName: string): Promise<void> {
+    const name = await this.siteName();
+    await this.sendEmail({
+      to: email,
+      subject: `Your product has been approved — ${name}`,
+      html: `<h2>Product approved</h2><p>Your product <strong>${this.h(productName)}</strong> is now live on ${this.h(name)}.</p>`,
+    });
+  }
+
+  async sendProductRejectionEmail(email: string, productName: string, reason?: string): Promise<void> {
+    const reasonBlock = reason
+      ? `<p><strong>Reason:</strong> ${this.h(reason)}</p>`
+      : '<p>Please review the listing guidelines and contact support if you have questions.</p>';
+    await this.sendEmail({
+      to: email,
+      subject: `Your product was not approved`,
+      html: `<h2>Product not approved</h2><p>Your product <strong>${this.h(productName)}</strong> was not approved.</p>${reasonBlock}`,
     });
   }
 }

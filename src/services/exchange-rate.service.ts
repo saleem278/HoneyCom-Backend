@@ -1,16 +1,24 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export type Currency = 'USD' | 'EUR' | 'GBP' | 'INR' | 'CAD' | 'AUD' | 'JPY';
 
+// Refresh every 6 hours. Free tier of exchangerate-api allows 1 500 reqs/month,
+// so 6h × 30 days = 120 refreshes — well within the limit.
+const REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 @Injectable()
-export class ExchangeRateService {
+export class ExchangeRateService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(ExchangeRateService.name);
   private baseCurrency: Currency;
+  private refreshTimer: ReturnType<typeof setInterval> | null = null;
+  /** Resolves when the first live-rate fetch completes (or fails). */
+  private initialLoadDone: Promise<void>;
   
   // Base exchange rates relative to USD (reference currency)
   // These rates represent: 1 USD = rate * targetCurrency
   // We use USD as reference because most exchange rate APIs use USD as base
-  private readonly baseRatesToUSD: Record<Currency, number> = {
+  private baseRatesToUSD: Record<Currency, number> = {
     USD: 1.0,      // Reference currency
     EUR: 0.92,     // 1 USD = 0.92 EUR
     GBP: 0.79,     // 1 USD = 0.79 GBP
@@ -35,13 +43,27 @@ export class ExchangeRateService {
       this.baseCurrency = 'INR';
     }
     
-    // Calculate exchange rates relative to the base currency
+    // Calculate exchange rates from static fallback values immediately so
+    // the service is always usable, even when the live API is unreachable.
     this.calculateExchangeRates();
-    
-    // TODO: Fetch exchange rates from API
-    // Example: https://api.exchangerate-api.com/v4/latest/USD
-    // Then convert to base currency rates
-    this.loadExchangeRates();
+    // Kick off live-rate fetch. Callers that need fresh rates (e.g. order
+    // creation) should await initialLoadDone before reading exchange rates.
+    this.initialLoadDone = this.loadExchangeRates();
+  }
+
+  /** Start the periodic refresh timer after the module is fully wired up. */
+  onModuleInit() {
+    this.refreshTimer = setInterval(() => {
+      this.loadExchangeRates();
+    }, REFRESH_INTERVAL_MS);
+  }
+
+  /** Cancel the timer when the module shuts down to avoid open handles. */
+  onModuleDestroy() {
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
   }
 
   /**
@@ -91,6 +113,16 @@ export class ExchangeRateService {
    * @param currency Target currency
    * @returns Exchange rate (e.g., 0.012 for USD means 1 BASE = 0.012 USD)
    */
+  /**
+   * Synchronous rate lookup — always safe because static fallback rates
+   * are set in the constructor. The async initialLoadDone promise means
+   * the rates may be stale on first call if the live fetch hasn't finished,
+   * but that is better than blocking every synchronous caller.
+   *
+   * Order creation calls this after awaiting initialLoadDone (see
+   * orders.service.ts) to ensure live rates are used for financial
+   * calculations.
+   */
   getExchangeRate(currency: Currency): number {
     if (currency === this.baseCurrency) {
       return 1.0;
@@ -100,6 +132,15 @@ export class ExchangeRateService {
       throw new Error(`Exchange rate not found for currency: ${currency}`);
     }
     return rate;
+  }
+
+  /**
+   * Await the first live-rate fetch before using rates for financial
+   * calculations. Returns immediately once rates have been loaded at
+   * least once; subsequent calls are no-ops.
+   */
+  async ensureRatesLoaded(): Promise<void> {
+    await this.initialLoadDone;
   }
 
   /**
@@ -113,7 +154,10 @@ export class ExchangeRateService {
       return amount;
     }
     const rate = this.getExchangeRate(targetCurrency);
-    return amount * rate;
+    // Round to 2 decimal places after every conversion to prevent IEEE 754
+    // floating-point drift accumulating across items and orders.
+    // e.g. 1000 INR × 0.012 = 12.0000000000001 without rounding → wrong totals.
+    return Math.round(amount * rate * 100) / 100;
   }
 
   /**
@@ -145,7 +189,7 @@ export class ExchangeRateService {
       amount = amount * targetRate;
     }
 
-    return amount;
+    return Math.round(amount * 100) / 100;
   }
 
   /**
@@ -154,30 +198,33 @@ export class ExchangeRateService {
    */
   private async loadExchangeRates(): Promise<void> {
     try {
-      // TODO: Implement API call to fetch real-time exchange rates
-      // Example: Fetch rates with USD as base (most APIs use USD)
-      // const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-      // const data = await response.json();
-      // 
-      // Update baseRatesToUSD:
-      // this.baseRatesToUSD = {
-      //   USD: 1.0,
-      //   EUR: data.rates.EUR,
-      //   GBP: data.rates.GBP,
-      //   INR: data.rates.INR,
-      //   CAD: data.rates.CAD,
-      //   AUD: data.rates.AUD,
-      //   JPY: data.rates.JPY,
-      // };
-      //
-      // Then recalculate rates for current base currency:
-      // this.calculateExchangeRates();
+      // Fetch real-time exchange rates from exchangerate-api.com (free tier)
+      const apiUrl = process.env.EXCHANGE_RATE_API_URL || 'https://api.exchangerate-api.com/v4/latest/USD';
       
-      // For now, using static rates
-      // Exchange rates loaded
-    } catch (error) {
-      // Error loading exchange rates
-      // Continue with static rates if API fails
+      const response = await fetch(apiUrl);
+      if (!response.ok) {
+        throw new Error(`Exchange rate API returned ${response.status}`);
+      }
+      
+      const data = await response.json() as { rates?: Record<string, number> };
+      
+      // Update baseRatesToUSD with fetched rates
+      if (data.rates) {
+        this.baseRatesToUSD = {
+          USD: 1.0,
+          EUR: data.rates.EUR || this.baseRatesToUSD.EUR,
+          GBP: data.rates.GBP || this.baseRatesToUSD.GBP,
+          INR: data.rates.INR || this.baseRatesToUSD.INR,
+          CAD: data.rates.CAD || this.baseRatesToUSD.CAD,
+          AUD: data.rates.AUD || this.baseRatesToUSD.AUD,
+          JPY: data.rates.JPY || this.baseRatesToUSD.JPY,
+        };
+        
+        // Recalculate rates for current base currency
+        this.calculateExchangeRates();
+      }
+    } catch (error: any) {
+      this.logger.warn(`Failed to fetch exchange rates from API, using static rates: ${error?.message || error}`);
     }
   }
 

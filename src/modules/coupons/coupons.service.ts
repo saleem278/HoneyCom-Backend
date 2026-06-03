@@ -17,7 +17,8 @@ export class CouponsService {
     }
     
     if (filters?.search) {
-      query.code = { $regex: filters.search, $options: 'i' };
+      const safe = filters.search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
+      query.code = { $regex: safe, $options: 'i' };
     }
 
     const coupons = await this.couponModel.find(query).sort({ createdAt: -1 });
@@ -39,18 +40,19 @@ export class CouponsService {
   }
 
   async findByCode(code: string) {
-    const coupon = await this.couponModel.findOne({ code: code.toUpperCase(), status: 'active' });
-    if (!coupon) {
-      throw new NotFoundException('Coupon not found');
-    }
-    
-    // Check if coupon is valid
+    // READ-ONLY validation endpoint — does NOT increment usedCount.
+    // The atomic increment happens in orders.service.ts at checkout time.
+    // This just checks validity so the UI can show coupon details.
     const now = new Date();
-    if (now < coupon.validFrom) {
-      throw new BadRequestException('Coupon is not yet valid');
-    }
-    if (now > coupon.validUntil) {
-      throw new BadRequestException('Coupon has expired');
+    const coupon = await this.couponModel.findOne({
+      code: code.toUpperCase(),
+      status: 'active',
+      validFrom: { $lte: now },
+      validUntil: { $gte: now },
+    });
+
+    if (!coupon) {
+      throw new NotFoundException('Coupon not found or expired');
     }
     if (coupon.usageLimit && coupon.usedCount >= coupon.usageLimit) {
       throw new BadRequestException('Coupon usage limit reached');

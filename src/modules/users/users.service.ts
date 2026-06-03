@@ -1,18 +1,22 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User, IUser } from '../../models/User.model';
 import { Address, IAddress } from '../../models/Address.model';
 import { PaymentMethod, IPaymentMethod } from '../../models/PaymentMethod.model';
 import { Product, IProduct } from '../../models/Product.model';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectModel('User') private userModel: Model<IUser>,
     @InjectModel('Address') private addressModel: Model<IAddress>,
     @InjectModel('PaymentMethod') private paymentMethodModel: Model<IPaymentMethod>,
     @InjectModel('Product') private productModel: Model<IProduct>,
+    private paymentsService: PaymentsService,
   ) {}
 
   async getProfile(userId: string) {
@@ -27,7 +31,18 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, updateData: Partial<IUser>) {
-    const user = await this.userModel.findByIdAndUpdate(userId, updateData, {
+    // SECURITY: Whitelist only safe fields to prevent Mass Assignment / Privilege Escalation.
+    // An attacker sending { role: 'admin' } must not be able to elevate their privileges.
+    const allowedFields: Array<keyof IUser | string> = ['name', 'email', 'phone', 'avatar'];
+    const filteredUpdateData: any = {};
+    
+    for (const key of Object.keys(updateData)) {
+      if (allowedFields.includes(key)) {
+        filteredUpdateData[key] = updateData[key as keyof IUser];
+      }
+    }
+
+    const user = await this.userModel.findByIdAndUpdate(userId, filteredUpdateData, {
       new: true,
       runValidators: true,  
     });
@@ -204,20 +219,29 @@ export class UsersService {
       );
     }
 
-    // If stripePaymentMethodId is provided, optionally fetch card details from Stripe
+    // If stripePaymentMethodId is provided, fetch card details from Stripe
     // This ensures we have accurate last4, brand, expiry from Stripe
     if (paymentData.type === 'card' && paymentData.stripePaymentMethodId) {
-      // TODO: Integrate with Stripe to fetch payment method details
-      // Example:
-      // const stripePaymentMethod = await this.stripe.paymentMethods.retrieve(
-      //   paymentData.stripePaymentMethodId
-      // );
-      // if (stripePaymentMethod.card) {
-      //   paymentData.last4 = stripePaymentMethod.card.last4;
-      //   paymentData.brand = stripePaymentMethod.card.brand;
-      //   paymentData.expiryMonth = String(stripePaymentMethod.card.exp_month).padStart(2, '0');
-      //   paymentData.expiryYear = String(stripePaymentMethod.card.exp_year);
-      // }
+      try {
+        const Stripe = require('stripe');
+        const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+        if (stripeSecretKey) {
+          const stripe = new Stripe(stripeSecretKey, {
+            apiVersion: '2024-11-20.acacia',
+          });
+          const stripePaymentMethod = await stripe.paymentMethods.retrieve(
+            paymentData.stripePaymentMethodId
+          );
+          if (stripePaymentMethod.card) {
+            paymentData.last4 = stripePaymentMethod.card.last4;
+            paymentData.brand = stripePaymentMethod.card.brand;
+            paymentData.expiryMonth = String(stripePaymentMethod.card.exp_month).padStart(2, '0');
+            paymentData.expiryYear = String(stripePaymentMethod.card.exp_year);
+          }
+        }
+      } catch (error: any) {
+        this.logger.error(`Error fetching Stripe payment method details: ${error?.message || error}`);
+      }
     } else if (paymentData.type === 'card' && !paymentData.stripePaymentMethodId) {
       throw new BadRequestException(
         'Stripe payment method ID is required for card payments. Use Stripe Elements to create a payment method.'
@@ -286,6 +310,10 @@ export class UsersService {
       { new: true }
     );
 
+    if (!updated) {
+      throw new NotFoundException('Payment method not found after update');
+    }
+
     // Return safe data only
     const safePaymentMethod = {
       _id: updated._id,
@@ -317,15 +345,21 @@ export class UsersService {
       throw new NotFoundException('Payment method not found');
     }
 
-    // TODO: If stripePaymentMethodId exists, delete from Stripe
-    // if (paymentMethod.stripePaymentMethodId && this.stripe) {
-    //   try {
-    //     await this.stripe.paymentMethods.detach(paymentMethod.stripePaymentMethodId);
-    //   } catch (error) {
-    //     // Log error but continue with database deletion
-    //     // Error deleting payment method from Stripe
-    //   }
-    // }
+    // If stripePaymentMethodId exists, delete from Stripe
+    if (paymentMethod.stripePaymentMethodId) {
+      try {
+        const Stripe = require('stripe');
+        const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+        if (stripeSecretKey) {
+          const stripe = new Stripe(stripeSecretKey, {
+            apiVersion: '2024-11-20.acacia',
+          });
+          await stripe.paymentMethods.detach(paymentMethod.stripePaymentMethodId);
+        }
+      } catch (error: any) {
+        this.logger.error(`Error deleting payment method from Stripe: ${error?.message || error}`);
+      }
+    }
 
     await this.paymentMethodModel.findOneAndDelete({
       _id: paymentMethodId,
@@ -344,8 +378,9 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
     
-    // Get wishlist products (assuming wishlist is stored as array of product IDs in user)
-    const wishlistIds = (user as any).wishlist || [];
+    // Get wishlist products. Limit to 200 to prevent memory exhaustion on
+    // users who accumulate large wishlists. Paginate if needed in future.
+    const wishlistIds = ((user as any).wishlist || []).slice(0, 200);
     const products = await this.productModel
       .find({ _id: { $in: wishlistIds }, status: 'approved' })
       .populate('category', 'name slug')

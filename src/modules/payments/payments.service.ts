@@ -1,92 +1,154 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
+import { createHmac } from 'crypto';
+import { IWebhookEvent } from '../../models/WebhookEvent.model';
 
 @Injectable()
 export class PaymentsService {
-  private stripeSecretKey: string;
-  private stripe: any;
+  private readonly logger = new Logger(PaymentsService.name);
+  private razorpay: any;
+  private razorpayKeyId: string;
+  private razorpayKeySecret: string;
+  private razorpayWebhookSecret: string;
+  private ordersService: any;
 
-  constructor(private configService: ConfigService) {
-    // Initialize Stripe if secret key is available
-    this.stripeSecretKey = this.configService.get<string>('STRIPE_SECRET_KEY') || '';
-    
-    // Only initialize Stripe if key is provided
-    if (this.stripeSecretKey && this.stripeSecretKey !== '') {
+  constructor(
+    private configService: ConfigService,
+    @InjectModel('WebhookEvent') private webhookEventModel: Model<IWebhookEvent>,
+  ) {
+    this.razorpayKeyId = this.configService.get<string>('RAZORPAY_KEY_ID') || '';
+    this.razorpayKeySecret = this.configService.get<string>('RAZORPAY_KEY_SECRET') || '';
+    this.razorpayWebhookSecret = this.configService.get<string>('RAZORPAY_WEBHOOK_SECRET') || '';
+
+    if (this.razorpayKeyId && this.razorpayKeySecret) {
       try {
-        // Dynamic import for Stripe
-        // this.stripe = require('stripe')(this.stripeSecretKey);
+        const Razorpay = require('razorpay');
+        this.razorpay = new Razorpay({
+          key_id: this.razorpayKeyId,
+          key_secret: this.razorpayKeySecret,
+        });
       } catch (error) {
-        // Stripe not installed or key not configured. Using placeholder mode.
+        this.logger.warn('Razorpay not properly configured.');
       }
     }
   }
 
-  async createPaymentIntent(amount: number, currency: string = 'INR') {
-    // Validate amount
+  // Razorpay-supported currencies
+  private static readonly SUPPORTED_CURRENCIES = new Set([
+    'INR', 'USD', 'EUR', 'GBP', 'SGD', 'AED', 'MYR', 'SAR',
+  ]);
+
+  /**
+   * Create a Razorpay order. The frontend uses the returned `id` to open
+   * the Razorpay Checkout modal and the `key_id` to authenticate.
+   */
+  async createOrder(amount: number, currency: string = 'INR') {
     if (amount <= 0) {
       throw new BadRequestException('Amount must be greater than 0');
     }
 
-    // Convert to cents for Stripe
-    const amountInCents = Math.round(amount * 100);
+    const normalizedCurrency = currency.toUpperCase();
+    if (!PaymentsService.SUPPORTED_CURRENCIES.has(normalizedCurrency)) {
+      throw new BadRequestException(
+        `Unsupported currency: ${currency}. Supported: ${[...PaymentsService.SUPPORTED_CURRENCIES].join(', ')}`,
+      );
+    }
 
-    // If Stripe is configured, use it
-    if (this.stripe && this.stripeSecretKey) {
+    // Razorpay amounts are in smallest currency unit (paise for INR)
+    const amountInSmallestUnit = Math.round(amount * 100);
+
+    if (this.razorpay) {
       try {
-        const paymentIntent = await this.stripe.paymentIntents.create({
-          amount: amountInCents,
-          currency: currency.toUpperCase(),
-          automatic_payment_methods: {
-            enabled: true,
-          },
+        const order = await this.razorpay.orders.create({
+          amount: amountInSmallestUnit,
+          currency: normalizedCurrency,
+          receipt: `rcpt_${Date.now().toString(36)}`,
         });
 
         return {
           success: true,
-          clientSecret: paymentIntent.client_secret,
-          paymentIntentId: paymentIntent.id,
+          orderId: order.id,
           amount,
-          currency,
+          currency: normalizedCurrency,
+          keyId: this.razorpayKeyId,
         };
       } catch (error: any) {
-        throw new BadRequestException(`Payment intent creation failed: ${error.message}`);
+        // Razorpay SDK wraps API errors as { statusCode, error: { description } }
+        const msg =
+          error?.error?.description ||
+          error?.message ||
+          JSON.stringify(error);
+        this.logger.error(`Razorpay order creation failed: ${msg}`);
+        throw new BadRequestException(`Razorpay order creation failed: ${msg}`);
       }
     }
 
-    // Placeholder mode (for development/testing)
+    // Placeholder mode (dev only)
+    const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+    if (isProd) {
+      throw new BadRequestException('Payment service is not configured. Please contact support.');
+    }
+
+    this.logger.warn('Razorpay not configured — returning placeholder order (non-production only)');
     return {
       success: true,
-      clientSecret: `placeholder_secret_${Date.now()}`,
-      paymentIntentId: `pi_placeholder_${Date.now()}`,
+      orderId: `order_placeholder_${Date.now()}`,
       amount,
-      currency,
-      note: 'Stripe not configured - using placeholder mode',
+      currency: normalizedCurrency,
+      keyId: 'rzp_test_placeholder',
+      note: 'Razorpay not configured - placeholder mode',
     };
   }
 
-  async confirmPayment(paymentIntentId: string) {
-    if (!paymentIntentId) {
-      throw new BadRequestException('Payment intent ID is required');
+  /**
+   * Verify Razorpay payment signature after the client-side checkout
+   * completes. Called by the frontend to confirm the payment is authentic
+   * before marking the order paid.
+   *
+   * Razorpay signs: `razorpay_order_id|razorpay_payment_id`
+   */
+  verifyPaymentSignature(
+    razorpayOrderId: string,
+    razorpayPaymentId: string,
+    razorpaySignature: string,
+  ): boolean {
+    if (!this.razorpayKeySecret) return false;
+    const body = `${razorpayOrderId}|${razorpayPaymentId}`;
+    const expectedSignature = createHmac('sha256', this.razorpayKeySecret)
+      .update(body)
+      .digest('hex');
+    return expectedSignature === razorpaySignature;
+  }
+
+  async confirmPayment(razorpayOrderId: string, razorpayPaymentId: string, razorpaySignature: string) {
+    if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      throw new BadRequestException('razorpayOrderId, razorpayPaymentId, and razorpaySignature are required');
     }
 
-    // If Stripe is configured, verify payment
-    if (this.stripe && this.stripeSecretKey) {
-      try {
-        const paymentIntent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
-        
-        if (paymentIntent.status !== 'succeeded') {
-          throw new BadRequestException(`Payment not completed. Status: ${paymentIntent.status}`);
-        }
+    if (this.razorpay) {
+      const valid = this.verifyPaymentSignature(razorpayOrderId, razorpayPaymentId, razorpaySignature);
+      if (!valid) {
+        throw new BadRequestException('Payment signature verification failed');
+      }
 
+      try {
+        const payment = await this.razorpay.payments.fetch(razorpayPaymentId);
+        if (payment.status !== 'captured' && payment.status !== 'authorized') {
+          throw new BadRequestException(`Payment not completed. Status: ${payment.status}`);
+        }
         return {
           success: true,
           message: 'Payment confirmed',
-          paymentIntentId,
-          amount: paymentIntent.amount / 100,
-          currency: paymentIntent.currency,
+          razorpayOrderId,
+          razorpayPaymentId,
+          amount: payment.amount / 100,
+          currency: payment.currency,
         };
       } catch (error: any) {
-        throw new BadRequestException(`Payment confirmation failed: ${error.message}`);
+        const msg = error?.error?.description || error?.message || JSON.stringify(error);
+        throw new BadRequestException(`Payment confirmation failed: ${msg}`);
       }
     }
 
@@ -94,42 +156,38 @@ export class PaymentsService {
     return {
       success: true,
       message: 'Payment confirmed (placeholder mode)',
-      paymentIntentId,
-      note: 'Stripe not configured - using placeholder mode',
+      razorpayOrderId,
+      razorpayPaymentId,
     };
   }
 
-  async processRefund(paymentIntentId: string, amount?: number, reason?: string) {
-    if (!paymentIntentId) {
-      throw new BadRequestException('Payment intent ID is required');
+  async processRefund(razorpayPaymentId: string, amount?: number, reason?: string) {
+    if (!razorpayPaymentId) {
+      throw new BadRequestException('Razorpay payment ID is required');
     }
 
-    // If Stripe is configured, process refund
-    if (this.stripe && this.stripeSecretKey) {
+    if (this.razorpay) {
       try {
-        const refundParams: any = {
-          payment_intent: paymentIntentId,
-        };
-
+        const refundParams: any = {};
         if (amount) {
-          refundParams.amount = Math.round(amount * 100); // Convert to cents
+          refundParams.amount = Math.round(amount * 100);
         }
-
         if (reason) {
-          refundParams.reason = reason;
+          refundParams.notes = { reason };
         }
 
-        const refund = await this.stripe.refunds.create(refundParams);
+        const refund = await this.razorpay.payments.refund(razorpayPaymentId, refundParams);
 
         return {
           success: true,
           refundId: refund.id,
           amount: refund.amount / 100,
           status: refund.status,
-          paymentIntentId,
+          razorpayPaymentId,
         };
       } catch (error: any) {
-        throw new BadRequestException(`Refund processing failed: ${error.message}`);
+        const msg = error?.error?.description || error?.message || JSON.stringify(error);
+        throw new BadRequestException(`Refund processing failed: ${msg}`);
       }
     }
 
@@ -137,10 +195,108 @@ export class PaymentsService {
     return {
       success: true,
       message: 'Refund processed (placeholder mode)',
-      paymentIntentId,
+      razorpayPaymentId,
       amount,
-      note: 'Stripe not configured - using placeholder mode',
     };
   }
-}
 
+  /**
+   * Verify Razorpay webhook signature using HMAC SHA256 with the
+   * webhook secret. Returns the parsed event body on success.
+   */
+  handleWebhook(payload: Buffer, signature: string): any {
+    if (!this.razorpayWebhookSecret) {
+      // No webhook secret configured — accept in non-prod for ease of dev
+      const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+      if (isProd) {
+        throw new BadRequestException('Razorpay webhook secret not configured');
+      }
+      return JSON.parse(payload.toString());
+    }
+
+    const expectedSignature = createHmac('sha256', this.razorpayWebhookSecret)
+      .update(payload)
+      .digest('hex');
+
+    if (expectedSignature !== signature) {
+      throw new BadRequestException('Razorpay webhook signature verification failed');
+    }
+
+    return JSON.parse(payload.toString());
+  }
+
+  setOrdersService(ordersService: any) {
+    this.ordersService = ordersService;
+  }
+
+  async processWebhookEvent(event: any): Promise<{ success: boolean; message: string }> {
+    // Idempotency guard — same event ID can arrive multiple times on retry
+    try {
+      await this.webhookEventModel.create({
+        eventId: event.id || `${event.event}_${Date.now()}`,
+        eventType: event.event,
+        processedAt: new Date(),
+      });
+    } catch (dupErr: any) {
+      if (dupErr?.code === 11000) {
+        this.logger.log(`Razorpay webhook ${event.id} (${event.event}) already processed — skipping`);
+        return { success: true, message: 'Event already processed (idempotent skip)' };
+      }
+      throw dupErr;
+    }
+
+    try {
+      const eventType: string = event.event || '';
+      const payload = event.payload?.payment?.entity || event.payload?.refund?.entity;
+
+      switch (eventType) {
+        case 'payment.authorized':
+        case 'payment.captured': {
+          const paymentId = payload?.id;
+          const orderId = payload?.order_id;
+          this.logger.log(`Payment ${eventType}: paymentId=${paymentId} orderId=${orderId}`);
+          if (this.ordersService && orderId) {
+            try {
+              await this.ordersService.updatePaymentStatusByRazorpayOrderId(
+                orderId,
+                paymentId,
+                'paid',
+                'processing',
+              );
+            } catch (err: any) {
+              this.logger.warn(`Failed to update order for Razorpay order ${orderId}: ${err.message}`);
+            }
+          }
+          return { success: true, message: 'Payment confirmed' };
+        }
+
+        case 'payment.failed': {
+          const orderId = payload?.order_id;
+          this.logger.warn(`Payment failed: orderId=${orderId}`);
+          if (this.ordersService && orderId) {
+            try {
+              await this.ordersService.updatePaymentStatusByRazorpayOrderId(orderId, null, 'failed');
+            } catch (err: any) {
+              this.logger.warn(`Failed to update order: ${err.message}`);
+            }
+          }
+          return { success: true, message: 'Payment failed recorded' };
+        }
+
+        case 'refund.created':
+        case 'refund.processed': {
+          const paymentId = payload?.payment_id;
+          this.logger.log(`Refund processed for payment ${paymentId}`);
+          return { success: true, message: 'Refund recorded' };
+        }
+
+        default:
+          this.logger.log(`Unhandled Razorpay event: ${eventType}`);
+          return { success: true, message: 'Event received but not processed' };
+      }
+    } catch (error: any) {
+      this.logger.error(`Error processing webhook event: ${error.message}`);
+      throw new BadRequestException(`Webhook processing failed: ${error.message}`);
+    }
+  }
+}

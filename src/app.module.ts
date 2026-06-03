@@ -21,6 +21,7 @@ import { StoresModule } from './modules/stores/stores.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { SeedModule } from './modules/seed/seed.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -30,8 +31,8 @@ import { CouponsModule } from './modules/coupons/coupons.module';
       envFilePath: '.env',
     }),
     
-    // Database
-    MongooseModule.forRoot(process.env.MONGODB_URI || 'mongodb://localhost:27017/honey-ecommerce', {
+    // Database — bootstrap.ts asserts MONGODB_URI is set before this module loads.
+    MongooseModule.forRoot(process.env.MONGODB_URI as string, {
       connectionFactory: (connection) => {
         connection.on('connected', () => {
           // MongoDB Connected
@@ -49,6 +50,7 @@ import { CouponsModule } from './modules/coupons/coupons.module';
     ]),
 
     // Feature Modules
+    HealthModule,
     AuthModule,
     UsersModule,
     ProductsModule,
