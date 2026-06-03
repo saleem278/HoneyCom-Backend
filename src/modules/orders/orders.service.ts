@@ -278,22 +278,27 @@ export class OrdersService {
         throw new BadRequestException(`Invalid payment method: ${paymentMethod}`);
       }
 
-      // SECURITY: For Razorpay payments, re-verify the HMAC signature server-side.
-      // The client forwards razorpayOrderId + razorpayPaymentId + razorpaySignature
-      // from the Razorpay SDK response. We must not trust them without verification.
-      if (paymentMethod === 'razorpay') {
+      // SECURITY: Two Razorpay order-creation patterns coexist:
+      //
+      //  A. Pre-payment (web/frontend): order is created first with only
+      //     razorpayOrderId (payment not yet completed). Payment status is
+      //     confirmed later via the Razorpay webhook. No signature available yet.
+      //
+      //  B. Post-payment (mobile): order is created after the Razorpay SDK
+      //     completes, forwarding razorpayOrderId + razorpayPaymentId +
+      //     razorpaySignature. Signature MUST be verified server-side here
+      //     because this path doesn't rely on the webhook for payment confirmation.
+      //
+      // Rule: when both razorpayOrderId AND razorpayPaymentId are present we
+      // are on path B — require and verify the signature. When only
+      // razorpayOrderId is present we are on path A — allow, webhook handles it.
+      if (paymentMethod === 'razorpay' && orderData.razorpayOrderId && orderData.razorpayPaymentId) {
         const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
         const razorpayConfigured = this.paymentsService.isRazorpayConfigured();
 
-        if (!orderData.razorpayOrderId) {
-          throw new BadRequestException('razorpayOrderId is required for Razorpay payments');
-        }
-
-        // Require and verify signature when Razorpay is configured or in production.
-        // In dev/staging without keys the check is skipped (placeholder mode).
         if (razorpayConfigured || isProd) {
-          if (!orderData.razorpayPaymentId || !orderData.razorpaySignature) {
-            throw new BadRequestException('razorpayPaymentId and razorpaySignature are required for Razorpay payments');
+          if (!orderData.razorpaySignature) {
+            throw new BadRequestException('razorpaySignature is required when razorpayPaymentId is provided');
           }
           const signatureValid = this.paymentsService.verifyPaymentSignature(
             orderData.razorpayOrderId,
