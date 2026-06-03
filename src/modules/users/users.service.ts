@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { User, IUser } from '../../models/User.model';
@@ -9,6 +9,8 @@ import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @InjectModel('User') private userModel: Model<IUser>,
     @InjectModel('Address') private addressModel: Model<IAddress>,
@@ -29,7 +31,18 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, updateData: Partial<IUser>) {
-    const user = await this.userModel.findByIdAndUpdate(userId, updateData, {
+    // SECURITY: Whitelist only safe fields to prevent Mass Assignment / Privilege Escalation.
+    // An attacker sending { role: 'admin' } must not be able to elevate their privileges.
+    const allowedFields: Array<keyof IUser | string> = ['name', 'email', 'phone', 'avatar'];
+    const filteredUpdateData: any = {};
+    
+    for (const key of Object.keys(updateData)) {
+      if (allowedFields.includes(key)) {
+        filteredUpdateData[key] = updateData[key as keyof IUser];
+      }
+    }
+
+    const user = await this.userModel.findByIdAndUpdate(userId, filteredUpdateData, {
       new: true,
       runValidators: true,  
     });
@@ -226,9 +239,8 @@ export class UsersService {
             paymentData.expiryYear = String(stripePaymentMethod.card.exp_year);
           }
         }
-      } catch (error) {
-        // Log error but continue - card details may be provided manually
-        console.error('Error fetching Stripe payment method details:', error);
+      } catch (error: any) {
+        this.logger.error(`Error fetching Stripe payment method details: ${error?.message || error}`);
       }
     } else if (paymentData.type === 'card' && !paymentData.stripePaymentMethodId) {
       throw new BadRequestException(
@@ -298,6 +310,10 @@ export class UsersService {
       { new: true }
     );
 
+    if (!updated) {
+      throw new NotFoundException('Payment method not found after update');
+    }
+
     // Return safe data only
     const safePaymentMethod = {
       _id: updated._id,
@@ -340,9 +356,8 @@ export class UsersService {
           });
           await stripe.paymentMethods.detach(paymentMethod.stripePaymentMethodId);
         }
-      } catch (error) {
-        // Log error but continue with database deletion
-        console.error('Error deleting payment method from Stripe:', error);
+      } catch (error: any) {
+        this.logger.error(`Error deleting payment method from Stripe: ${error?.message || error}`);
       }
     }
 
@@ -363,8 +378,9 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
     
-    // Get wishlist products (assuming wishlist is stored as array of product IDs in user)
-    const wishlistIds = (user as any).wishlist || [];
+    // Get wishlist products. Limit to 200 to prevent memory exhaustion on
+    // users who accumulate large wishlists. Paginate if needed in future.
+    const wishlistIds = ((user as any).wishlist || []).slice(0, 200);
     const products = await this.productModel
       .find({ _id: { $in: wishlistIds }, status: 'approved' })
       .populate('category', 'name slug')

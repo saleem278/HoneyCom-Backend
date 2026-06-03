@@ -5,6 +5,11 @@ export interface IProductVariant {
   options: string[];
 }
 
+export interface IProductQnA {
+  q: string;
+  a: string;
+}
+
 export interface IProduct extends Document {
   name: string;
   description: string;
@@ -23,10 +28,13 @@ export interface IProduct extends Document {
     height: number;
   };
   status: 'pending' | 'approved' | 'rejected' | 'inactive';
+  rejectionReason?: string;
   featured: boolean;
   rating: number;
   numReviews: number;
   tags: string[];
+  qna?: IProductQnA[];
+  specifications?: Array<{ label: string; value: string }>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -55,7 +63,8 @@ const ProductSchema: Schema = new Schema(
     price: {
       type: Number,
       required: [true, 'Please provide a price'],
-      min: [0, 'Price must be positive'],
+      min: [0.01, 'Price must be at least 0.01'],
+      max: [10000000, 'Price cannot exceed 10,000,000'],
     },
     compareAtPrice: {
       type: Number,
@@ -81,6 +90,7 @@ const ProductSchema: Schema = new Schema(
       type: Number,
       required: true,
       min: [0, 'Inventory cannot be negative'],
+      max: [10000000, 'Inventory cannot exceed 10 million units'],
       default: 0,
     },
     variants: [
@@ -111,6 +121,11 @@ const ProductSchema: Schema = new Schema(
       enum: ['pending', 'approved', 'rejected', 'inactive'],
       default: 'pending',
     },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      maxlength: [1000, 'Rejection reason cannot exceed 1000 characters'],
+    },
     featured: {
       type: Boolean,
       default: false,
@@ -131,6 +146,18 @@ const ProductSchema: Schema = new Schema(
         trim: true,
       },
     ],
+    qna: [
+      {
+        q: { type: String, trim: true, maxlength: 500 },
+        a: { type: String, trim: true, maxlength: 2000 },
+      },
+    ],
+    specifications: [
+      {
+        label: { type: String, trim: true, maxlength: 100 },
+        value: { type: String, trim: true, maxlength: 500 },
+      },
+    ],
   },
   {
     timestamps: true,
@@ -139,10 +166,16 @@ const ProductSchema: Schema = new Schema(
   }
 );
 
-// Index for search
+// Text search across name, description, and tags
 ProductSchema.index({ name: 'text', description: 'text', tags: 'text' });
+// Category + status compound (product listing page filter)
 ProductSchema.index({ category: 1, status: 1 });
-ProductSchema.index({ seller: 1 });
+// Seller product list (seller dashboard)
+ProductSchema.index({ seller: 1, status: 1 });
+// Price range filter — supports minPrice/maxPrice queries efficiently
+ProductSchema.index({ price: 1, status: 1 });
+// Featured products query (homepage)
+ProductSchema.index({ featured: 1, status: 1 });
 
 export const Product = mongoose.model<IProduct>('Product', ProductSchema);
 export { ProductSchema };

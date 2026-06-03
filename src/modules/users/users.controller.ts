@@ -17,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('Users')
 @Controller('users')
@@ -28,28 +29,28 @@ export class UsersController {
   @Get('profile')
   @ApiOperation({ summary: 'Get user profile' })
   @ApiResponse({ status: 200, description: 'User profile retrieved' })
-  async getProfile(@Request() req) {
+  async getProfile(@Request() req: AuthedRequest) {
     return this.usersService.getProfile(req.user.id);
   }
 
   @Put('profile')
   @ApiOperation({ summary: 'Update user profile' })
   @ApiResponse({ status: 200, description: 'Profile updated successfully' })
-  async updateProfile(@Request() req, @Body() updateData: any) {
+  async updateProfile(@Request() req: AuthedRequest, @Body() updateData: any) {
     return this.usersService.updateProfile(req.user.id, updateData);
   }
 
   @Get('addresses')
   @ApiOperation({ summary: 'Get user addresses' })
   @ApiResponse({ status: 200, description: 'List of addresses' })
-  async getAddresses(@Request() req) {
+  async getAddresses(@Request() req: AuthedRequest) {
     return this.usersService.getAddresses(req.user.id);
   }
 
   @Post('addresses')
   @ApiOperation({ summary: 'Add new address' })
   @ApiResponse({ status: 201, description: 'Address added successfully' })
-  async addAddress(@Request() req, @Body() addressData: any) {
+  async addAddress(@Request() req: AuthedRequest, @Body() addressData: any) {
     return this.usersService.addAddress(req.user.id, addressData);
   }
 
@@ -57,7 +58,7 @@ export class UsersController {
   @ApiOperation({ summary: 'Update address' })
   @ApiResponse({ status: 200, description: 'Address updated successfully' })
   async updateAddress(
-    @Request() req,
+    @Request() req: AuthedRequest,
     @Param('id') addressId: string,
     @Body() updateData: any
   ) {
@@ -67,14 +68,14 @@ export class UsersController {
   @Delete('addresses/:id')
   @ApiOperation({ summary: 'Delete address' })
   @ApiResponse({ status: 200, description: 'Address deleted successfully' })
-  async deleteAddress(@Request() req, @Param('id') addressId: string) {
+  async deleteAddress(@Request() req: AuthedRequest, @Param('id') addressId: string) {
     return this.usersService.deleteAddress(req.user.id, addressId);
   }
 
   @Get('payment-methods')
   @ApiOperation({ summary: 'Get user payment methods' })
   @ApiResponse({ status: 200, description: 'List of payment methods' })
-  async getPaymentMethods(@Request() req) {
+  async getPaymentMethods(@Request() req: AuthedRequest) {
     return this.usersService.getPaymentMethods(req.user.id);
   }
 
@@ -84,7 +85,7 @@ export class UsersController {
     description: 'Adds a payment method using Stripe payment method token. Card data should be tokenized via Stripe Elements before calling this endpoint.'
   })
   @ApiResponse({ status: 201, description: 'Payment method added successfully' })
-  async addPaymentMethod(@Request() req, @Body() paymentData: {
+  async addPaymentMethod(@Request() req: AuthedRequest, @Body() paymentData: {
     type: 'card' | 'paypal';
     stripePaymentMethodId?: string; // Required for card type
     last4?: string;
@@ -102,7 +103,7 @@ export class UsersController {
   @ApiOperation({ summary: 'Update payment method' })
   @ApiResponse({ status: 200, description: 'Payment method updated successfully' })
   async updatePaymentMethod(
-    @Request() req,
+    @Request() req: AuthedRequest,
     @Param('id') paymentMethodId: string,
     @Body() updateData: { cardHolderName?: string; isDefault?: boolean }
   ) {
@@ -112,35 +113,35 @@ export class UsersController {
   @Delete('payment-methods/:id')
   @ApiOperation({ summary: 'Delete payment method' })
   @ApiResponse({ status: 200, description: 'Payment method deleted successfully' })
-  async deletePaymentMethod(@Request() req, @Param('id') paymentMethodId: string) {
+  async deletePaymentMethod(@Request() req: AuthedRequest, @Param('id') paymentMethodId: string) {
     return this.usersService.deletePaymentMethod(req.user.id, paymentMethodId);
   }
 
   @Get('wishlist')
   @ApiOperation({ summary: 'Get user wishlist' })
   @ApiResponse({ status: 200, description: 'User wishlist' })
-  async getWishlist(@Request() req) {
+  async getWishlist(@Request() req: AuthedRequest) {
     return this.usersService.getWishlist(req.user.id);
   }
 
   @Post('wishlist')
   @ApiOperation({ summary: 'Add product to wishlist' })
   @ApiResponse({ status: 200, description: 'Product added to wishlist' })
-  async addToWishlist(@Request() req, @Body() body: { productId: string }) {
+  async addToWishlist(@Request() req: AuthedRequest, @Body() body: { productId: string }) {
     return this.usersService.addToWishlist(req.user.id, body.productId);
   }
 
   @Delete('wishlist/:productId')
   @ApiOperation({ summary: 'Remove product from wishlist' })
   @ApiResponse({ status: 200, description: 'Product removed from wishlist' })
-  async removeFromWishlist(@Request() req, @Param('productId') productId: string) {
+  async removeFromWishlist(@Request() req: AuthedRequest, @Param('productId') productId: string) {
     return this.usersService.removeFromWishlist(req.user.id, productId);
   }
 
   @Delete('wishlist')
   @ApiOperation({ summary: 'Clear wishlist' })
   @ApiResponse({ status: 200, description: 'Wishlist cleared' })
-  async clearWishlist(@Request() req) {
+  async clearWishlist(@Request() req: AuthedRequest) {
     return this.usersService.clearWishlist(req.user.id);
   }
 }
