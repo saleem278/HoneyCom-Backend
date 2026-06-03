@@ -22,6 +22,7 @@ import { SettingsModule } from './modules/settings/settings.module';
 import { SeedModule } from './modules/seed/seed.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { HealthModule } from './modules/health/health.module';
+import { PayoutsModule } from './modules/payouts/payouts.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { HealthModule } from './modules/health/health.module';
     StoresModule,
     SettingsModule,
     CouponsModule,
+    PayoutsModule,
     SeedModule,
   ],
 })
