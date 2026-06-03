@@ -56,10 +56,11 @@ export class ProductsController {
   }
 
   @Get(':id')
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Get product by ID' })
   @ApiResponse({ status: 200, description: 'Product details' })
-  async findOne(@Param('id') id: string, @Currency() currency: string) {
-    return this.productsService.findOne(id, currency);
+  async findOne(@Param('id') id: string, @Currency() currency: string, @Request() req: any) {
+    return this.productsService.findOne(id, currency, req?.user?.role, req?.user?.id);
   }
 
   @Post()
