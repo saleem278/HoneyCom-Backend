@@ -20,7 +20,7 @@ export class SettingsController {
   @Public()
   @ApiOperation({ summary: 'Get public storefront settings (no auth)' })
   async getPublic() {
-    const [branding, storefront, seo, orders, navigation, footer, support, about, products, notifications] = await Promise.all([
+    const [branding, storefront, seo, orders, navigation, footer, support, about, products, notifications, platform] = await Promise.all([
       this.settingsService.getByCategory('branding'),
       this.settingsService.getByCategory('storefront'),
       this.settingsService.getByCategory('seo'),
@@ -31,6 +31,7 @@ export class SettingsController {
       this.settingsService.getByCategory('about'),
       this.settingsService.getByCategory('products'),
       this.settingsService.getByCategory('notifications'),
+      this.settingsService.getByCategory('platform'),
     ]);
     return {
       success: true,
@@ -45,6 +46,7 @@ export class SettingsController {
         about:         about.settings,
         products:      products.settings,
         notifications: notifications.settings,
+        platform:      platform.settings,
       },
     };
   }

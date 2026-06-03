@@ -43,20 +43,23 @@ export class OrdersService {
     shippingFlat: number;
     freeShippingAbove: number;
     returnWindowDays: number;
+    commissionRate: number;
   }> {
     const rows = await this.settingsModel
-      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat', 'order.freeShippingAbove', 'order.returnWindowDays'] } })
+      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat', 'order.freeShippingAbove', 'order.returnWindowDays', 'platform.commissionRate'] } })
       .lean();
     const map = new Map(rows.map((r: any) => [r.key, r.value]));
     const taxRate = Number(map.get('order.taxRate') ?? 0.18);
     const shippingFlat = Number(map.get('order.shippingFlat') ?? 99);
     const freeShippingAbove = Number(map.get('order.freeShippingAbove') ?? 499);
     const returnWindowDays = Number(map.get('order.returnWindowDays') ?? 30);
+    const commissionRate = Number(map.get('platform.commissionRate') ?? 0.10);
     return {
       taxRate: Number.isFinite(taxRate) && taxRate >= 0 ? taxRate : 0.18,
       shippingFlat: Number.isFinite(shippingFlat) && shippingFlat >= 0 ? shippingFlat : 99,
       freeShippingAbove: Number.isFinite(freeShippingAbove) && freeShippingAbove >= 0 ? freeShippingAbove : 499,
       returnWindowDays: Number.isFinite(returnWindowDays) && returnWindowDays > 0 ? returnWindowDays : 30,
+      commissionRate: Number.isFinite(commissionRate) && commissionRate >= 0 && commissionRate <= 1 ? commissionRate : 0.10,
     };
   }
 
@@ -133,6 +136,11 @@ export class OrdersService {
       itemsToProcess = cart.items;
     }
 
+    // Fetch all order-level settings upfront so the commission rate is
+    // available when building each line item and doesn't require a second
+    // DB round-trip later in the method.
+    const { taxRate, shippingFlat, freeShippingAbove, commissionRate } = await this.getOrderSettings();
+
     let subtotal = 0;
     const items: Array<{
       product: any;
@@ -142,6 +150,9 @@ export class OrdersService {
       price: number;
       image: string;
       variants: any;
+      commissionRate?: number;
+      commissionAmount?: number;
+      sellerEarning?: number;
     }> = [];
 
     // Reserve inventory atomically, item by item. Each `$inc` is conditional on
@@ -190,6 +201,9 @@ export class OrdersService {
         const itemTotal = product.price * item.quantity;
         subtotal += itemTotal;
 
+        const commissionAmount = Number((itemTotal * commissionRate).toFixed(2));
+        const sellerEarning = Number((itemTotal - commissionAmount).toFixed(2));
+
         items.push({
           product: product._id,
           // Snapshot the seller onto the line item so seller-side
@@ -202,6 +216,11 @@ export class OrdersService {
           price: product.price,
           image: product.images?.[0] || '',
           variants: item.variants || {},
+          // Snapshot commission at order time — rate changes don't
+          // retroactively alter what sellers earned on past orders.
+          commissionRate,
+          commissionAmount,
+          sellerEarning,
         });
       }
     } catch (err) {
@@ -234,7 +253,6 @@ export class OrdersService {
       );
     };
 
-    const { taxRate, shippingFlat, freeShippingAbove } = await this.getOrderSettings();
     const tax = subtotal * taxRate;
     const shipping = subtotal > 0 && subtotal < freeShippingAbove ? shippingFlat : 0;
     let discount = 0;

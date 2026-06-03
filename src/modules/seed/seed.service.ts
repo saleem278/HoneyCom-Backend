@@ -1953,6 +1953,9 @@ export class SeedService {
       { key: 'branding.socialYoutube', value: 'https://youtube.com/@dayam', category: 'branding', description: 'YouTube channel URL.' },
       { key: 'branding.socialWhatsapp', value: 'https://wa.me/919876543210', category: 'branding', description: 'WhatsApp chat link.' },
 
+      // ── Platform / Monetisation ───────────────────────────────────────────
+      { key: 'platform.commissionRate', value: 0.10, category: 'platform', description: 'Platform commission on seller revenue (decimal). 0.10 = 10%. Snapshotted on each order line item at creation time.' },
+
       // ── Orders ────────────────────────────────────────────────────────────
       { key: 'order.taxRate', value: 0.18, category: 'orders', description: 'Tax rate (decimal). 0.18 = 18% GST.' },
       { key: 'order.shippingFlat', value: 99, category: 'orders', description: 'Flat shipping fee in INR.' },
