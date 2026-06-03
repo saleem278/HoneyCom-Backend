@@ -73,7 +73,9 @@ export class ReviewsService {
     const reviews = await this.reviewModel
       .find(filter)
       .populate('user', 'name email avatar')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
 
     // Real rating distribution from actual review data
     const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };

@@ -322,6 +322,10 @@ export class SellerService {
         $group: {
           _id: null,
           totalRevenue: { $sum: '$itemRevenue' },
+          totalNetEarnings: {
+            $sum: { $ifNull: ['$items.sellerEarning', '$itemRevenue'] },
+          },
+          totalCommission: { $sum: { $ifNull: ['$items.commissionAmount', 0] } },
           orderIds: { $addToSet: '$_id' },
         },
       },
@@ -329,6 +333,8 @@ export class SellerService {
         $project: {
           _id: 0,
           totalRevenue: 1,
+          totalNetEarnings: 1,
+          totalCommission: 1,
           totalOrders: { $size: '$orderIds' },
           averageOrderValue: {
             $cond: [
@@ -346,7 +352,7 @@ export class SellerService {
       report: {
         dailySales,
         monthlySales,
-        totals: totals[0] || { totalRevenue: 0, totalOrders: 0, averageOrderValue: 0 },
+        totals: totals[0] || { totalRevenue: 0, totalNetEarnings: 0, totalCommission: 0, totalOrders: 0, averageOrderValue: 0 },
       },
     };
   }
