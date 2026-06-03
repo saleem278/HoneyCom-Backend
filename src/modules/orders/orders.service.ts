@@ -34,20 +34,29 @@ export class OrdersService {
   ) {}
 
   /**
-   * Read tax rate and flat shipping from the Settings collection.
-   * Falls back to safe defaults (10% tax, ₹500 shipping) if not configured.
+   * Read order-related settings from the Settings collection.
+   * Fallbacks match cart.service.ts so both services agree on the same numbers.
    * Admin can update these via PUT /settings/bulk without a deploy.
    */
-  private async getOrderSettings(): Promise<{ taxRate: number; shippingFlat: number }> {
+  private async getOrderSettings(): Promise<{
+    taxRate: number;
+    shippingFlat: number;
+    freeShippingAbove: number;
+    returnWindowDays: number;
+  }> {
     const rows = await this.settingsModel
-      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat'] } })
+      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat', 'order.freeShippingAbove', 'order.returnWindowDays'] } })
       .lean();
     const map = new Map(rows.map((r: any) => [r.key, r.value]));
-    const taxRate = Number(map.get('order.taxRate') ?? 0.1);
-    const shippingFlat = Number(map.get('order.shippingFlat') ?? 500);
+    const taxRate = Number(map.get('order.taxRate') ?? 0.18);
+    const shippingFlat = Number(map.get('order.shippingFlat') ?? 99);
+    const freeShippingAbove = Number(map.get('order.freeShippingAbove') ?? 499);
+    const returnWindowDays = Number(map.get('order.returnWindowDays') ?? 30);
     return {
-      taxRate: Number.isFinite(taxRate) && taxRate >= 0 ? taxRate : 0.1,
-      shippingFlat: Number.isFinite(shippingFlat) && shippingFlat >= 0 ? shippingFlat : 500,
+      taxRate: Number.isFinite(taxRate) && taxRate >= 0 ? taxRate : 0.18,
+      shippingFlat: Number.isFinite(shippingFlat) && shippingFlat >= 0 ? shippingFlat : 99,
+      freeShippingAbove: Number.isFinite(freeShippingAbove) && freeShippingAbove >= 0 ? freeShippingAbove : 499,
+      returnWindowDays: Number.isFinite(returnWindowDays) && returnWindowDays > 0 ? returnWindowDays : 30,
     };
   }
 
@@ -225,9 +234,9 @@ export class OrdersService {
       );
     };
 
-    const { taxRate, shippingFlat } = await this.getOrderSettings();
+    const { taxRate, shippingFlat, freeShippingAbove } = await this.getOrderSettings();
     const tax = subtotal * taxRate;
-    const shipping = subtotal > 0 ? shippingFlat : 0;
+    const shipping = subtotal > 0 && subtotal < freeShippingAbove ? shippingFlat : 0;
     let discount = 0;
     let total = 0;
 
@@ -255,7 +264,7 @@ export class OrdersService {
         city: shippingAddressData.city || '',
         state: shippingAddressData.state || '',
         zipCode: shippingAddressData.postalCode || shippingAddressData.zipCode || '',
-        country: shippingAddressData.country || 'United States',
+        country: shippingAddressData.country || 'India',
         phone: shippingAddressData.phone || '0000000000',
         isDefault: false,
       }], { session });
@@ -635,8 +644,7 @@ export class OrdersService {
       throw new BadRequestException('Order is not eligible for return. Only delivered orders can be returned.');
     }
 
-    // Enforce 30-day return window from delivery/updated timestamp
-    const returnWindowDays = 30;
+    const { returnWindowDays } = await this.getOrderSettings();
     const deliveryDate = order.updatedAt;
     const daysSinceDelivery = (Date.now() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24);
     if (daysSinceDelivery > returnWindowDays) {
