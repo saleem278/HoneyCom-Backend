@@ -27,24 +27,40 @@ export class SellerService {
     // Revenue must only count *this seller's* line items, not the whole order.
     // Multi-seller orders previously double-counted: a seller with 1 of 10 items
     // saw the entire order total as their revenue.
-    const totalRevenue = await this.orderModel.aggregate([
+    // Also compute net earnings (after platform commission) and total commission.
+    // For legacy items that predate the commission fields, fall back to the gross
+    // amount as both gross and net so old data doesn't appear to have zero earnings.
+    const earningsAgg = await this.orderModel.aggregate([
       { $match: { 'items.product': { $in: productIds }, status: 'delivered' } },
       { $unwind: '$items' },
       { $match: { 'items.product': { $in: productIds } } },
       {
         $group: {
           _id: null,
-          total: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          totalNetEarnings: {
+            $sum: {
+              $ifNull: [
+                '$items.sellerEarning',
+                { $multiply: ['$items.price', '$items.quantity'] },
+              ],
+            },
+          },
+          totalCommission: { $sum: { $ifNull: ['$items.commissionAmount', 0] } },
         },
       },
     ]);
+
+    const earningsSummary = earningsAgg[0] || { totalRevenue: 0, totalNetEarnings: 0, totalCommission: 0 };
 
     return {
       success: true,
       dashboard: {
         totalProducts,
         totalOrders,
-        totalRevenue: totalRevenue[0]?.total || 0,
+        totalRevenue: earningsSummary.totalRevenue,
+        totalNetEarnings: earningsSummary.totalNetEarnings,
+        totalCommission: earningsSummary.totalCommission,
       },
     };
   }

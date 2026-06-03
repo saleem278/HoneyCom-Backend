@@ -29,6 +29,13 @@ export interface IOrderItem {
   // When the line-item status last changed. Used to render relative
   // "Updated 2 days ago" copy. Optional — pre-existing orders won't have it.
   statusUpdatedAt?: Date;
+  // Platform commission fields — snapshotted at order-creation time so
+  // rate changes don't retroactively alter historical earnings. Optional
+  // on the type; legacy orders that predate this field have no commission
+  // data and callers should fall back to price*quantity for those rows.
+  commissionRate?: number;    // platform rate at time of order (e.g. 0.10 = 10%)
+  commissionAmount?: number;  // platform's cut for this line item
+  sellerEarning?: number;     // seller's net (price*qty − commissionAmount)
 }
 
 export interface IOrder extends Document {
@@ -122,6 +129,19 @@ const OrderSchema: Schema = new Schema(
         },
         statusUpdatedAt: {
           type: Date,
+        },
+        commissionRate: {
+          type: Number,
+          min: 0,
+          max: 1,
+        },
+        commissionAmount: {
+          type: Number,
+          min: 0,
+        },
+        sellerEarning: {
+          type: Number,
+          min: 0,
         },
       },
     ],
