@@ -85,7 +85,9 @@ const CouponSchema: Schema = new Schema(
   }
 );
 
-CouponSchema.index({ code: 1 });
+// Explicit unique index — the schema-level `unique: true` creates an index but
+// doesn't guarantee the sparse/background options we want. Declare explicitly.
+CouponSchema.index({ code: 1 }, { unique: true });
 CouponSchema.index({ status: 1, validFrom: 1, validUntil: 1 });
 
 export const Coupon = mongoose.model<ICoupon>('Coupon', CouponSchema);

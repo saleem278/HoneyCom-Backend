@@ -1,4 +1,4 @@
-import { Controller, Post, Get, UseGuards, Query, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Get, UseGuards, Query, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { SeedService } from './seed.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -14,24 +14,23 @@ export class SeedController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Seed database with sample data (Admin only)' })
+  @ApiOperation({ summary: 'Seed database with sample data (Admin only, non-production)' })
   @ApiResponse({ status: 200, description: 'Database seeded successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Admin only' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Admin only or production environment' })
   async seed() {
-    return this.seedService.seed();
-  }
-
-  @Get('run')
-  @ApiOperation({ summary: 'Seed database with sample data (Protected by parameter)' })
-  @ApiQuery({ name: 'param', required: true, description: 'Secret parameter to authorize seeding', type: String })
-  @ApiResponse({ status: 200, description: 'Database seeded successfully' })
-  @ApiResponse({ status: 400, description: 'Invalid parameter' })
-  async seedWithParam(@Query('param') param: string) {
-    if (param !== 'Mahi1407') {
-      throw new BadRequestException('Invalid parameter. Access denied.');
+    // Hard-block in production. A seed wipes the entire database; allowing
+    // it on a live environment is catastrophic even if accidentally called.
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException(
+        'Database seeding is disabled in production. Use a restore from backup instead.',
+      );
     }
     return this.seedService.seed();
   }
+
+  // GET /seed/run was a backdoor protected by a hardcoded query-param secret.
+  // It has been intentionally removed. Use POST /seed (admin JWT required) instead.
+  // If you need to seed from a terminal without an admin token, use the npm run seed CLI command.
 }
 

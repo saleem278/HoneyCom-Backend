@@ -1,11 +1,20 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+// Single source of truth for the user role string. Both the Mongoose enum and
+// the IUser type reference this so they cannot drift. Clients (mobile + web)
+// must use these exact strings — note that the CMS role is 'contentEditor'
+// (camelCase), not 'content_editor' or 'cms'.
+// superadmin has all admin powers plus: manage other admins, access all settings,
+// and cannot be locked out. Only 1 superadmin should exist per installation.
+export const USER_ROLES = ['customer', 'seller', 'admin', 'superadmin', 'contentEditor'] as const;
+export type UserRole = (typeof USER_ROLES)[number];
+
 export interface IUser extends Document {
   name: string;
   email?: string;
   password: string;
   phone?: string;
-  role: 'customer' | 'seller' | 'admin';
+  role: UserRole;
   status: 'active' | 'inactive' | 'suspended';
   avatar?: string;
   addresses: mongoose.Types.ObjectId[];
@@ -19,6 +28,20 @@ export interface IUser extends Document {
   resetPasswordExpire?: Date;
   phoneLoginOtp?: string;
   phoneLoginOtpExpire?: Date;
+  phoneLoginOtpAttempts?: number;
+  phoneLoginOtpLockedUntil?: Date;
+  // TOTP-based 2FA. `pendingSecret` is the secret created during setup but
+  // not yet activated — it only flips into `secret` (and `enabled` -> true)
+  // when the user successfully verifies a code, proving they actually
+  // scanned the QR. Recovery codes are hashed so they can't be read from
+  // a stolen DB dump.
+  twoFactor?: {
+    enabled?: boolean;
+    secret?: string;
+    pendingSecret?: string;
+    recoveryCodes?: string[];
+    activatedAt?: Date;
+  };
   socialLogin?: {
     provider: string;
     providerId: string;
@@ -80,7 +103,7 @@ const UserSchema: Schema = new Schema(
     },
     role: {
       type: String,
-      enum: ['customer', 'seller', 'admin', 'contentEditor'],
+      enum: USER_ROLES,
       default: 'customer',
     },
     status: {
@@ -123,6 +146,20 @@ const UserSchema: Schema = new Schema(
     resetPasswordExpire: Date,
     phoneLoginOtp: String,
     phoneLoginOtpExpire: Date,
+    phoneLoginOtpAttempts: { type: Number, default: 0 },
+    phoneLoginOtpLockedUntil: Date,
+    twoFactor: {
+      enabled: { type: Boolean, default: false },
+      // The active secret is `select: false` so it doesn't leak into
+      // ordinary `findById(...)` calls — must be explicitly selected by
+      // the verify path.
+      secret: { type: String, select: false },
+      pendingSecret: { type: String, select: false },
+      // Recovery codes stored as bcrypt hashes; they get cleared as the
+      // user consumes them.
+      recoveryCodes: { type: [String], select: false, default: undefined },
+      activatedAt: Date,
+    },
     socialLogin: {
       provider: String,
       providerId: String,

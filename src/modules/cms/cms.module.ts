@@ -14,6 +14,7 @@ import { Form, FormSchema } from '../../models/Form.model';
 import { FormSubmission, FormSubmissionSchema } from '../../models/FormSubmission.model';
 import { ContentVersion, ContentVersionSchema } from '../../models/ContentVersion.model';
 import { Widget, WidgetSchema } from '../../models/Widget.model';
+import { SettingsSchema } from '../../models/Settings.model';
 import { AuthModule } from '../auth/auth.module';
 import { EmailService } from '../../services/email.service';
 
@@ -29,6 +30,7 @@ import { EmailService } from '../../services/email.service';
       { name: 'FormSubmission', schema: FormSubmissionSchema },
       { name: 'ContentVersion', schema: ContentVersionSchema },
       { name: 'Widget', schema: WidgetSchema },
+      { name: 'Settings', schema: SettingsSchema },
     ]),
     ScheduleModule.forRoot(),
     ConfigModule,

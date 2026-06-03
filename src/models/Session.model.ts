@@ -1,5 +1,14 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+/**
+ * What the session token authorises. `session` is the normal
+ * user-issued bearer (email/password, phone OTP, social). `impersonation`
+ * tracks an admin acting as another user — the strategy treats both
+ * as valid auth, but downstream code uses the discriminator to tag
+ * audit rows and the UI banner.
+ */
+export type SessionPurpose = 'session' | 'impersonation';
+
 export interface ISession extends Document {
   userId: mongoose.Types.ObjectId;
   token: string; // JWT token (hashed or just reference)
@@ -21,6 +30,10 @@ export interface ISession extends Document {
   expiresAt: Date;
   createdAt: Date;
   revokedAt?: Date;
+  /** What the token grants. Defaults to 'session'. */
+  purpose?: SessionPurpose;
+  /** When purpose === 'impersonation', the admin id who triggered it. */
+  impersonator?: mongoose.Types.ObjectId;
 }
 
 export const SessionSchema: Schema = new Schema(
@@ -70,6 +83,17 @@ export const SessionSchema: Schema = new Schema(
     revokedAt: {
       type: Date,
     },
+    purpose: {
+      type: String,
+      enum: ['session', 'impersonation'],
+      default: 'session',
+      index: true,
+    },
+    impersonator: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -80,8 +104,12 @@ export const SessionSchema: Schema = new Schema(
 // Compound index for efficient queries
 SessionSchema.index({ userId: 1, isActive: 1 });
 SessionSchema.index({ userId: 1, expiresAt: 1 });
+// Critical: jwt.strategy.ts queries by { token, isActive, expiresAt } on every request.
+// Without this compound index, Mongo uses the single token index but then scans to
+// filter isActive/expiresAt, creating O(n) work per request under high concurrency.
+SessionSchema.index({ token: 1, isActive: 1, expiresAt: 1 });
 
-// Auto-cleanup expired sessions (optional, can also be done via cron)
+// Auto-cleanup expired sessions via MongoDB TTL
 SessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const Session = mongoose.model<ISession>('Session', SessionSchema);

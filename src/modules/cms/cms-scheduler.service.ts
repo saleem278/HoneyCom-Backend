@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -7,6 +7,8 @@ import { IBlog } from '../../models/Blog.model';
 
 @Injectable()
 export class CmsSchedulerService {
+  private readonly logger = new Logger(CmsSchedulerService.name);
+
   constructor(
     @InjectModel('Page') private pageModel: Model<IPage>,
     @InjectModel('Blog') private blogModel: Model<IBlog>,
@@ -51,12 +53,12 @@ export class CmsSchedulerService {
       );
 
       if (scheduledPages.modifiedCount > 0 || scheduledPosts.modifiedCount > 0) {
-        console.log(
-          `Published ${scheduledPages.modifiedCount} pages and ${scheduledPosts.modifiedCount} blog posts`
+        this.logger.log(
+          `Published ${scheduledPages.modifiedCount} pages and ${scheduledPosts.modifiedCount} blog posts`,
         );
       }
-    } catch (error) {
-      console.error('Error publishing scheduled content:', error);
+    } catch (error: any) {
+      this.logger.error(`Error publishing scheduled content: ${error?.message || error}`);
     }
   }
 }

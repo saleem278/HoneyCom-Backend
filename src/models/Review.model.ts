@@ -35,6 +35,7 @@ const ReviewSchema: Schema = new Schema(
     comment: {
       type: String,
       required: [true, 'Please provide a review comment'],
+      minlength: [10, 'Comment must be at least 10 characters'],
       maxlength: [1000, 'Comment cannot exceed 1000 characters'],
     },
     images: [
@@ -68,17 +69,27 @@ const ReviewSchema: Schema = new Schema(
   }
 );
 
-// Update product rating when review is saved
+// Recalculate product rating whenever a review is saved.
+// Only approved reviews count toward the public rating.
 ReviewSchema.post('save', async function () {
-  const Review = this.constructor as mongoose.Model<IReview>;
-  const reviews = await Review.find({ product: this.product, status: 'approved' });
-  
-  const avgRating = reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
-  
-  await mongoose.model('Product').findByIdAndUpdate(this.product, {
-    rating: Math.round(avgRating * 10) / 10,
-    numReviews: reviews.length,
-  });
+  try {
+    const Review = this.constructor as mongoose.Model<IReview>;
+    const reviews = await Review.find({ product: this.product, status: 'approved' });
+    // Guard against division-by-zero: if no approved reviews exist, reset to 0.
+    const avgRating =
+      reviews.length > 0
+        ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+        : 0;
+    await mongoose.model('Product').findByIdAndUpdate(this.product, {
+      rating: Math.round(avgRating * 10) / 10,
+      numReviews: reviews.length,
+    });
+  } catch (err) {
+    // Post-save hooks must never throw — Mongoose silently swallows the
+    // error but the save has already committed, so we just log.
+    // eslint-disable-next-line no-console
+    console.error(`[ReviewSchema.post('save')] Failed to update product rating:`, err);
+  }
 });
 
 ReviewSchema.index({ product: 1, user: 1 }, { unique: true });

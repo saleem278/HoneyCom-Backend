@@ -10,7 +10,7 @@ export class BrandsService {
   ) {}
 
   async findAll() {
-    const brands = await this.brandModel.find({ status: 'active' }).sort({ name: 1 });
+    const brands = await this.brandModel.find({ status: 'active' }).sort({ name: 1 }).limit(500).lean();
     return {
       success: true,
       brands,
