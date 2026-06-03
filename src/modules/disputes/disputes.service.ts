@@ -23,10 +23,13 @@ export class DisputesService {
       throw new NotFoundException('Order not found');
     }
 
-    // Verify user owns the order
-    const customerId = typeof order.customer === 'object' && order.customer !== null
-      ? (order.customer as any)._id?.toString()
-      : order.customer?.toString();
+    // Verify user owns the order. `customer` is typed as ObjectId, but after
+    // `.populate('customer')` it may arrive as a User-like object — handle both.
+    const rawCustomer: unknown = order.customer;
+    const customerId =
+      rawCustomer && typeof rawCustomer === 'object' && '_id' in rawCustomer
+        ? String((rawCustomer as { _id: { toString(): string } })._id)
+        : String(rawCustomer);
     
     if (customerId !== userId) {
       throw new ForbiddenException('You can only create disputes for your own orders');
@@ -127,45 +130,69 @@ export class DisputesService {
   }
 
   async resolve(id: string, adminId: string, resolutionData: any) {
-    const dispute = await this.disputeModel.findById(id).populate('order');
-    if (!dispute) {
-      throw new NotFoundException('Dispute not found');
+    // Atomically claim the dispute — only succeeds if it's still open/in_review.
+    // This prevents two concurrent admin requests from both processing a refund
+    // (double-refund race condition). The $set is committed before the refund
+    // call, so a second request will hit the 'already resolved' guard below.
+    const disputed = await this.disputeModel.findOneAndUpdate(
+      { _id: id, status: { $in: ['open', 'in_review'] } },
+      { $set: { status: 'resolving', resolvedBy: adminId, resolvedAt: new Date() } },
+      { new: false }, // Return the OLD document so we can detect concurrent resolve
+    ).populate('order');
+
+    if (!disputed) {
+      // Either not found, or already being/been resolved by a concurrent request.
+      const existing = await this.disputeModel.findById(id);
+      if (!existing) throw new NotFoundException('Dispute not found');
+      throw new BadRequestException(
+        `Dispute cannot be resolved in current status (${existing.status}). It may have already been resolved.`,
+      );
     }
 
-    if (dispute.status !== 'open' && dispute.status !== 'in_review') {
-      throw new BadRequestException('Dispute cannot be resolved in current status');
-    }
-
-    dispute.status = 'resolved';
-    dispute.resolution = resolutionData.resolution;
-    dispute.resolutionNotes = resolutionData.notes;
-    dispute.resolvedBy = adminId as any;
-    dispute.resolvedAt = new Date();
-    await dispute.save();
-
-    // Process refund if resolution requires it
+    // Process refund if resolution requires it. Any failure here rolls the
+    // dispute back to 'in_review' so the admin can retry.
     if (resolutionData.resolution === 'refund' || resolutionData.resolution === 'partial_refund') {
-      const order = dispute.order as any;
+      const order = disputed.order as any;
       const refundAmount = resolutionData.refundAmount || order.total;
-      
-      try {
-        if (order.paymentIntentId) {
-          await this.paymentsService.processRefund(order.paymentIntentId, refundAmount, resolutionData.notes);
-        }
-        // Update order status
-        order.status = 'refunded';
-        order.paymentStatus = 'refunded';
-        await order.save();
-      } catch (error: any) {
-        // Error processing refund
-        // Continue even if refund fails - admin can process manually
+
+      // Validate refund amount does not exceed original order total
+      if (refundAmount > order.total) {
+        await this.disputeModel.findByIdAndUpdate(id, { $set: { status: 'in_review' } });
+        throw new BadRequestException(
+          `Refund amount (${refundAmount}) cannot exceed order total (${order.total})`,
+        );
       }
+
+      const razorpayPaymentId = (order as any).razorpayPaymentId;
+      if (razorpayPaymentId) {
+        try {
+          await this.paymentsService.processRefund(razorpayPaymentId, refundAmount, resolutionData.notes);
+        } catch (error: any) {
+          // Roll back the status claim so admin can retry
+          await this.disputeModel.findByIdAndUpdate(id, { $set: { status: 'in_review' } });
+          throw new BadRequestException(`Razorpay refund failed: ${error.message || error}. Dispute status reset to in_review.`);
+        }
+      }
+
+      // Mark order as refunded only after successful payment processing
+      order.status = 'refunded';
+      order.paymentStatus = 'refunded';
+      await order.save();
     }
+
+    // Finalize the dispute
+    await this.disputeModel.findByIdAndUpdate(id, {
+      $set: {
+        status: 'resolved',
+        resolution: resolutionData.resolution,
+        resolutionNotes: resolutionData.notes,
+      },
+    });
 
     return {
       success: true,
       message: 'Dispute resolved successfully',
-      dispute: await this.disputeModel.findById(dispute._id).populate('order customer seller resolvedBy'),
+      dispute: await this.disputeModel.findById(id).populate('order customer seller resolvedBy'),
     };
   }
 

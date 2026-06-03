@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { Product, IProduct } from '../../models/Product.model';
 import { Order, IOrder } from '../../models/Order.model';
 import { User, IUser } from '../../models/User.model';
+import { assertOrderTransition } from '../orders/order-status';
 
 @Injectable()
 export class SellerService {
@@ -15,20 +16,27 @@ export class SellerService {
 
   async getDashboard(sellerId: string) {
     const totalProducts = await this.productModel.countDocuments({ seller: sellerId });
-    
-    // Get seller's product IDs
+
     const products = await this.productModel.find({ seller: sellerId }).select('_id');
     const productIds = products.map(p => p._id);
-    
-    // Count orders where seller's products are in items
-    const totalOrders = await this.orderModel.countDocuments({ 
-      'items.product': { $in: productIds } 
+
+    const totalOrders = await this.orderModel.countDocuments({
+      'items.product': { $in: productIds },
     });
-    
-    // Calculate revenue from delivered orders with seller's products
+
+    // Revenue must only count *this seller's* line items, not the whole order.
+    // Multi-seller orders previously double-counted: a seller with 1 of 10 items
+    // saw the entire order total as their revenue.
     const totalRevenue = await this.orderModel.aggregate([
       { $match: { 'items.product': { $in: productIds }, status: 'delivered' } },
-      { $group: { _id: null, total: { $sum: '$total' } } },
+      { $unwind: '$items' },
+      { $match: { 'items.product': { $in: productIds } } },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+        },
+      },
     ]);
 
     return {
@@ -67,22 +75,37 @@ export class SellerService {
   }
 
   async getOrders(sellerId: string, page: number = 1, limit: number = 20) {
-    // Get orders where seller's products are in the items
+    // Orders with at least one line item owned by this seller. Uses
+    // the multikey index on `items.seller` (Order.model.ts) so this
+    // is an O(matching-orders) lookup rather than the previous
+    // O(orders × seller-products) scan that first fetched every
+    // product id and built a giant $in array.
+    //
+    // Fallback for legacy orders: rows that predate the items.seller
+    // backfill won't have the field. We OR-match `items.product` for
+    // those to avoid hiding pre-migration orders from the seller view
+    // — drop the fallback once a backfill migration has run.
     const products = await this.productModel.find({ seller: sellerId }).select('_id');
-    const productIds = products.map(p => p._id);
-    
+    const productIds = products.map((p) => p._id);
+    const filter = {
+      $or: [
+        { 'items.seller': sellerId },
+        { 'items.product': { $in: productIds }, 'items.seller': { $exists: false } },
+      ],
+    };
+
     const skip = (page - 1) * limit;
     const orders = await this.orderModel
-      .find({ 'items.product': { $in: productIds } })
+      .find(filter)
       .populate('customer', 'name email')
       .populate('shippingAddress', 'firstName lastName addressLine1 addressLine2 city state zipCode country phone')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
-    
-    const total = await this.orderModel.countDocuments({ 'items.product': { $in: productIds } });
-    
+
+    const total = await this.orderModel.countDocuments(filter);
+
     return {
       success: true,
       orders,
@@ -144,18 +167,45 @@ export class SellerService {
       throw new NotFoundException('Order not found');
     }
 
-    // Verify seller owns products in this order
-    const products = await this.productModel.find({ seller: sellerId }).select('_id');
-    const productIds = products.map(p => p._id);
-    const orderHasSellerProducts = order.items.some((item: any) => 
-      productIds.some(pid => pid.toString() === item.product.toString())
-    );
+    // Verify the seller owns *all* the products in this order. Previously a
+    // seller with one item in a 10-item multi-seller order could mark the
+    // entire order delivered, including other sellers' line items.
+    //
+    // The clean fix is per-line-item status, but that's a schema redesign.
+    // For now, refuse seller updates on multi-seller orders — admin can still
+    // take action via the admin panel.
+    const sellerProducts = await this.productModel.find({ seller: sellerId }).select('_id');
+    const sellerProductIds = new Set(sellerProducts.map(p => p._id.toString()));
 
-    if (!orderHasSellerProducts) {
+    const orderProductIds = order.items.map((item: any) => item.product.toString());
+    const allItemsBelongToSeller = orderProductIds.every((pid) => sellerProductIds.has(pid));
+    const someItemsBelongToSeller = orderProductIds.some((pid) => sellerProductIds.has(pid));
+
+    if (!someItemsBelongToSeller) {
       throw new BadRequestException('Not authorized to update this order');
     }
+    if (!allItemsBelongToSeller) {
+      throw new BadRequestException(
+        'This order contains items from other sellers. Per-item fulfillment is not yet supported; please contact admin.',
+      );
+    }
+
+    // Sellers can only advance the order through fulfillment states. Cancellation
+    // and refunds are admin/customer actions — refuse them here regardless of
+    // what the state machine would otherwise allow.
+    const allowedSellerStatuses = new Set(['processing', 'shipped', 'delivered']);
+    if (!allowedSellerStatuses.has(updateData.status)) {
+      throw new BadRequestException(
+        `Sellers can only set status to: ${[...allowedSellerStatuses].join(', ')}`,
+      );
+    }
+
+    assertOrderTransition(order.status, updateData.status);
 
     order.status = updateData.status as any;
+    if (order.status === 'delivered' && order.paymentMethod === 'cash_on_delivery') {
+      order.paymentStatus = 'paid';
+    }
     if (updateData.trackingNumber) {
       order.trackingNumber = updateData.trackingNumber;
     }
@@ -174,49 +224,94 @@ export class SellerService {
     const products = await this.productModel.find({ seller: sellerId }).select('_id');
     const productIds = products.map(p => p._id);
 
-    const matchQuery: any = { 'items.product': { $in: productIds } };
-    if (startDate || endDate) {
-      matchQuery.createdAt = {};
-      if (startDate) matchQuery.createdAt.$gte = startDate;
-      if (endDate) matchQuery.createdAt.$lte = endDate;
-    }
+    // Default to last 90 days when no date range is provided to prevent
+    // full-table scans on large order collections.
+    const defaultStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const effectiveStart = startDate ?? defaultStart;
+    const effectiveEnd = endDate ?? new Date();
 
-    // Daily sales data
-    const dailySales = await this.orderModel.aggregate([
+    const matchQuery: any = {
+      'items.product': { $in: productIds },
+      createdAt: { $gte: effectiveStart, $lte: effectiveEnd },
+    };
+
+    // Common pipeline prefix: only delivered orders that include this seller's
+    // products, then $unwind so each line item becomes its own document, then
+    // re-filter to drop other sellers' line items. From here we can sum
+    // accurately on the seller's items only.
+    const sellerItemsPipeline = [
       { $match: { ...matchQuery, status: 'delivered' } },
+      { $unwind: '$items' },
+      { $match: { 'items.product': { $in: productIds } } },
+      {
+        $addFields: {
+          itemRevenue: { $multiply: ['$items.price', '$items.quantity'] },
+        },
+      },
+    ];
+
+    const dailySales = await this.orderModel.aggregate([
+      ...sellerItemsPipeline,
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-          revenue: { $sum: '$total' },
-          orders: { $sum: 1 },
-          items: { $sum: { $size: '$items' } },
+          revenue: { $sum: '$itemRevenue' },
+          // distinct orders (an order with 3 of this seller's items counts once)
+          orderIds: { $addToSet: '$_id' },
+          items: { $sum: '$items.quantity' },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          revenue: 1,
+          items: 1,
+          orders: { $size: '$orderIds' },
         },
       },
       { $sort: { _id: 1 } },
     ]);
 
-    // Monthly sales data
     const monthlySales = await this.orderModel.aggregate([
-      { $match: { ...matchQuery, status: 'delivered' } },
+      ...sellerItemsPipeline,
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
-          revenue: { $sum: '$total' },
-          orders: { $sum: 1 },
+          revenue: { $sum: '$itemRevenue' },
+          orderIds: { $addToSet: '$_id' },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          revenue: 1,
+          orders: { $size: '$orderIds' },
         },
       },
       { $sort: { _id: 1 } },
     ]);
 
-    // Total metrics
     const totals = await this.orderModel.aggregate([
-      { $match: { ...matchQuery, status: 'delivered' } },
+      ...sellerItemsPipeline,
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: '$total' },
-          totalOrders: { $sum: 1 },
-          averageOrderValue: { $avg: '$total' },
+          totalRevenue: { $sum: '$itemRevenue' },
+          orderIds: { $addToSet: '$_id' },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalRevenue: 1,
+          totalOrders: { $size: '$orderIds' },
+          averageOrderValue: {
+            $cond: [
+              { $eq: [{ $size: '$orderIds' }, 0] },
+              0,
+              { $divide: ['$totalRevenue', { $size: '$orderIds' }] },
+            ],
+          },
         },
       },
     ]);
@@ -283,14 +378,26 @@ export class SellerService {
     const products = await this.productModel.find({ seller: sellerId }).select('_id');
     const productIds = products.map(p => p._id);
 
+    // Per-customer totals must again only count *this seller's* line items.
+    // Previously this summed entire-order totals so a customer who bought 1 of
+    // this seller's items in a 10-item cart appeared as a top-spender.
     const customerData = await this.orderModel.aggregate([
       { $match: { 'items.product': { $in: productIds }, status: 'delivered' } },
+      { $unwind: '$items' },
+      { $match: { 'items.product': { $in: productIds } } },
       {
         $group: {
           _id: '$customer',
-          totalSpent: { $sum: '$total' },
-          orderCount: { $sum: 1 },
+          totalSpent: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          orderIds: { $addToSet: '$_id' },
           lastOrderDate: { $max: '$createdAt' },
+        },
+      },
+      {
+        $project: {
+          totalSpent: 1,
+          lastOrderDate: 1,
+          orderCount: { $size: '$orderIds' },
         },
       },
       { $sort: { totalSpent: -1 } },

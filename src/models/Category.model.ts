@@ -5,6 +5,12 @@ export interface ICategory extends Document {
   slug: string;
   description?: string;
   image?: string;
+  /** Emoji or short icon string shown in the homepage category pill row. */
+  icon?: string;
+  /** Surface this category in the homepage "Shop by Category" grid. */
+  featured?: boolean;
+  /** Manual sort order for storefront display (lower = first). */
+  displayOrder?: number;
   parent?: mongoose.Types.ObjectId;
   status: 'active' | 'inactive';
   createdAt: Date;
@@ -31,6 +37,18 @@ const CategorySchema: Schema = new Schema(
     },
     image: {
       type: String,
+    },
+    icon: {
+      type: String,
+      maxlength: [16, 'Icon must be a short string or emoji'],
+    },
+    featured: {
+      type: Boolean,
+      default: false,
+    },
+    displayOrder: {
+      type: Number,
+      default: 0,
     },
     parent: {
       type: Schema.Types.ObjectId,

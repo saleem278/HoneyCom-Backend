@@ -16,12 +16,17 @@ export class SmsService {
     // Initialize Twilio if credentials are available
     if (this.twilioAccountSid && this.twilioAuthToken) {
       try {
-        // Dynamic import for Twilio
-        // const twilio = require('twilio');
-        // this.twilioClient = twilio(this.twilioAccountSid, this.twilioAuthToken);
-      } catch (error) {
-        // Twilio not installed or not configured. Using placeholder mode.
+        const twilio = require('twilio');
+        this.twilioClient = twilio(this.twilioAccountSid, this.twilioAuthToken);
+      } catch (error: any) {
+        // Twilio package not installed or credentials invalid.
+        // OTP delivery will fall back to placeholder mode — which means
+        // EXPOSE_OTP_IN_RESPONSE must be set in dev, and in production
+        // SMS simply won't deliver. Configure TWILIO_* env vars to fix.
+        console.warn(`[SmsService] Twilio initialization failed: ${error?.message}. SMS will not be delivered.`);
       }
+    } else {
+      console.warn('[SmsService] TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN not set. SMS delivery disabled.');
     }
   }
 
