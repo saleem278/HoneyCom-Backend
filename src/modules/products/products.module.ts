@@ -7,14 +7,17 @@ import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 import { Product, ProductSchema } from '../../models/Product.model';
 import { Category, CategorySchema } from '../../models/Category.model';
+import { ProductAlert, ProductAlertSchema } from '../../models/ProductAlert.model';
 import { AuthModule } from '../auth/auth.module';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
+import { MobileModule } from '../mobile/mobile.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: 'Product', schema: ProductSchema },
       { name: 'Category', schema: CategorySchema },
+      { name: 'ProductAlert', schema: ProductAlertSchema },
     ]),
     MulterModule.register({
       storage: diskStorage({
@@ -36,6 +39,7 @@ import { ExchangeRateService } from '../../services/exchange-rate.service';
       },
     }),
     AuthModule,
+    MobileModule,
   ],
   controllers: [ProductsController],
   providers: [ProductsService, ExchangeRateService],
