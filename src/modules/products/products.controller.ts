@@ -11,6 +11,8 @@ import {
   Request,
   UseInterceptors,
   UploadedFile,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,6 +23,7 @@ import {
   ApiConsumes,
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
 import { ProductsService } from './products.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
@@ -53,6 +56,52 @@ export class ProductsController {
     const userRole: string = req?.user?.role ?? 'customer';
     const userId: string | undefined = req?.user?.id;
     return this.productsService.findAll(query, userRole, userId, currency);
+  }
+
+  @Get('alerts/my')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get my product alert subscriptions' })
+  @ApiResponse({ status: 200, description: 'List of alert subscriptions' })
+  async getMyAlerts(@Request() req: AuthedRequest) {
+    return this.productsService.getMyAlerts(req.user.id);
+  }
+
+  @Get(':id/alerts/status')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get alert subscription status for a product' })
+  @ApiResponse({ status: 200, description: 'Alert subscription status' })
+  async getAlertStatus(@Param('id') id: string, @Request() req: AuthedRequest) {
+    return this.productsService.getAlertStatus(id, req.user.id);
+  }
+
+  @Post(':id/alerts')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Subscribe to a product alert' })
+  @ApiResponse({ status: 201, description: 'Alert subscription created' })
+  async subscribeAlert(
+    @Param('id') id: string,
+    @Body() body: { type: 'price_drop' | 'back_in_stock'; targetPrice?: number },
+    @Request() req: AuthedRequest,
+  ) {
+    return this.productsService.subscribeAlert(id, req.user.id, body.type, body.targetPrice);
+  }
+
+  @Delete(':id/alerts/:type')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Unsubscribe from a product alert' })
+  @ApiResponse({ status: 200, description: 'Alert removed' })
+  async unsubscribeAlert(
+    @Param('id') id: string,
+    @Param('type') type: 'price_drop' | 'back_in_stock',
+    @Request() req: AuthedRequest,
+  ) {
+    return this.productsService.unsubscribeAlert(id, req.user.id, type);
   }
 
   @Get(':id')

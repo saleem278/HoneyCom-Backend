@@ -3,14 +3,18 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Product, IProduct } from '../../models/Product.model';
 import { Category, ICategory } from '../../models/Category.model';
+import { IProductAlert } from '../../models/ProductAlert.model';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
+import { MobileService } from '../mobile/mobile.service';
 
 @Injectable()
 export class ProductsService {
   constructor(
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Category') private categoryModel: Model<ICategory>,
+    @InjectModel('ProductAlert') private productAlertModel: Model<IProductAlert>,
     private exchangeRateService: ExchangeRateService,
+    private mobileService: MobileService,
   ) {}
 
   /**
@@ -351,11 +355,26 @@ export class ProductsService {
       this.validateImageUrls(filteredUpdateData.images);
     }
 
+    const oldPrice = product.price;
+    const oldInventory = product.inventory;
+
     const updatedProduct = await this.productModel.findByIdAndUpdate(
       id,
       filteredUpdateData,
       { new: true, runValidators: true }
     ).populate('category', 'name slug').populate('seller', 'name email');
+
+    // Fire alert notifications asynchronously — don't block the response.
+    if (updatedProduct) {
+      const newPrice = updatedProduct.price;
+      const newInventory = updatedProduct.inventory;
+      if (newPrice < oldPrice) {
+        this.triggerPriceDropAlerts(id, oldPrice, newPrice, updatedProduct.name).catch(() => {});
+      }
+      if (oldInventory === 0 && newInventory > 0) {
+        this.triggerBackInStockAlerts(id, updatedProduct.name).catch(() => {});
+      }
+    }
 
     return {
       success: true,
@@ -537,8 +556,13 @@ export class ProductsService {
       throw new BadRequestException('Inventory cannot be negative');
     }
 
+    const oldInventory = product.inventory;
     product.inventory = inventory;
     await product.save();
+
+    if (oldInventory === 0 && inventory > 0) {
+      this.triggerBackInStockAlerts(id, product.name).catch(() => {});
+    }
 
     return {
       success: true,
@@ -563,5 +587,90 @@ export class ProductsService {
       success: true,
       message: 'Product deleted successfully',
     };
+  }
+
+  // ── Product Alerts ────────────────────────────────────────────────────────
+
+  async subscribeAlert(productId: string, userId: string, type: 'price_drop' | 'back_in_stock', targetPrice?: number) {
+    const product = await this.productModel.findById(productId);
+    if (!product) throw new NotFoundException('Product not found');
+
+    await this.productAlertModel.findOneAndUpdate(
+      { user: userId, product: productId, type },
+      { active: true, targetPrice: targetPrice ?? undefined, notifiedAt: undefined },
+      { upsert: true, new: true },
+    );
+
+    return { success: true, message: 'Alert subscription saved' };
+  }
+
+  async unsubscribeAlert(productId: string, userId: string, type: 'price_drop' | 'back_in_stock') {
+    await this.productAlertModel.findOneAndDelete({ user: userId, product: productId, type });
+    return { success: true, message: 'Alert removed' };
+  }
+
+  async getMyAlerts(userId: string) {
+    const alerts = await this.productAlertModel
+      .find({ user: userId, active: true })
+      .populate('product', 'name price images inventory')
+      .sort({ createdAt: -1 })
+      .limit(100);
+    return { success: true, alerts };
+  }
+
+  async getAlertStatus(productId: string, userId: string) {
+    const alerts = await this.productAlertModel.find({ user: userId, product: productId, active: true });
+    return {
+      success: true,
+      priceDrop: alerts.some(a => a.type === 'price_drop'),
+      backInStock: alerts.some(a => a.type === 'back_in_stock'),
+    };
+  }
+
+  private async triggerPriceDropAlerts(productId: string, oldPrice: number, newPrice: number, productName: string) {
+    const alerts = await this.productAlertModel.find({
+      product: productId,
+      type: 'price_drop',
+      active: true,
+      $or: [{ targetPrice: { $exists: false } }, { targetPrice: null }, { targetPrice: { $gte: newPrice } }],
+    });
+
+    await Promise.all(
+      alerts.map(async alert => {
+        try {
+          await this.mobileService.sendPushNotification(
+            alert.user.toString(),
+            '💰 Price Drop Alert!',
+            `${productName} dropped from ₹${oldPrice.toLocaleString('en-IN')} to ₹${newPrice.toLocaleString('en-IN')}`,
+            'promotion',
+            { type: 'price_drop', productId },
+          );
+          await this.productAlertModel.findByIdAndUpdate(alert._id, { notifiedAt: new Date() });
+        } catch {}
+      }),
+    );
+  }
+
+  private async triggerBackInStockAlerts(productId: string, productName: string) {
+    const alerts = await this.productAlertModel.find({
+      product: productId,
+      type: 'back_in_stock',
+      active: true,
+    });
+
+    await Promise.all(
+      alerts.map(async alert => {
+        try {
+          await this.mobileService.sendPushNotification(
+            alert.user.toString(),
+            '🎉 Back in Stock!',
+            `${productName} is now available again. Grab it before it sells out!`,
+            'promotion',
+            { type: 'back_in_stock', productId },
+          );
+          await this.productAlertModel.findByIdAndUpdate(alert._id, { active: false, notifiedAt: new Date() });
+        } catch {}
+      }),
+    );
   }
 }
