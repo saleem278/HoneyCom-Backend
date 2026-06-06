@@ -1,6 +1,6 @@
 import { Controller, Get, Put, Body, UseGuards, Request, Param, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { StoresService } from './stores.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -81,6 +81,45 @@ export class StoresController {
   @ApiResponse({ status: 200, description: 'Settings updated' })
   async updateStoreSettings(@Request() req: AuthedRequest, @Body() settings: any) {
     return this.storesService.updateStoreSettings(req.user.id, settings);
+  }
+
+  @Get('admin')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({ summary: 'Admin: list all stores with search and status filter' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'status', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Paginated list of all stores' })
+  async adminListStores(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.storesService.adminListStores({
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      search,
+      status,
+    });
+  }
+
+  @Put('admin/:id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @ApiOperation({ summary: 'Admin: activate or deactivate a store' })
+  @ApiResponse({ status: 200, description: 'Store status updated' })
+  async adminUpdateStoreStatus(
+    @Param('id') id: string,
+    @Body() body: { status: 'active' | 'inactive' },
+  ) {
+    return this.storesService.adminUpdateStoreStatus(id, body.status);
   }
 
   @Get(':id')
