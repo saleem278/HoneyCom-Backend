@@ -152,4 +152,55 @@ export class EmailService {
       html: `<h2>Product not approved</h2><p>Your product <strong>${this.h(productName)}</strong> was not approved.</p>${reasonBlock}`,
     });
   }
+
+  /** Send a contact-form submission to the configured support email. */
+  async sendContactEmail(opts: {
+    fromName: string;
+    fromEmail: string;
+    subject: string;
+    message: string;
+  }): Promise<void> {
+    const siteName = await this.siteName();
+    // Resolve destination from DB settings, fall back to SMTP_USER
+    const settings = await this.settingsModel.findOne({ key: 'supportEmail' }).lean();
+    const to: string = (settings?.value as string) || this.configService.get<string>('SMTP_USER') || '';
+    if (!to) throw new Error('No support email configured');
+    await this.sendEmail({
+      to,
+      subject: `[${siteName} Contact] ${this.h(opts.subject)}`,
+      html: `
+        <h2>New Contact Message — ${this.h(siteName)}</h2>
+        <p><strong>From:</strong> ${this.h(opts.fromName)} &lt;${this.h(opts.fromEmail)}&gt;</p>
+        <p><strong>Subject:</strong> ${this.h(opts.subject)}</p>
+        <hr/>
+        <p style="white-space:pre-wrap">${this.h(opts.message)}</p>
+      `,
+      text: `From: ${opts.fromName} <${opts.fromEmail}>\nSubject: ${opts.subject}\n\n${opts.message}`,
+    });
+  }
+
+  /** Notify a seller when a customer asks a question about their product. */
+  async sendProductQuestionEmail(opts: {
+    sellerEmail: string;
+    sellerName: string;
+    productName: string;
+    productId: string;
+    question: string;
+    customerEmail?: string;
+  }): Promise<void> {
+    const siteName = await this.siteName();
+    await this.sendEmail({
+      to: opts.sellerEmail,
+      subject: `New question on your product: ${this.h(opts.productName)}`,
+      html: `
+        <h2>New Customer Question — ${this.h(siteName)}</h2>
+        <p>A customer has asked a question about your product <strong>${this.h(opts.productName)}</strong>.</p>
+        <blockquote style="border-left:4px solid #f97316;margin:12px 0;padding:8px 16px;background:#fff7ed">
+          <em>${this.h(opts.question)}</em>
+        </blockquote>
+        ${opts.customerEmail ? `<p><strong>Customer email:</strong> ${this.h(opts.customerEmail)}</p>` : ''}
+        <p>Please log in to your seller portal to answer this question.</p>
+      `,
+    });
+  }
 }

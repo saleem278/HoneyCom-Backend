@@ -163,4 +163,17 @@ export class ProductsController {
   async remove(@Param('id') id: string, @Request() req: AuthedRequest) {
     return this.productsService.remove(id, req.user.id, req.user.role);
   }
+
+  @Post(':id/questions')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Ask a question about a product' })
+  @ApiResponse({ status: 200, description: 'Question submitted' })
+  async askQuestion(
+    @Param('id') id: string,
+    @Body() body: { question: string; customerEmail?: string },
+  ) {
+    return this.productsService.askQuestion(id, body.question, body.customerEmail);
+  }
 }
+

@@ -4,8 +4,10 @@ import { Model, Types } from 'mongoose';
 import { Product, IProduct } from '../../models/Product.model';
 import { Category, ICategory } from '../../models/Category.model';
 import { IProductAlert } from '../../models/ProductAlert.model';
+import { ISettings } from '../../models/Settings.model';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { MobileService } from '../mobile/mobile.service';
+import { EmailService } from '../../services/email.service';
 
 @Injectable()
 export class ProductsService {
@@ -13,8 +15,10 @@ export class ProductsService {
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Category') private categoryModel: Model<ICategory>,
     @InjectModel('ProductAlert') private productAlertModel: Model<IProductAlert>,
+    @InjectModel('Settings') private settingsModel: Model<ISettings>,
     private exchangeRateService: ExchangeRateService,
     private mobileService: MobileService,
+    private emailService: EmailService,
   ) {}
 
   /**
@@ -587,6 +591,39 @@ export class ProductsService {
       success: true,
       message: 'Product deleted successfully',
     };
+  }
+
+  // ── Product Q&A ─────────────────────────────────────────────────────────
+
+  async askQuestion(id: string, question: string, customerEmail?: string) {
+    const trimmed = question?.trim();
+    if (!trimmed) throw new BadRequestException('Question text is required');
+
+    const product = await this.productModel
+      .findById(id)
+      .populate({ path: 'seller', select: 'name email', strictPopulate: false })
+      .lean();
+    if (!product) throw new NotFoundException('Product not found');
+
+    // Append the question (unanswered) to the product's qna array
+    await this.productModel.findByIdAndUpdate(id, {
+      $push: { qna: { q: trimmed, a: '' } },
+    });
+
+    // Fire email notification to seller asynchronously — don't block response
+    const seller = product.seller as any;
+    if (seller?.email) {
+      this.emailService.sendProductQuestionEmail({
+        sellerEmail: seller.email,
+        sellerName: seller.name || 'Seller',
+        productName: product.name,
+        productId: id,
+        question: trimmed,
+        customerEmail,
+      }).catch(() => {});
+    }
+
+    return { success: true, message: 'Your question has been submitted.' };
   }
 
   // ── Product Alerts ────────────────────────────────────────────────────────

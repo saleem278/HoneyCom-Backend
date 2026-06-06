@@ -8,9 +8,11 @@ import { ProductsService } from './products.service';
 import { Product, ProductSchema } from '../../models/Product.model';
 import { Category, CategorySchema } from '../../models/Category.model';
 import { ProductAlert, ProductAlertSchema } from '../../models/ProductAlert.model';
+import { SettingsSchema } from '../../models/Settings.model';
 import { AuthModule } from '../auth/auth.module';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { MobileModule } from '../mobile/mobile.module';
+import { EmailService } from '../../services/email.service';
 
 @Module({
   imports: [
@@ -18,6 +20,7 @@ import { MobileModule } from '../mobile/mobile.module';
       { name: 'Product', schema: ProductSchema },
       { name: 'Category', schema: CategorySchema },
       { name: 'ProductAlert', schema: ProductAlertSchema },
+      { name: 'Settings', schema: SettingsSchema },
     ]),
     MulterModule.register({
       storage: diskStorage({
@@ -42,8 +45,9 @@ import { MobileModule } from '../mobile/mobile.module';
     MobileModule,
   ],
   controllers: [ProductsController],
-  providers: [ProductsService, ExchangeRateService],
+  providers: [ProductsService, ExchangeRateService, EmailService],
   exports: [ProductsService],
 })
 export class ProductsModule {}
+
 
