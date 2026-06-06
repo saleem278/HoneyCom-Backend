@@ -19,19 +19,21 @@ export class OptionalJwtAuthGuard extends AuthGuard('jwt') {
   }
 
   handleRequest(err: any, user: any, info: any) {
-    // If NO token was provided, treat as unauthenticated guest (allow through).
-    // If a token WAS provided but is invalid/expired, reject — a client that
-    // deliberately sends a token expects authentication, and a forged/stale
-    // token should never silently downgrade to guest access.
+    // If NO token was provided → guest access (allow through).
+    // If token is EXPIRED → also treat as guest; the client will clear it on
+    //   the next 401 from a protected endpoint. Blocking expired tokens here
+    //   causes 401s on public endpoints (banners, products) during token rollover.
+    // If token is FORGED / malformed (JsonWebTokenError) → reject.
     if (err) throw err;
     if (!user) {
-      // info.name === 'JsonWebTokenError' | 'TokenExpiredError' when a token
-      // was supplied but failed verification. Distinguish from "no token" case.
-      if (info && info.name && info.name !== 'No auth token') {
-        const { UnauthorizedException } = require('@nestjs/common');
-        throw new UnauthorizedException(info.message || 'Invalid token');
+      const infoName: string = info?.name ?? '';
+      const isExpired = infoName === 'TokenExpiredError';
+      const isNoToken = !infoName || infoName === 'No auth token';
+      if (isExpired || isNoToken) {
+        return null; // Guest access
       }
-      return null; // Genuinely no token → guest
+      const { UnauthorizedException } = require('@nestjs/common');
+      throw new UnauthorizedException(info.message || 'Invalid token');
     }
     return user;
   }
