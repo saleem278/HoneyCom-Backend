@@ -1,5 +1,5 @@
 import { Controller, Get, Put, Param, Body, UseGuards, Request, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { SellerService } from './seller.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -23,11 +23,21 @@ export class SellerController {
 
   @Get('products')
   @ApiOperation({ summary: 'Get seller products' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'status', required: false, type: String })
   @ApiResponse({ status: 200, description: 'List of products' })
-  async getProducts(@Request() req: AuthedRequest, @Query('page') page?: string, @Query('limit') limit?: string) {
+  async getProducts(
+    @Request() req: AuthedRequest,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+  ) {
     const pageNum = parseInt(page || '', 10) || 1;
     const limitNum = parseInt(limit || '', 10) || 20;
-    return this.sellerService.getProducts(req.user.id, pageNum, limitNum);
+    return this.sellerService.getProducts(req.user.id, pageNum, limitNum, search, status);
   }
 
   @Get('orders')
