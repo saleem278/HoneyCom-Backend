@@ -59,6 +59,10 @@ export class ProductsService {
       } else {
         // Regular users only see approved products
         filter.status = 'approved';
+        // Allow browsing a specific seller's storefront
+        if (query.seller && String(query.seller).match(/^[0-9a-fA-F]{24}$/)) {
+          filter.seller = query.seller;
+        }
       }
 
       if (query.category) {
