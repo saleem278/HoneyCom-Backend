@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   Request,
 } from '@nestjs/common';
@@ -15,6 +16,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthedRequest } from '../../common/types/request.types';
@@ -143,6 +145,36 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'Wishlist cleared' })
   async clearWishlist(@Request() req: AuthedRequest) {
     return this.usersService.clearWishlist(req.user.id);
+  }
+
+  // -------- Wallet --------
+
+  @Get('wallet')
+  @ApiOperation({ summary: 'Get wallet balance and recent transactions' })
+  @ApiResponse({ status: 200, description: 'Wallet info retrieved' })
+  async getWallet(@Request() req: AuthedRequest) {
+    return this.usersService.getWallet(req.user.id);
+  }
+
+  @Post('wallet/topup')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Top up wallet balance' })
+  @ApiResponse({ status: 200, description: 'Wallet topped up successfully' })
+  async topupWallet(@Request() req: AuthedRequest, @Body() body: { amount: number }) {
+    return this.usersService.topup(req.user.id, body.amount);
+  }
+
+  @Get('wallet/transactions')
+  @ApiOperation({ summary: 'Get paginated wallet transaction history' })
+  @ApiResponse({ status: 200, description: 'Wallet transactions retrieved' })
+  async getWalletTransactions(
+    @Request() req: AuthedRequest,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = parseInt(page || '', 10) || 1;
+    const limitNum = parseInt(limit || '', 10) || 20;
+    return this.usersService.getWalletTransactions(req.user.id, pageNum, limitNum);
   }
 }
 
