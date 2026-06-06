@@ -167,13 +167,17 @@ export class ProductsController {
   @Post(':id/questions')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Ask a question about a product' })
   @ApiResponse({ status: 200, description: 'Question submitted' })
   async askQuestion(
     @Param('id') id: string,
     @Body() body: { question: string; customerEmail?: string },
+    @Request() req: any,
   ) {
-    return this.productsService.askQuestion(id, body.question, body.customerEmail);
+    // Prefer the verified email from the JWT over any client-supplied email.
+    const email = req.user?.email ?? body.customerEmail;
+    return this.productsService.askQuestion(id, body.question, email);
   }
 }
 

@@ -136,6 +136,7 @@ export class AuthController {
   }
 
   @Post('social-login')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Social login (Google/Facebook)' })
   @ApiBody({ type: SocialLoginDto })
   @ApiResponse({ status: 200, description: 'Social login successful' })
