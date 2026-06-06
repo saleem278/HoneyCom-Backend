@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
 import { AdminController } from './admin.controller';
@@ -15,6 +15,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { UsersModule } from '../users/users.module';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
+import { LoyaltyModule } from '../loyalty/loyalty.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { ExchangeRateService } from '../../services/exchange-rate.service';
     AuthModule,
     PaymentsModule,
     UsersModule,
+    forwardRef(() => LoyaltyModule),
   ],
   controllers: [AdminController],
   providers: [AdminService, EmailService, ExchangeRateService],

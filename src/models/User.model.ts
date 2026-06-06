@@ -20,6 +20,7 @@ export interface IUser extends Document {
   addresses: mongoose.Types.ObjectId[];
   paymentMethods: mongoose.Types.ObjectId[];
   walletBalance: number;
+  loyaltyPoints: number;
   wishlist?: mongoose.Types.ObjectId[];
   emailVerified: boolean;
   phoneVerified: boolean;
@@ -131,6 +132,11 @@ const UserSchema: Schema = new Schema(
       type: Number,
       default: 0,
       min: [0, 'Wallet balance cannot be negative'],
+    },
+    loyaltyPoints: {
+      type: Number,
+      default: 0,
+      min: [0, 'Loyalty points cannot be negative'],
     },
     wishlist: [
       {
