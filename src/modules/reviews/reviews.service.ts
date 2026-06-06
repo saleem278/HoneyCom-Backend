@@ -161,6 +161,25 @@ export class ReviewsService {
     };
   }
 
+  async findByUser(userId: string, page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [reviews, total] = await Promise.all([
+      this.reviewModel
+        .find({ user: userId })
+        .populate('product', 'name images slug price')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      this.reviewModel.countDocuments({ user: userId }),
+    ]);
+    return {
+      success: true,
+      reviews,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    };
+  }
+
   async markHelpful(reviewId: string, userId: string) {
     // Atomic $addToSet + $inc prevents the read-modify-write race condition
     // where two concurrent requests both pass the "already marked" check before
