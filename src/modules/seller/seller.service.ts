@@ -67,18 +67,28 @@ export class SellerService {
     };
   }
 
-  async getProducts(sellerId: string, page: number = 1, limit: number = 20) {
+  async getProducts(sellerId: string, page: number = 1, limit: number = 20, search?: string, status?: string) {
     const skip = (page - 1) * limit;
+    const filter: any = { seller: sellerId };
+    if (status && ['pending', 'approved', 'rejected', 'inactive'].includes(status)) {
+      filter.status = status;
+    }
+    if (search?.trim()) {
+      filter.$or = [
+        { name: { $regex: search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+        { sku: { $regex: search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
+      ];
+    }
     const products = await this.productModel
-      .find({ seller: sellerId })
+      .find(filter)
       .populate('category', 'name slug')
       .populate('seller', 'name email')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
-    
-    const total = await this.productModel.countDocuments({ seller: sellerId });
+
+    const total = await this.productModel.countDocuments(filter);
     
     return {
       success: true,
