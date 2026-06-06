@@ -34,6 +34,22 @@ export class ReviewsController {
     return this.reviewsService.findAll(productId);
   }
 
+  @Get('my')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get reviews written by the current user' })
+  async getMyReviews(
+    @Request() req: AuthedRequest,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.reviewsService.findByUser(
+      req.user.id,
+      parseInt(page || '', 10) || 1,
+      parseInt(limit || '', 10) || 20,
+    );
+  }
+
   @Get('product/:productId')
   @ApiOperation({ summary: 'Get reviews by product ID' })
   @ApiResponse({ status: 200, description: 'List of reviews for product' })
