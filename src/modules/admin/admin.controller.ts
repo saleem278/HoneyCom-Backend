@@ -1,6 +1,8 @@
 import { Controller, Get, Put, Delete, Param, Body, UseGuards, Request, Post, Query, Res, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AdminService } from './admin.service';
+import { UsersService } from '../users/users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -12,6 +14,7 @@ import {
   sessionCookieOptions,
   clearSessionCookieOptions,
 } from '../../common/utils/cookie-options';
+import { AdminWalletActionDto } from './dto/admin-wallet.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -19,7 +22,10 @@ import {
 @Roles('admin')
 @ApiBearerAuth('JWT-auth')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly usersService: UsersService,
+  ) {}
 
   @Get('dashboard')
   @ApiOperation({ summary: 'Get admin dashboard' })
@@ -304,6 +310,34 @@ export class AdminController {
     const showEveryone = viewAll === 'true';
     const limitNum = parseInt(limit || '', 10) || 50;
     return this.adminService.listImpersonations(req.user.id, showEveryone, limitNum);
+  }
+
+  // -------- Wallet management --------
+
+  @Post('users/:id/wallet/credit')
+  @Roles('admin', 'superadmin')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Admin: credit a user wallet' })
+  @ApiResponse({ status: 200, description: 'Wallet credited successfully' })
+  async adminCreditWallet(
+    @Request() req: AuthedRequest,
+    @Param('id') userId: string,
+    @Body() body: AdminWalletActionDto,
+  ) {
+    return this.usersService.adminCreditWallet(userId, body.amount, body.description, req.user.id);
+  }
+
+  @Post('users/:id/wallet/debit')
+  @Roles('admin', 'superadmin')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Admin: debit a user wallet' })
+  @ApiResponse({ status: 200, description: 'Wallet debited successfully' })
+  async adminDebitWallet(
+    @Request() req: AuthedRequest,
+    @Param('id') userId: string,
+    @Body() body: AdminWalletActionDto,
+  ) {
+    return this.usersService.adminDebitWallet(userId, body.amount, body.description, req.user.id);
   }
 }
 

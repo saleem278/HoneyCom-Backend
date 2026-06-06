@@ -19,6 +19,7 @@ export interface IUser extends Document {
   avatar?: string;
   addresses: mongoose.Types.ObjectId[];
   paymentMethods: mongoose.Types.ObjectId[];
+  walletBalance: number;
   wishlist?: mongoose.Types.ObjectId[];
   emailVerified: boolean;
   phoneVerified: boolean;
@@ -126,6 +127,11 @@ const UserSchema: Schema = new Schema(
         ref: 'PaymentMethod',
       },
     ],
+    walletBalance: {
+      type: Number,
+      default: 0,
+      min: [0, 'Wallet balance cannot be negative'],
+    },
     wishlist: [
       {
         type: Schema.Types.ObjectId,

@@ -1,10 +1,11 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import mongoose, { Model } from 'mongoose';
 import { User, IUser } from '../../models/User.model';
 import { Address, IAddress } from '../../models/Address.model';
 import { PaymentMethod, IPaymentMethod } from '../../models/PaymentMethod.model';
 import { Product, IProduct } from '../../models/Product.model';
+import { IWalletTransaction } from '../../models/WalletTransaction.model';
 import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
@@ -16,6 +17,7 @@ export class UsersService {
     @InjectModel('Address') private addressModel: Model<IAddress>,
     @InjectModel('PaymentMethod') private paymentMethodModel: Model<IPaymentMethod>,
     @InjectModel('Product') private productModel: Model<IProduct>,
+    @InjectModel('WalletTransaction') private walletTransactionModel: Model<IWalletTransaction>,
     private paymentsService: PaymentsService,
   ) {}
 
@@ -440,6 +442,233 @@ export class UsersService {
       success: true,
       message: 'Wishlist cleared',
     };
+  }
+
+  // -------- Wallet --------
+
+  async getWallet(userId: string) {
+    const user = await this.userModel.findById(userId).lean();
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const transactions = await this.walletTransactionModel
+      .find({ user: userId })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
+    return {
+      success: true,
+      wallet: {
+        balance: (user as any).walletBalance ?? 0,
+        transactions,
+      },
+    };
+  }
+
+  async getWalletTransactions(userId: string, page = 1, limit = 20) {
+    const skip = (page - 1) * limit;
+    const [transactions, total] = await Promise.all([
+      this.walletTransactionModel
+        .find({ user: userId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      this.walletTransactionModel.countDocuments({ user: userId }),
+    ]);
+
+    return {
+      success: true,
+      transactions,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    };
+  }
+
+  async topup(userId: string, amount: number) {
+    if (!amount || amount < 1 || amount > 50000) {
+      throw new BadRequestException('Top-up amount must be between 1 and 50000');
+    }
+
+    const session = await mongoose.startSession();
+    let result: any;
+    await session.withTransaction(async () => {
+      const user = await this.userModel
+        .findByIdAndUpdate(
+          userId,
+          { $inc: { walletBalance: amount } },
+          { new: true, session },
+        )
+        .lean();
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      const balanceAfter = (user as any).walletBalance ?? 0;
+
+      const [transaction] = await this.walletTransactionModel.create(
+        [
+          {
+            user: userId,
+            amount,
+            type: 'credit',
+            reason: 'topup',
+            description: `Wallet top-up of ${amount}`,
+            balanceAfter,
+          },
+        ],
+        { session },
+      );
+
+      result = { balance: balanceAfter, transaction };
+    });
+    session.endSession();
+
+    return { success: true, wallet: result };
+  }
+
+  async debitWallet(
+    userId: string,
+    amount: number,
+    reason: 'order_payment' | 'refund' | 'admin_debit',
+    description: string,
+    orderId?: string,
+  ) {
+    const session = await mongoose.startSession();
+    let result: any;
+    await session.withTransaction(async () => {
+      const user = await this.userModel.findById(userId).session(session);
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      const currentBalance = (user as any).walletBalance ?? 0;
+      if (currentBalance < amount) {
+        throw new BadRequestException('Insufficient wallet balance');
+      }
+
+      const updated = await this.userModel
+        .findByIdAndUpdate(
+          userId,
+          { $inc: { walletBalance: -amount } },
+          { new: true, session },
+        )
+        .lean();
+
+      const balanceAfter = (updated as any).walletBalance ?? 0;
+
+      const txData: any = {
+        user: userId,
+        amount,
+        type: 'debit',
+        reason,
+        description,
+        balanceAfter,
+      };
+      if (orderId) {
+        txData.orderId = orderId;
+      }
+
+      const [transaction] = await this.walletTransactionModel.create([txData], { session });
+      result = { balance: balanceAfter, transaction };
+    });
+    session.endSession();
+
+    return { success: true, wallet: result };
+  }
+
+  async adminCreditWallet(targetUserId: string, amount: number, description: string, adminId: string) {
+    if (!amount || amount <= 0) {
+      throw new BadRequestException('Credit amount must be greater than 0');
+    }
+
+    const session = await mongoose.startSession();
+    let result: any;
+    await session.withTransaction(async () => {
+      const user = await this.userModel
+        .findByIdAndUpdate(
+          targetUserId,
+          { $inc: { walletBalance: amount } },
+          { new: true, session },
+        )
+        .lean();
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      const balanceAfter = (user as any).walletBalance ?? 0;
+
+      const [transaction] = await this.walletTransactionModel.create(
+        [
+          {
+            user: targetUserId,
+            amount,
+            type: 'credit',
+            reason: 'admin_credit',
+            description: description || `Admin credit by ${adminId}`,
+            balanceAfter,
+          },
+        ],
+        { session },
+      );
+
+      result = { balance: balanceAfter, transaction };
+    });
+    session.endSession();
+
+    return { success: true, wallet: result };
+  }
+
+  async adminDebitWallet(targetUserId: string, amount: number, description: string, adminId: string) {
+    if (!amount || amount <= 0) {
+      throw new BadRequestException('Debit amount must be greater than 0');
+    }
+
+    const session = await mongoose.startSession();
+    let result: any;
+    await session.withTransaction(async () => {
+      const user = await this.userModel.findById(targetUserId).session(session);
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      const currentBalance = (user as any).walletBalance ?? 0;
+      if (currentBalance < amount) {
+        throw new BadRequestException('Insufficient wallet balance');
+      }
+
+      const updated = await this.userModel
+        .findByIdAndUpdate(
+          targetUserId,
+          { $inc: { walletBalance: -amount } },
+          { new: true, session },
+        )
+        .lean();
+
+      const balanceAfter = (updated as any).walletBalance ?? 0;
+
+      const [transaction] = await this.walletTransactionModel.create(
+        [
+          {
+            user: targetUserId,
+            amount,
+            type: 'debit',
+            reason: 'admin_debit',
+            description: description || `Admin debit by ${adminId}`,
+            balanceAfter,
+          },
+        ],
+        { session },
+      );
+
+      result = { balance: balanceAfter, transaction };
+    });
+    session.endSession();
+
+    return { success: true, wallet: result };
   }
 }
 

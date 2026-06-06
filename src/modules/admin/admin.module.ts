@@ -12,6 +12,7 @@ import { SettingsSchema } from '../../models/Settings.model';
 import { NotificationSchema } from '../../models/Notification.model';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { UsersModule } from '../users/users.module';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 
@@ -29,6 +30,7 @@ import { ExchangeRateService } from '../../services/exchange-rate.service';
     ConfigModule,
     AuthModule,
     PaymentsModule,
+    UsersModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, EmailService, ExchangeRateService],
