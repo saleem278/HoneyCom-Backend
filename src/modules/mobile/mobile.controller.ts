@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { MobileService } from './mobile.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthedRequest } from '../../common/types/request.types';
@@ -36,9 +36,15 @@ export class MobileController {
   // ========== NOTIFICATIONS ==========
   @Get('notifications')
   @ApiOperation({ summary: 'Get user notifications' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiResponse({ status: 200, description: 'List of notifications' })
-  async getNotifications(@Request() req: AuthedRequest, @Body() body?: { page?: number; limit?: number }) {
-    return this.mobileService.getNotifications(req.user.id, body?.page, body?.limit);
+  async getNotifications(
+    @Request() req: AuthedRequest,
+    @Query() query?: { page?: number; limit?: number },
+    @Body() body?: { page?: number; limit?: number },
+  ) {
+    return this.mobileService.getNotifications(req.user.id, query?.page ?? body?.page, query?.limit ?? body?.limit);
   }
 
   @Put('notifications/:id/read')
