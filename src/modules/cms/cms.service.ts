@@ -346,7 +346,7 @@ export class CmsService {
     const filter: any = {};
     if (location) filter.location = location;
     
-    const menus = await this.menuModel.find(filter).sort({ createdAt: -1 });
+    const menus = await this.menuModel.find(filter).sort({ createdAt: -1 }).limit(200);
     return { success: true, menus };
   }
 
@@ -397,7 +397,7 @@ export class CmsService {
 
   // ========== FORMS ==========
   async getForms() {
-    const forms = await this.formModel.find().sort({ createdAt: -1 });
+    const forms = await this.formModel.find().sort({ createdAt: -1 }).limit(200);
     return { success: true, forms };
   }
 
@@ -455,7 +455,7 @@ export class CmsService {
       throw new NotFoundException('Form not found');
     }
 
-    const submissions = await this.formSubmissionModel.find({ form: formId }).sort({ createdAt: -1 });
+    const submissions = await this.formSubmissionModel.find({ form: formId }).sort({ createdAt: -1 }).limit(500);
     return { success: true, submissions };
   }
 
@@ -517,7 +517,7 @@ export class CmsService {
 
   // ========== BLOG CATEGORIES ==========
   async getBlogCategories() {
-    const categories = await this.blogCategoryModel.find().populate('parent', 'name slug').sort({ name: 1 });
+    const categories = await this.blogCategoryModel.find().populate('parent', 'name slug').sort({ name: 1 }).limit(200);
     return { success: true, categories };
   }
 
@@ -595,8 +595,8 @@ export class CmsService {
   async generateSitemap() {
     const baseUrl = this.configService.get<string>('FRONTEND_URL')?.split(',')[0] || 'http://localhost:3000';
     
-    const pages = await this.pageModel.find({ status: 'published' }).select('slug updatedAt').lean();
-    const posts = await this.blogModel.find({ status: 'published' }).select('slug updatedAt').lean();
+    const pages = await this.pageModel.find({ status: 'published' }).select('slug updatedAt').limit(1000).lean();
+    const posts = await this.blogModel.find({ status: 'published' }).select('slug updatedAt').limit(1000).lean();
 
     const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">

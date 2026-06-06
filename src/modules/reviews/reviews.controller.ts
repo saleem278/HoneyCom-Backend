@@ -10,6 +10,7 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -28,6 +29,7 @@ export class ReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @Get()
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   @ApiOperation({ summary: 'Get all reviews' })
   @ApiResponse({ status: 200, description: 'List of reviews' })
   async findAll(@Query('productId') productId?: string) {
@@ -37,6 +39,7 @@ export class ReviewsController {
   @Get('my')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get reviews written by the current user' })
   async getMyReviews(
     @Request() req: AuthedRequest,
@@ -51,6 +54,7 @@ export class ReviewsController {
   }
 
   @Get('product/:productId')
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   @ApiOperation({ summary: 'Get reviews by product ID' })
   @ApiResponse({ status: 200, description: 'List of reviews for product' })
   async findByProduct(@Param('productId') productId: string) {
@@ -60,6 +64,7 @@ export class ReviewsController {
   @Post()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Create review' })
   @ApiResponse({ status: 201, description: 'Review created' })
   async create(@Request() req: AuthedRequest, @Body() body: { productId: string; rating: number; comment: string }) {
@@ -69,6 +74,7 @@ export class ReviewsController {
   @Post('product/:productId')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Create review for product' })
   @ApiResponse({ status: 201, description: 'Review created' })
   async createForProduct(
@@ -82,6 +88,7 @@ export class ReviewsController {
   @Put(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update review' })
   @ApiResponse({ status: 200, description: 'Review updated' })
   async update(@Param('id') id: string, @Request() req: AuthedRequest, @Body() updateData: any) {
@@ -91,6 +98,7 @@ export class ReviewsController {
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Delete review' })
   @ApiResponse({ status: 200, description: 'Review deleted' })
   async remove(@Param('id') id: string, @Request() req: AuthedRequest) {
@@ -100,6 +108,7 @@ export class ReviewsController {
   @Post(':id/helpful')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Mark review as helpful' })
   @ApiResponse({ status: 200, description: 'Review marked as helpful' })
   async markHelpful(@Param('id') id: string, @Request() req: AuthedRequest) {
@@ -112,6 +121,7 @@ export class ReviewsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Admin: list all reviews with filters and pagination' })
   async adminListReviews(
     @Query('page') page?: string,
@@ -131,6 +141,7 @@ export class ReviewsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Admin: approve or reject a review' })
   async adminUpdateStatus(
     @Param('id') id: string,
@@ -143,6 +154,7 @@ export class ReviewsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Admin: delete any review' })
   async adminDelete(@Param('id') id: string) {
     return this.reviewsService.adminDelete(id);

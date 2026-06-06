@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Param, Body, Query, UseGuards, Request } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { DisputesService } from './disputes.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -15,6 +16,7 @@ export class DisputesController {
 
   @Post()
   @Roles('customer')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Create a new dispute' })
   @ApiResponse({ status: 201, description: 'Dispute created' })
   async create(@Request() req: AuthedRequest, @Body() disputeData: any) {
@@ -22,6 +24,7 @@ export class DisputesController {
   }
 
   @Get()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get all disputes (filtered by user role)' })
   @ApiResponse({ status: 200, description: 'List of disputes' })
   async findAll(@Request() req: AuthedRequest, @Query() filters: any) {
@@ -29,6 +32,7 @@ export class DisputesController {
   }
 
   @Get(':id')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get dispute by ID' })
   @ApiResponse({ status: 200, description: 'Dispute details' })
   async findOne(@Param('id') id: string, @Request() req: AuthedRequest) {
@@ -37,6 +41,7 @@ export class DisputesController {
 
   @Put(':id/resolve')
   @Roles('admin')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Resolve a dispute (admin only)' })
   @ApiResponse({ status: 200, description: 'Dispute resolved' })
   async resolve(@Param('id') id: string, @Request() req: AuthedRequest, @Body() resolutionData: any) {
@@ -45,6 +50,7 @@ export class DisputesController {
 
   @Put(':id/status')
   @Roles('admin')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update dispute status (admin only)' })
   @ApiResponse({ status: 200, description: 'Dispute status updated' })
   async updateStatus(@Param('id') id: string, @Request() req: AuthedRequest, @Body() body: { status: string }) {
@@ -52,6 +58,7 @@ export class DisputesController {
   }
 
   @Put(':id/close')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Close a resolved dispute' })
   @ApiResponse({ status: 200, description: 'Dispute closed' })
   async close(@Param('id') id: string, @Request() req: AuthedRequest) {

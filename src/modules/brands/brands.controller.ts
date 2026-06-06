@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { BrandsService } from './brands.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -13,6 +14,7 @@ export class BrandsController {
 
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   @ApiOperation({ summary: 'Get all brands' })
   @ApiResponse({ status: 200, description: 'List of brands' })
   async findAll() {
@@ -21,6 +23,7 @@ export class BrandsController {
 
   @Get('slug/:slug')
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   @ApiOperation({ summary: 'Get brand by slug' })
   @ApiResponse({ status: 200, description: 'Brand details' })
   async findBySlug(@Param('slug') slug: string) {
@@ -29,6 +32,7 @@ export class BrandsController {
 
   @Get(':id')
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   @ApiOperation({ summary: 'Get brand by ID' })
   @ApiResponse({ status: 200, description: 'Brand details' })
   async findOne(@Param('id') id: string) {
@@ -39,6 +43,7 @@ export class BrandsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Create brand' })
   @ApiResponse({ status: 201, description: 'Brand created' })
   async create(@Body() brandData: any) {
@@ -49,6 +54,7 @@ export class BrandsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update brand' })
   @ApiResponse({ status: 200, description: 'Brand updated' })
   async update(@Param('id') id: string, @Body() updateData: any) {
@@ -59,6 +65,7 @@ export class BrandsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Delete brand' })
   @ApiResponse({ status: 200, description: 'Brand deleted' })
   async delete(@Param('id') id: string) {

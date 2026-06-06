@@ -29,6 +29,7 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get('profile')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get user profile' })
   @ApiResponse({ status: 200, description: 'User profile retrieved' })
   async getProfile(@Request() req: AuthedRequest) {
@@ -36,6 +37,7 @@ export class UsersController {
   }
 
   @Put('profile')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update user profile' })
   @ApiResponse({ status: 200, description: 'Profile updated successfully' })
   async updateProfile(@Request() req: AuthedRequest, @Body() updateData: any) {
@@ -43,6 +45,7 @@ export class UsersController {
   }
 
   @Get('addresses')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get user addresses' })
   @ApiResponse({ status: 200, description: 'List of addresses' })
   async getAddresses(@Request() req: AuthedRequest) {
@@ -50,6 +53,7 @@ export class UsersController {
   }
 
   @Post('addresses')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Add new address' })
   @ApiResponse({ status: 201, description: 'Address added successfully' })
   async addAddress(@Request() req: AuthedRequest, @Body() addressData: any) {
@@ -57,6 +61,7 @@ export class UsersController {
   }
 
   @Put('addresses/:id')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update address' })
   @ApiResponse({ status: 200, description: 'Address updated successfully' })
   async updateAddress(
@@ -68,6 +73,7 @@ export class UsersController {
   }
 
   @Delete('addresses/:id')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Delete address' })
   @ApiResponse({ status: 200, description: 'Address deleted successfully' })
   async deleteAddress(@Request() req: AuthedRequest, @Param('id') addressId: string) {
@@ -75,6 +81,7 @@ export class UsersController {
   }
 
   @Get('payment-methods')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get user payment methods' })
   @ApiResponse({ status: 200, description: 'List of payment methods' })
   async getPaymentMethods(@Request() req: AuthedRequest) {
@@ -82,7 +89,8 @@ export class UsersController {
   }
 
   @Post('payment-methods')
-  @ApiOperation({ 
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({
     summary: 'Add payment method',
     description: 'Adds a payment method using Stripe payment method token. Card data should be tokenized via Stripe Elements before calling this endpoint.'
   })
@@ -102,6 +110,7 @@ export class UsersController {
   }
 
   @Put('payment-methods/:id')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update payment method' })
   @ApiResponse({ status: 200, description: 'Payment method updated successfully' })
   async updatePaymentMethod(
@@ -113,6 +122,7 @@ export class UsersController {
   }
 
   @Delete('payment-methods/:id')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Delete payment method' })
   @ApiResponse({ status: 200, description: 'Payment method deleted successfully' })
   async deletePaymentMethod(@Request() req: AuthedRequest, @Param('id') paymentMethodId: string) {
@@ -120,6 +130,7 @@ export class UsersController {
   }
 
   @Get('wishlist')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get user wishlist' })
   @ApiResponse({ status: 200, description: 'User wishlist' })
   async getWishlist(@Request() req: AuthedRequest) {
@@ -127,6 +138,7 @@ export class UsersController {
   }
 
   @Post('wishlist')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Add product to wishlist' })
   @ApiResponse({ status: 200, description: 'Product added to wishlist' })
   async addToWishlist(@Request() req: AuthedRequest, @Body() body: { productId: string }) {
@@ -134,6 +146,7 @@ export class UsersController {
   }
 
   @Delete('wishlist/:productId')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Remove product from wishlist' })
   @ApiResponse({ status: 200, description: 'Product removed from wishlist' })
   async removeFromWishlist(@Request() req: AuthedRequest, @Param('productId') productId: string) {
@@ -141,6 +154,7 @@ export class UsersController {
   }
 
   @Delete('wishlist')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Clear wishlist' })
   @ApiResponse({ status: 200, description: 'Wishlist cleared' })
   async clearWishlist(@Request() req: AuthedRequest) {
@@ -150,6 +164,7 @@ export class UsersController {
   // -------- Wallet --------
 
   @Get('wallet')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get wallet balance and recent transactions' })
   @ApiResponse({ status: 200, description: 'Wallet info retrieved' })
   async getWallet(@Request() req: AuthedRequest) {
@@ -165,6 +180,7 @@ export class UsersController {
   }
 
   @Get('wallet/transactions')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get paginated wallet transaction history' })
   @ApiResponse({ status: 200, description: 'Wallet transactions retrieved' })
   async getWalletTransactions(
