@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Product, IProduct } from '../../models/Product.model';
 import { Order, IOrder } from '../../models/Order.model';
 import { User, IUser } from '../../models/User.model';
 import { assertOrderTransition } from '../orders/order-status';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 
 @Injectable()
 export class SellerService {
@@ -12,6 +13,7 @@ export class SellerService {
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Order') private orderModel: Model<IOrder>,
     @InjectModel('User') private userModel: Model<IUser>,
+    @Optional() private readonly loyaltyService?: LoyaltyService,
   ) {}
 
   async getDashboard(sellerId: string) {
@@ -238,6 +240,16 @@ export class SellerService {
       order.carrier = updateData.carrier;
     }
     await order.save();
+
+    // Fire-and-forget: award loyalty points when order is delivered.
+    if (order.status === 'delivered' && this.loyaltyService) {
+      const customerId = order.customer?.toString();
+      if (customerId) {
+        this.loyaltyService
+          .awardOrderPoints(customerId, order._id.toString(), order.total ?? 0)
+          .catch(() => undefined);
+      }
+    }
 
     return {
       success: true,

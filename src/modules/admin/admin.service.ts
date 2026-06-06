@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException, Optional } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import mongoose, { Model } from 'mongoose';
 import { JwtService } from '@nestjs/jwt';
@@ -16,6 +16,7 @@ import { EmailService } from '../../services/email.service';
 import { ExchangeRateService, Currency } from '../../services/exchange-rate.service';
 import { AuthService } from '../auth/auth.service';
 import { assertOrderTransition } from '../orders/order-status';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 
 @Injectable()
 export class AdminService {
@@ -33,6 +34,7 @@ export class AdminService {
     private jwtService: JwtService,
     private authService: AuthService,
     private exchangeRateService: ExchangeRateService,
+    @Optional() private readonly loyaltyService?: LoyaltyService,
   ) {}
 
   private convertOrderCurrency(order: any): any {
@@ -846,6 +848,17 @@ export class AdminService {
     if (data.note !== undefined) update.note = data.note;
 
     const updated = await this.orderModel.findByIdAndUpdate(id, update, { new: true });
+
+    // Award loyalty points when admin marks an order delivered.
+    if (data.status === 'delivered' && this.loyaltyService) {
+      const customerId = order.customer?.toString();
+      if (customerId) {
+        this.loyaltyService
+          .awardOrderPoints(customerId, id, (order as any).total ?? 0)
+          .catch(() => undefined);
+      }
+    }
+
     return { success: true, order: updated };
   }
 
