@@ -182,6 +182,46 @@ export class StoresService {
     };
   }
 
+  async adminListStores(params: { page?: number; limit?: number; search?: string; status?: string }) {
+    const query: Record<string, unknown> = {};
+    if (params.status && ['active', 'inactive'].includes(params.status)) {
+      query.status = params.status;
+    }
+    if (params.search?.trim()) {
+      const safe = params.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
+      query.$or = [
+        { storeName: { $regex: safe, $options: 'i' } },
+        { slug: { $regex: safe, $options: 'i' } },
+      ];
+    }
+    const page = Math.max(1, Number(params.page) || 1);
+    const limit = Math.min(Math.max(1, Number(params.limit) || 20), 100);
+    const skip = (page - 1) * limit;
+    const [stores, total] = await Promise.all([
+      this.storeModel
+        .find(query)
+        .populate('seller', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      this.storeModel.countDocuments(query),
+    ]);
+    return { success: true, stores, pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
+  }
+
+  async adminUpdateStoreStatus(id: string, status: 'active' | 'inactive') {
+    if (!isValidObjectId(id)) {
+      throw new NotFoundException('Store not found');
+    }
+    const store = await this.storeModel
+      .findByIdAndUpdate(id, { status }, { new: true })
+      .populate('seller', 'name email');
+    if (!store) {
+      throw new NotFoundException('Store not found');
+    }
+    return { success: true, store };
+  }
+
   async updateStoreSettings(sellerId: string, settings: any) {
     const store = await this.storeModel.findOne({ seller: sellerId });
     if (!store) {
