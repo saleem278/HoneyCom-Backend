@@ -537,16 +537,19 @@ export class OrdersService {
           const settingRow = await this.settingsModel.findOne({ key: 'referral.referrerBonusPts' }).lean() as any;
           const bonusPts = settingRow ? (parseInt(settingRow.value, 10) || 100) : 100;
 
-          const referrer = await this.userModel.findOne({ referralCode: referralCodeFromCart });
-          if (referrer) {
-            referrer.loyaltyPoints = (referrer.loyaltyPoints || 0) + bonusPts;
-            if (!referrer.referralStats) {
-              referrer.referralStats = { usedCount: 0, bonusEarned: 0 };
-            }
-            referrer.referralStats.usedCount += 1;
-            referrer.referralStats.bonusEarned += bonusPts;
-            await referrer.save();
-          }
+          // Atomic increment so concurrent referral credits can't clobber each
+          // other via read-then-write. `$inc` creates the nested referralStats
+          // fields on first use, so no separate default-initialization is needed.
+          await this.userModel.updateOne(
+            { referralCode: referralCodeFromCart },
+            {
+              $inc: {
+                loyaltyPoints: bonusPts,
+                'referralStats.usedCount': 1,
+                'referralStats.bonusEarned': bonusPts,
+              },
+            },
+          );
 
           // Stamp the referee so they can't reuse another referral code
           await this.userModel.updateOne(
