@@ -568,38 +568,13 @@ export class OrdersService {
       await cart.save({ session });
     }
 
-    // Credit referrer outside transaction — a DB failure here should not roll back the order
+    // Credit referrer outside transaction — a DB failure here should not roll
+    // back the order. For Razorpay orders the cart-clear (and thus the credit)
+    // is deferred to the payment-success webhook; see
+    // updatePaymentStatusByRazorpayOrderId, which calls creditReferral once
+    // payment is confirmed. COD/PayPal credit immediately here.
     if (referralCodeFromCart && !deferCartClear) {
-      setImmediate(async () => {
-        try {
-          const settingRow = await this.settingsModel.findOne({ key: 'referral.referrerBonusPts' }).lean() as any;
-          const bonusPts = settingRow ? (parseInt(settingRow.value, 10) || 100) : 100;
-
-          // Atomic increment so concurrent referral credits can't clobber each
-          // other via read-then-write. `$inc` creates the nested referralStats
-          // fields on first use, so no separate default-initialization is needed.
-          await this.userModel.updateOne(
-            { referralCode: referralCodeFromCart },
-            {
-              $inc: {
-                loyaltyPoints: bonusPts,
-                'referralStats.usedCount': 1,
-                'referralStats.bonusEarned': bonusPts,
-              },
-            },
-          );
-
-          // Stamp the referee so they can't reuse another referral code
-          await this.userModel.updateOne(
-            { _id: userId, referralCodeUsed: { $exists: false } },
-            { $set: { referralCodeUsed: referralCodeFromCart } },
-          );
-        } catch (refErr: any) {
-          this.logger.warn(
-            `Referral post-order processing failed for code ${referralCodeFromCart}: ${refErr?.message || refErr}`,
-          );
-        }
-      });
+      this.creditReferral(referralCodeFromCart, userId);
     }
 
     // Send confirmation email outside the transaction — SMTP is not
@@ -1026,6 +1001,48 @@ export class OrdersService {
   }
 
   /**
+   * Credit a referrer their bonus points and stamp the referee as having used
+   * a code. Fire-and-forget (via setImmediate) so a referral-bookkeeping
+   * failure never rolls back or blocks a paid order. Called from two places:
+   *   - order create, for COD/PayPal (immediate, non-deferred) orders, and
+   *   - the Razorpay payment-success webhook, once payment is confirmed.
+   * The referee stamp is guarded by `referralCodeUsed: { $exists: false }`, so
+   * it's safe against the webhook firing more than once.
+   */
+  private creditReferral(referralCode: string, refereeUserId: string): void {
+    setImmediate(async () => {
+      try {
+        const settingRow = await this.settingsModel.findOne({ key: 'referral.referrerBonusPts' }).lean() as any;
+        const bonusPts = settingRow ? (parseInt(settingRow.value, 10) || 100) : 100;
+
+        // Atomic increment so concurrent referral credits can't clobber each
+        // other via read-then-write. `$inc` creates the nested referralStats
+        // fields on first use, so no separate default-initialization is needed.
+        await this.userModel.updateOne(
+          { referralCode },
+          {
+            $inc: {
+              loyaltyPoints: bonusPts,
+              'referralStats.usedCount': 1,
+              'referralStats.bonusEarned': bonusPts,
+            },
+          },
+        );
+
+        // Stamp the referee so they can't reuse another referral code.
+        await this.userModel.updateOne(
+          { _id: refereeUserId, referralCodeUsed: { $exists: false } },
+          { $set: { referralCodeUsed: referralCode } },
+        );
+      } catch (refErr: any) {
+        this.logger.warn(
+          `Referral post-order processing failed for code ${referralCode}: ${refErr?.message || refErr}`,
+        );
+      }
+    });
+  }
+
+  /**
    * Update order payment status by Razorpay order ID — called by webhook handler.
    */
   async updatePaymentStatusByRazorpayOrderId(
@@ -1071,14 +1088,25 @@ export class OrdersService {
     );
 
     if (paymentStatus === 'paid') {
-      // Now that payment is confirmed, clear the user's cart.
+      // Now that payment is confirmed, clear the user's cart — and credit any
+      // referral. For Razorpay the credit is deferred to here (order create
+      // skips it because the cart-clear is deferred), so without this an online
+      // payment would never credit the referrer or stamp the referee. Capture
+      // the referral code BEFORE clearing the cart. The idempotency guard above
+      // ensures this runs at most once per order.
       try {
         const cart = await this.cartModel.findOne({ user: order.customer });
         if (cart) {
+          const referralCode = cart.referralCode;
           cart.items = [];
           cart.couponCode = undefined;
           cart.couponDiscount = undefined;
+          cart.referralCode = undefined;
+          cart.referralDiscount = undefined;
           await cart.save();
+          if (referralCode) {
+            this.creditReferral(referralCode, this.extractCustomerId(order.customer));
+          }
         }
       } catch (err: any) {
         this.logger.warn(
