@@ -21,6 +21,7 @@ import {
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
+import { CreateOrderDto } from './dto/create-order.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -39,7 +40,7 @@ export class OrdersController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Create new order' })
   @ApiResponse({ status: 201, description: 'Order created successfully' })
-  async create(@Request() req: AuthedRequest, @Body() orderData: any, @Currency() currency: string) {
+  async create(@Request() req: AuthedRequest, @Body() orderData: CreateOrderDto, @Currency() currency: string) {
     // Override currency from body with header currency (header takes priority)
     orderData.currency = currency;
     return this.ordersService.create(req.user.id, orderData);
