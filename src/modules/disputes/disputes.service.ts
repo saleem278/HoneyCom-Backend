@@ -6,6 +6,7 @@ import { Order, IOrder } from '../../models/Order.model';
 import { User, IUser } from '../../models/User.model';
 import { Product, IProduct } from '../../models/Product.model';
 import { PaymentsService } from '../payments/payments.service';
+import { EmailService } from '../../services/email.service';
 
 @Injectable()
 export class DisputesService {
@@ -15,6 +16,7 @@ export class DisputesService {
     @InjectModel('User') private userModel: Model<IUser>,
     @InjectModel('Product') private productModel: Model<IProduct>,
     private paymentsService: PaymentsService,
+    private emailService: EmailService,
   ) {}
 
   async create(userId: string, disputeData: any) {
@@ -61,9 +63,37 @@ export class DisputesService {
       status: 'open',
     });
 
+    const populated = await this.disputeModel.findById(dispute._id).populate('order customer seller');
+
+    // Notify all parties: customer confirmation, seller + admin alerts. Best-effort.
+    setImmediate(async () => {
+      try {
+        const cust: any = populated?.customer;
+        const seller: any = populated?.seller;
+        if (cust?.email) {
+          await this.emailService.sendDisputeConfirmationEmail(cust.email, populated, order).catch(() => undefined);
+        }
+        if (seller?.email) {
+          await this.emailService
+            .sendDisputeAlertEmail({ to: seller.email, dispute: populated, order, portal: 'seller' })
+            .catch(() => undefined);
+        }
+        const admins = await this.userModel.find({ role: 'admin' }).select('email');
+        for (const a of admins) {
+          if (a.email) {
+            await this.emailService
+              .sendDisputeAlertEmail({ to: a.email, dispute: populated, order, portal: 'admin' })
+              .catch(() => undefined);
+          }
+        }
+      } catch {
+        // best-effort notifications
+      }
+    });
+
     return {
       success: true,
-      dispute: await this.disputeModel.findById(dispute._id).populate('order customer seller'),
+      dispute: populated,
     };
   }
 
@@ -189,10 +219,33 @@ export class DisputesService {
       },
     });
 
+    const resolved = await this.disputeModel.findById(id).populate('order customer seller resolvedBy');
+
+    // Notify the customer and seller of the resolution. Best-effort.
+    setImmediate(async () => {
+      try {
+        const ord: any = resolved?.order;
+        const cust: any = resolved?.customer;
+        const seller: any = resolved?.seller;
+        if (cust?.email) {
+          await this.emailService
+            .sendDisputeResolvedEmail({ to: cust.email, dispute: resolved, order: ord, portal: 'customer' })
+            .catch(() => undefined);
+        }
+        if (seller?.email) {
+          await this.emailService
+            .sendDisputeResolvedEmail({ to: seller.email, dispute: resolved, order: ord, portal: 'seller' })
+            .catch(() => undefined);
+        }
+      } catch {
+        // best-effort notifications
+      }
+    });
+
     return {
       success: true,
       message: 'Dispute resolved successfully',
-      dispute: await this.disputeModel.findById(id).populate('order customer seller resolvedBy'),
+      dispute: resolved,
     };
   }
 

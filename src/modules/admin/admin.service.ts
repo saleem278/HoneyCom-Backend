@@ -401,6 +401,13 @@ export class AdminService {
     user.status = status;
     await user.save();
 
+    // Notify the user their account status changed. Best-effort.
+    if (user.email) {
+      this.emailService
+        .sendAccountStatusEmail(user.email, status, user.name || 'there')
+        .catch((err: any) => this.logger.warn(`Account status email failed for ${user.email}: ${err?.message || err}`));
+    }
+
     return {
       success: true,
       user,
@@ -443,6 +450,14 @@ export class AdminService {
     order.status = 'refunded';
     order.paymentStatus = 'refunded';
     await order.save();
+
+    // Notify the customer their refund was processed. Best-effort.
+    const refundCustomerEmail = (order as any)?.customer?.email;
+    if (refundCustomerEmail) {
+      this.emailService
+        .sendOrderRefundedEmail(refundCustomerEmail, order, refundAmount, reason)
+        .catch((err: any) => this.logger.warn(`Refund email failed for order ${order._id}: ${err?.message || err}`));
+    }
 
     return {
       success: true,
@@ -849,6 +864,19 @@ export class AdminService {
 
     const updated = await this.orderModel.findByIdAndUpdate(id, update, { new: true });
 
+    // Notify the customer of the status change. Best-effort, fire-and-forget.
+    if (data.status && updated) {
+      setImmediate(async () => {
+        try {
+          const o = await this.orderModel.findById(updated._id).populate('customer');
+          const email = (o as any)?.customer?.email;
+          if (email) await this.emailService.sendOrderStatusUpdateEmail(email, o);
+        } catch (err: any) {
+          this.logger.warn(`Admin order status email failed for order ${id}: ${err?.message || err}`);
+        }
+      });
+    }
+
     // Award loyalty points when admin marks an order delivered.
     if (data.status === 'delivered' && this.loyaltyService) {
       const customerId = order.customer?.toString();
@@ -867,6 +895,20 @@ export class AdminService {
       { _id: { $in: ids } },
       { status },
     );
+
+    // Notify each affected customer of the status change. Best-effort.
+    setImmediate(async () => {
+      try {
+        const orders = await this.orderModel.find({ _id: { $in: ids } }).populate('customer');
+        for (const o of orders) {
+          const email = (o as any)?.customer?.email;
+          if (email) await this.emailService.sendOrderStatusUpdateEmail(email, o).catch(() => undefined);
+        }
+      } catch (err: any) {
+        this.logger.warn(`Admin bulk status email failed: ${err?.message || err}`);
+      }
+    });
+
     return { success: true, modified: result.modifiedCount };
   }
 

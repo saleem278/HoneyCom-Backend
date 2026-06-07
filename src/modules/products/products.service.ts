@@ -320,6 +320,14 @@ export class ProductsService {
     await product.populate('category', 'name slug');
     await product.populate('seller', 'name email');
 
+    // Confirm submission to the seller — product is pending admin review. Best-effort.
+    const submittedSeller: any = (product as any).seller;
+    if (submittedSeller?.email) {
+      this.emailService
+        .sendProductSubmittedEmail(submittedSeller.email, product.name)
+        .catch(() => undefined);
+    }
+
     return {
       success: true,
       product,

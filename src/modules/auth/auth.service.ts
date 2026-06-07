@@ -151,23 +151,13 @@ export class AuthService {
         .filter((email): email is string => typeof email === 'string' && email.length > 0);
       
       if (adminEmails.length > 0 && this.emailService) {
-        const adminNotificationHtml = `
-          <h1>New Seller Registration</h1>
-          <p>A new seller has registered and is pending approval:</p>
-          <ul>
-            <li><strong>Name:</strong> ${name}</li>
-            <li><strong>Email:</strong> ${email}</li>
-            <li><strong>Business Name:</strong> ${businessName || 'N/A'}</li>
-          </ul>
-          <p><a href="${process.env.FRONTEND_URL}/admin/sellers">Review Seller Applications</a></p>
-        `;
-        
-        // Send to all admins
-        await Promise.all(adminEmails.map(adminEmail => 
-          this.emailService.sendEmail({
+        // Send the designed new-seller notification to all admins
+        await Promise.all(adminEmails.map(adminEmail =>
+          this.emailService.sendNewSellerNotificationEmail({
             to: adminEmail,
-            subject: 'New Seller Registration - Pending Approval',
-            html: adminNotificationHtml,
+            sellerName: name,
+            sellerEmail: email,
+            storeName: businessName,
           }).catch((err) => {
             this.logger.error(`Failed to send notification to ${adminEmail}: ${err?.message || err}`);
           })
@@ -594,6 +584,13 @@ export class AuthService {
     user.emailVerificationExpire = undefined;
     await user.save();
 
+    // Welcome the user now that their email is confirmed. Best-effort.
+    if (user.email) {
+      this.emailService
+        .sendWelcomeEmail(user.email)
+        .catch((err: any) => this.logger.error(`Failed to send welcome email to ${user.email}: ${err?.message || err}`));
+    }
+
     return {
       success: true,
       message: 'Email verified successfully',
@@ -657,6 +654,13 @@ export class AuthService {
     user.resetPasswordExpire = undefined;
     await user.save();
 
+    // Security confirmation — best-effort, never block the reset on email failure.
+    if (user.email) {
+      this.emailService
+        .sendPasswordChangedEmail(user.email, 'reset')
+        .catch((err: any) => this.logger.error(`Failed to send password reset confirmation to ${user.email}: ${err?.message || err}`));
+    }
+
     // Revoke all existing sessions so an attacker who already had access loses
     // it on password reset. The user will need to log in again on every device.
     try {
@@ -712,6 +716,13 @@ export class AuthService {
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(newPassword, salt);
     await user.save();
+
+    // Security confirmation — best-effort.
+    if (user.email) {
+      this.emailService
+        .sendPasswordChangedEmail(user.email, 'changed')
+        .catch((err: any) => this.logger.error(`Failed to send password change confirmation to ${user.email}: ${err?.message || err}`));
+    }
 
     // Revoke every other session — keep the requester's current session
     // alive so they don't have to log in again on the same device.

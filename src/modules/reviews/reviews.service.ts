@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { Review, IReview } from '../../models/Review.model';
 import { Product, IProduct } from '../../models/Product.model';
 import { IOrder } from '../../models/Order.model';
+import { EmailService } from '../../services/email.service';
 
 @Injectable()
 export class ReviewsService {
@@ -11,6 +12,7 @@ export class ReviewsService {
     @InjectModel('Review') private reviewModel: Model<IReview>,
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Order') private orderModel: Model<IOrder>,
+    private emailService: EmailService,
   ) {}
 
   async create(userId: string, productId: string, reviewData: any) {
@@ -57,6 +59,27 @@ export class ReviewsService {
 
     // Update product rating
     await this.updateProductRating(productId);
+
+    // Notify the seller of the new review. Best-effort, fire-and-forget.
+    setImmediate(async () => {
+      try {
+        const populatedProduct = await this.productModel.findById(productId).populate('seller', 'name email');
+        const seller: any = (populatedProduct as any)?.seller;
+        if (seller?.email) {
+          await this.emailService.sendReviewNotificationEmail({
+            to: seller.email,
+            sellerName: seller.name || 'Seller',
+            productName: product.name,
+            productId,
+            rating: reviewData.rating,
+            title: reviewData.title,
+            comment: reviewData.comment,
+          });
+        }
+      } catch {
+        // best-effort notification
+      }
+    });
 
     return {
       success: true,

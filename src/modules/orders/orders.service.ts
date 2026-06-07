@@ -36,6 +36,67 @@ export class OrdersService {
   ) {}
 
   /**
+   * Fire-and-forget: email the order's customer an order-status update.
+   * SMTP is not transactional — never let a mail failure surface to the caller.
+   */
+  private notifyCustomerStatus(orderId: any): void {
+    setImmediate(async () => {
+      try {
+        const o = await this.orderModel.findById(orderId).populate('customer');
+        const email = (o as any)?.customer?.email;
+        if (email) await this.emailService.sendOrderStatusUpdateEmail(email, o);
+      } catch (err: any) {
+        this.logger.warn(`Order status email failed for order ${orderId}: ${err?.message || err}`);
+      }
+    });
+  }
+
+  /** Fire-and-forget: email the order's customer a refund confirmation. */
+  private notifyCustomerRefund(orderId: any, amount?: number, reason?: string): void {
+    setImmediate(async () => {
+      try {
+        const o = await this.orderModel.findById(orderId).populate('customer');
+        const email = (o as any)?.customer?.email;
+        if (email) await this.emailService.sendOrderRefundedEmail(email, o, amount, reason);
+      } catch (err: any) {
+        this.logger.warn(`Refund email failed for order ${orderId}: ${err?.message || err}`);
+      }
+    });
+  }
+
+  /** Fire-and-forget: notify each seller of the line items they need to fulfil. */
+  private notifySellersOfNewOrder(order: any): void {
+    setImmediate(async () => {
+      try {
+        const bySeller = new Map<string, any[]>();
+        for (const it of order.items || []) {
+          const sid = it.seller ? it.seller.toString() : null;
+          if (!sid) continue;
+          if (!bySeller.has(sid)) bySeller.set(sid, []);
+          bySeller.get(sid)!.push(it);
+        }
+        if (!bySeller.size) return;
+        const sellers = await this.userModel
+          .find({ _id: { $in: [...bySeller.keys()] } })
+          .select('name email');
+        for (const s of sellers) {
+          if (!s.email) continue;
+          await this.emailService
+            .sendNewOrderToSellerEmail({
+              to: s.email,
+              sellerName: s.name || 'Seller',
+              order,
+              items: bySeller.get(s._id.toString()) || [],
+            })
+            .catch(() => undefined);
+        }
+      } catch (err: any) {
+        this.logger.warn(`Seller new-order email failed for order ${order?._id}: ${err?.message || err}`);
+      }
+    });
+  }
+
+  /**
    * Read order-related settings from the Settings collection.
    * Fallbacks match cart.service.ts so both services agree on the same numbers.
    * Admin can update these via PUT /settings/bulk without a deploy.
@@ -594,6 +655,9 @@ export class OrdersService {
       }
     });
 
+    // Notify the seller(s) of the new order so they can begin fulfilment.
+    this.notifySellersOfNewOrder(order);
+
     return {
       success: true,
       order: this.convertOrderCurrency(order),
@@ -725,6 +789,9 @@ export class OrdersService {
     order.status = 'cancelled';
     await order.save();
 
+    // Notify the customer their order was cancelled (and refunded, if applicable).
+    this.notifyCustomerStatus(order._id);
+
     // Return reserved stock to the catalog. We use $inc rather than recompute
     // so concurrent updates to inventory aren't clobbered.
     await Promise.all(
@@ -810,6 +877,10 @@ export class OrdersService {
       order.paymentStatus = 'refunded';
     }
     await order.save();
+
+    // Confirm the return/refund to the customer. For non-Razorpay payments the
+    // money moves once an admin processes it, but the return itself is accepted.
+    this.notifyCustomerRefund(order._id, order.total, 'Customer return request');
 
     return {
       success: true,
@@ -1113,7 +1184,19 @@ export class OrdersService {
           `Failed to clear cart for order ${order._id} after payment success: ${err?.message || err}`,
         );
       }
+      // Payment confirmed — let the customer know the order is now processing.
+      this.notifyCustomerStatus(order._id);
     } else if (paymentStatus === 'failed') {
+      // Payment failed — tell the customer the order was cancelled.
+      setImmediate(async () => {
+        try {
+          const o = await this.orderModel.findById(order._id).populate('customer');
+          const email = (o as any)?.customer?.email;
+          if (email) await this.emailService.sendPaymentFailedEmail(email, o);
+        } catch (err: any) {
+          this.logger.warn(`Payment-failed email failed for order ${order._id}: ${err?.message || err}`);
+        }
+      });
       // Payment failed — release the inventory we reserved at order-create time.
       // Order status is already set to 'cancelled' in updateData above.
       try {

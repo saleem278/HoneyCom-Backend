@@ -137,19 +137,17 @@ export class EmailService {
     const name = await this.siteName();
     await this.sendEmail({
       to: email,
-      subject: `Your product has been approved — ${name}`,
-      html: `<h2>Product approved</h2><p>Your product <strong>${this.h(productName)}</strong> is now live on ${this.h(name)}.</p>`,
+      subject: `Your product is live — ${name}`,
+      html: await this.templates.getProductApprovalEmail(productName),
     });
   }
 
   async sendProductRejectionEmail(email: string, productName: string, reason?: string): Promise<void> {
-    const reasonBlock = reason
-      ? `<p><strong>Reason:</strong> ${this.h(reason)}</p>`
-      : '<p>Please review the listing guidelines and contact support if you have questions.</p>';
+    const name = await this.siteName();
     await this.sendEmail({
       to: email,
-      subject: `Your product was not approved`,
-      html: `<h2>Product not approved</h2><p>Your product <strong>${this.h(productName)}</strong> was not approved.</p>${reasonBlock}`,
+      subject: `Your product was not approved — ${name}`,
+      html: await this.templates.getProductRejectionEmail(productName, reason),
     });
   }
 
@@ -168,13 +166,7 @@ export class EmailService {
     await this.sendEmail({
       to,
       subject: `[${siteName} Contact] ${this.h(opts.subject)}`,
-      html: `
-        <h2>New Contact Message — ${this.h(siteName)}</h2>
-        <p><strong>From:</strong> ${this.h(opts.fromName)} &lt;${this.h(opts.fromEmail)}&gt;</p>
-        <p><strong>Subject:</strong> ${this.h(opts.subject)}</p>
-        <hr/>
-        <p style="white-space:pre-wrap">${this.h(opts.message)}</p>
-      `,
+      html: await this.templates.getContactEmail(opts),
       text: `From: ${opts.fromName} <${opts.fromEmail}>\nSubject: ${opts.subject}\n\n${opts.message}`,
     });
   }
@@ -188,19 +180,149 @@ export class EmailService {
     question: string;
     customerEmail?: string;
   }): Promise<void> {
-    const siteName = await this.siteName();
     await this.sendEmail({
       to: opts.sellerEmail,
       subject: `New question on your product: ${this.h(opts.productName)}`,
-      html: `
-        <h2>New Customer Question — ${this.h(siteName)}</h2>
-        <p>A customer has asked a question about your product <strong>${this.h(opts.productName)}</strong>.</p>
-        <blockquote style="border-left:4px solid #f97316;margin:12px 0;padding:8px 16px;background:#fff7ed">
-          <em>${this.h(opts.question)}</em>
-        </blockquote>
-        ${opts.customerEmail ? `<p><strong>Customer email:</strong> ${this.h(opts.customerEmail)}</p>` : ''}
-        <p>Please log in to your seller portal to answer this question.</p>
-      `,
+      html: await this.templates.getProductQuestionEmail(opts),
+    });
+  }
+
+  /** Notify admins when a new seller registers and is awaiting approval. */
+  async sendNewSellerNotificationEmail(opts: {
+    to: string;
+    sellerName: string;
+    sellerEmail: string;
+    storeName?: string;
+  }): Promise<void> {
+    const name = await this.siteName();
+    await this.sendEmail({
+      to: opts.to,
+      subject: `New seller registration — pending approval — ${name}`,
+      html: await this.templates.getNewSellerNotificationEmail(opts),
+    });
+  }
+
+  /** Welcome email sent once a customer verifies their email address. */
+  async sendWelcomeEmail(email: string): Promise<void> {
+    const name = await this.siteName();
+    await this.sendEmail({
+      to: email,
+      subject: `Welcome to ${name}!`,
+      html: await this.templates.getWelcomeEmail(),
+    });
+  }
+
+  /** Security confirmation after a password reset (link) or change (logged-in). */
+  async sendPasswordChangedEmail(email: string, context: 'reset' | 'changed' = 'changed'): Promise<void> {
+    const name = await this.siteName();
+    await this.sendEmail({
+      to: email,
+      subject: `Your password was ${context === 'reset' ? 'reset' : 'changed'} — ${name}`,
+      html: await this.templates.getPasswordChangedEmail(context),
+    });
+  }
+
+  /** Notify a customer that a refund has been processed for their order. */
+  async sendOrderRefundedEmail(email: string, order: any, amount?: number, reason?: string): Promise<void> {
+    const name = await this.siteName();
+    const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
+    await this.sendEmail({
+      to: email,
+      subject: `Refund processed for order #${orderId} — ${name}`,
+      html: await this.templates.getRefundProcessedEmail(order, amount, reason),
+    });
+  }
+
+  /** Notify a customer that their payment failed and the order was cancelled. */
+  async sendPaymentFailedEmail(email: string, order: any): Promise<void> {
+    const name = await this.siteName();
+    const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
+    await this.sendEmail({
+      to: email,
+      subject: `Payment failed for order #${orderId} — ${name}`,
+      html: await this.templates.getPaymentFailedEmail(order),
+    });
+  }
+
+  /** Notify a seller that they have received a new order. */
+  async sendNewOrderToSellerEmail(opts: { to: string; sellerName: string; order: any; items: any[] }): Promise<void> {
+    const orderId = opts.order.orderNumber || (opts.order._id ? opts.order._id.toString().slice(-8) : 'N/A');
+    await this.sendEmail({
+      to: opts.to,
+      subject: `New order received #${orderId}`,
+      html: await this.templates.getNewOrderSellerEmail({ sellerName: opts.sellerName, order: opts.order, items: opts.items }),
+    });
+  }
+
+  /** Confirm to a customer that their dispute has been received. */
+  async sendDisputeConfirmationEmail(email: string, dispute: any, order: any): Promise<void> {
+    const name = await this.siteName();
+    await this.sendEmail({
+      to: email,
+      subject: `We received your dispute — ${name}`,
+      html: await this.templates.getDisputeConfirmationEmail(dispute, order),
+    });
+  }
+
+  /** Alert a seller or admin that a new dispute has been raised. */
+  async sendDisputeAlertEmail(opts: { to: string; dispute: any; order: any; portal: 'seller' | 'admin' }): Promise<void> {
+    const name = await this.siteName();
+    await this.sendEmail({
+      to: opts.to,
+      subject: `New dispute raised — ${name}`,
+      html: await this.templates.getDisputeAlertEmail({ dispute: opts.dispute, order: opts.order, portal: opts.portal }),
+    });
+  }
+
+  /** Notify a customer or seller that a dispute has been resolved. */
+  async sendDisputeResolvedEmail(opts: { to: string; dispute: any; order: any; portal: 'customer' | 'seller' }): Promise<void> {
+    const name = await this.siteName();
+    await this.sendEmail({
+      to: opts.to,
+      subject: `Your dispute has been resolved — ${name}`,
+      html: await this.templates.getDisputeResolvedEmail({ dispute: opts.dispute, order: opts.order, portal: opts.portal }),
+    });
+  }
+
+  /** Notify a seller that a customer left a review on their product. */
+  async sendReviewNotificationEmail(opts: {
+    to: string;
+    sellerName: string;
+    productName: string;
+    productId: string;
+    rating?: number;
+    title?: string;
+    comment?: string;
+  }): Promise<void> {
+    await this.sendEmail({
+      to: opts.to,
+      subject: `New review on ${opts.productName}`,
+      html: await this.templates.getReviewNotificationEmail(opts),
+    });
+  }
+
+  /** Notify a user that their account status changed (suspended/deactivated/reactivated). */
+  async sendAccountStatusEmail(
+    email: string,
+    status: 'active' | 'inactive' | 'suspended',
+    name: string,
+    reason?: string,
+  ): Promise<void> {
+    const siteName = await this.siteName();
+    await this.sendEmail({
+      to: email,
+      subject: `Account status update — ${siteName}`,
+      html: await this.templates.getAccountStatusEmail(status, name, reason),
+    });
+  }
+
+  /** Confirm to a seller that their product was submitted and is pending review. */
+  async sendProductSubmittedEmail(email: string, productName: string): Promise<void> {
+    const name = await this.siteName();
+    await this.sendEmail({
+      to: email,
+      subject: `Product submitted for review — ${name}`,
+      html: await this.templates.getProductSubmittedEmail(productName),
     });
   }
 }
