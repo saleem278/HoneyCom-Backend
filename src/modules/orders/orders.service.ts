@@ -8,6 +8,7 @@ import { Product, IProduct } from '../../models/Product.model';
 import { Address, IAddress } from '../../models/Address.model';
 import { Coupon, ICoupon } from '../../models/Coupon.model';
 import { Settings, ISettings } from '../../models/Settings.model';
+import { IUser } from '../../models/User.model';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
@@ -25,6 +26,7 @@ export class OrdersService {
     @InjectModel('Address') private addressModel: Model<IAddress>,
     @InjectModel('Coupon') private couponModel: Model<ICoupon>,
     @InjectModel('Settings') private settingsModel: Model<ISettings>,
+    @InjectModel('User') private userModel: Model<IUser>,
     @InjectConnection() private connection: Connection,
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
@@ -452,6 +454,12 @@ export class OrdersService {
         discount = Math.min(calculatedDiscount, subtotal);
       }
 
+      // Apply referral discount (additive with coupon, capped at subtotal)
+      if (cart?.referralCode && (cart?.referralDiscount ?? 0) > 0) {
+        const referralDiscount = Math.min(cart.referralDiscount, subtotal - discount);
+        if (referralDiscount > 0) discount += referralDiscount;
+      }
+
       total = Math.max(0, subtotal + tax + shipping - discount);
 
       const orderCount = await this.orderModel.countDocuments();
@@ -509,11 +517,48 @@ export class OrdersService {
     //  - paypal: clear now until PayPal sync confirmation is wired up.
     const deferCartClear =
       order.paymentMethod === 'razorpay' && !!orderData.razorpayOrderId;
+
+    // Capture referral code before cart is cleared
+    const referralCodeFromCart = cart?.referralCode;
+
     if (cart && !deferCartClear) {
       cart.items = [];
       cart.couponCode = undefined;
       cart.couponDiscount = undefined;
+      cart.referralCode = undefined;
+      cart.referralDiscount = undefined;
       await cart.save({ session });
+    }
+
+    // Credit referrer outside transaction — a DB failure here should not roll back the order
+    if (referralCodeFromCart && !deferCartClear) {
+      setImmediate(async () => {
+        try {
+          const settingRow = await this.settingsModel.findOne({ key: 'referral.referrerBonusPts' }).lean() as any;
+          const bonusPts = settingRow ? (parseInt(settingRow.value, 10) || 100) : 100;
+
+          const referrer = await this.userModel.findOne({ referralCode: referralCodeFromCart });
+          if (referrer) {
+            referrer.loyaltyPoints = (referrer.loyaltyPoints || 0) + bonusPts;
+            if (!referrer.referralStats) {
+              referrer.referralStats = { usedCount: 0, bonusEarned: 0 };
+            }
+            referrer.referralStats.usedCount += 1;
+            referrer.referralStats.bonusEarned += bonusPts;
+            await referrer.save();
+          }
+
+          // Stamp the referee so they can't reuse another referral code
+          await this.userModel.updateOne(
+            { _id: userId, referralCodeUsed: { $exists: false } },
+            { $set: { referralCodeUsed: referralCodeFromCart } },
+          );
+        } catch (refErr: any) {
+          this.logger.warn(
+            `Referral post-order processing failed for code ${referralCodeFromCart}: ${refErr?.message || refErr}`,
+          );
+        }
+      });
     }
 
     // Send confirmation email outside the transaction — SMTP is not

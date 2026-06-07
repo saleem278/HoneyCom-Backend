@@ -25,6 +25,7 @@ import { HealthModule } from './modules/health/health.module';
 import { PayoutsModule } from './modules/payouts/payouts.module';
 import { FlashSalesModule } from './modules/flash-sales/flash-sales.module';
 import { LoyaltyModule } from './modules/loyalty/loyalty.module';
+import { ReferralModule } from './modules/referral/referral.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { LoyaltyModule } from './modules/loyalty/loyalty.module';
     PayoutsModule,
     FlashSalesModule,
     LoyaltyModule,
+    ReferralModule,
     SeedModule,
   ],
 })

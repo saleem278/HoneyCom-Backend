@@ -21,6 +21,9 @@ export interface IUser extends Document {
   paymentMethods: mongoose.Types.ObjectId[];
   walletBalance: number;
   loyaltyPoints: number;
+  referralCode?: string;
+  referralCodeUsed?: string;
+  referralStats?: { usedCount: number; bonusEarned: number };
   wishlist?: mongoose.Types.ObjectId[];
   emailVerified: boolean;
   phoneVerified: boolean;
@@ -137,6 +140,12 @@ const UserSchema: Schema = new Schema(
       type: Number,
       default: 0,
       min: [0, 'Loyalty points cannot be negative'],
+    },
+    referralCode: { type: String, sparse: true, index: true },
+    referralCodeUsed: { type: String },
+    referralStats: {
+      usedCount: { type: Number, default: 0 },
+      bonusEarned: { type: Number, default: 0 },
     },
     wishlist: [
       {
