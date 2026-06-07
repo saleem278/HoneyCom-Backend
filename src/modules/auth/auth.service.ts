@@ -151,23 +151,13 @@ export class AuthService {
         .filter((email): email is string => typeof email === 'string' && email.length > 0);
       
       if (adminEmails.length > 0 && this.emailService) {
-        const adminNotificationHtml = `
-          <h1>New Seller Registration</h1>
-          <p>A new seller has registered and is pending approval:</p>
-          <ul>
-            <li><strong>Name:</strong> ${name}</li>
-            <li><strong>Email:</strong> ${email}</li>
-            <li><strong>Business Name:</strong> ${businessName || 'N/A'}</li>
-          </ul>
-          <p><a href="${process.env.FRONTEND_URL}/admin/sellers">Review Seller Applications</a></p>
-        `;
-        
-        // Send to all admins
-        await Promise.all(adminEmails.map(adminEmail => 
-          this.emailService.sendEmail({
+        // Send the designed new-seller notification to all admins
+        await Promise.all(adminEmails.map(adminEmail =>
+          this.emailService.sendNewSellerNotificationEmail({
             to: adminEmail,
-            subject: 'New Seller Registration - Pending Approval',
-            html: adminNotificationHtml,
+            sellerName: name,
+            sellerEmail: email,
+            storeName: businessName,
           }).catch((err) => {
             this.logger.error(`Failed to send notification to ${adminEmail}: ${err?.message || err}`);
           })

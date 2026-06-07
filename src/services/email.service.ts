@@ -137,19 +137,17 @@ export class EmailService {
     const name = await this.siteName();
     await this.sendEmail({
       to: email,
-      subject: `Your product has been approved — ${name}`,
-      html: `<h2>Product approved</h2><p>Your product <strong>${this.h(productName)}</strong> is now live on ${this.h(name)}.</p>`,
+      subject: `Your product is live — ${name}`,
+      html: await this.templates.getProductApprovalEmail(productName),
     });
   }
 
   async sendProductRejectionEmail(email: string, productName: string, reason?: string): Promise<void> {
-    const reasonBlock = reason
-      ? `<p><strong>Reason:</strong> ${this.h(reason)}</p>`
-      : '<p>Please review the listing guidelines and contact support if you have questions.</p>';
+    const name = await this.siteName();
     await this.sendEmail({
       to: email,
-      subject: `Your product was not approved`,
-      html: `<h2>Product not approved</h2><p>Your product <strong>${this.h(productName)}</strong> was not approved.</p>${reasonBlock}`,
+      subject: `Your product was not approved — ${name}`,
+      html: await this.templates.getProductRejectionEmail(productName, reason),
     });
   }
 
@@ -168,13 +166,7 @@ export class EmailService {
     await this.sendEmail({
       to,
       subject: `[${siteName} Contact] ${this.h(opts.subject)}`,
-      html: `
-        <h2>New Contact Message — ${this.h(siteName)}</h2>
-        <p><strong>From:</strong> ${this.h(opts.fromName)} &lt;${this.h(opts.fromEmail)}&gt;</p>
-        <p><strong>Subject:</strong> ${this.h(opts.subject)}</p>
-        <hr/>
-        <p style="white-space:pre-wrap">${this.h(opts.message)}</p>
-      `,
+      html: await this.templates.getContactEmail(opts),
       text: `From: ${opts.fromName} <${opts.fromEmail}>\nSubject: ${opts.subject}\n\n${opts.message}`,
     });
   }
@@ -188,19 +180,25 @@ export class EmailService {
     question: string;
     customerEmail?: string;
   }): Promise<void> {
-    const siteName = await this.siteName();
     await this.sendEmail({
       to: opts.sellerEmail,
       subject: `New question on your product: ${this.h(opts.productName)}`,
-      html: `
-        <h2>New Customer Question — ${this.h(siteName)}</h2>
-        <p>A customer has asked a question about your product <strong>${this.h(opts.productName)}</strong>.</p>
-        <blockquote style="border-left:4px solid #f97316;margin:12px 0;padding:8px 16px;background:#fff7ed">
-          <em>${this.h(opts.question)}</em>
-        </blockquote>
-        ${opts.customerEmail ? `<p><strong>Customer email:</strong> ${this.h(opts.customerEmail)}</p>` : ''}
-        <p>Please log in to your seller portal to answer this question.</p>
-      `,
+      html: await this.templates.getProductQuestionEmail(opts),
+    });
+  }
+
+  /** Notify admins when a new seller registers and is awaiting approval. */
+  async sendNewSellerNotificationEmail(opts: {
+    to: string;
+    sellerName: string;
+    sellerEmail: string;
+    storeName?: string;
+  }): Promise<void> {
+    const name = await this.siteName();
+    await this.sendEmail({
+      to: opts.to,
+      subject: `New seller registration — pending approval — ${name}`,
+      html: await this.templates.getNewSellerNotificationEmail(opts),
     });
   }
 }
