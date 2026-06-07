@@ -21,7 +21,7 @@ export class CouponsService {
       query.code = { $regex: safe, $options: 'i' };
     }
 
-    const coupons = await this.couponModel.find(query).sort({ createdAt: -1 });
+    const coupons = await this.couponModel.find(query).sort({ createdAt: -1 }).limit(500);
     return {
       success: true,
       coupons,

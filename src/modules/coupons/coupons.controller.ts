@@ -10,6 +10,7 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CouponsService } from './coupons.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -24,6 +25,7 @@ export class CouponsController {
   constructor(private readonly couponsService: CouponsService) {}
 
   @Get()
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get all coupons' })
   @ApiResponse({ status: 200, description: 'List of coupons' })
   @Roles('admin')
@@ -32,6 +34,7 @@ export class CouponsController {
   }
 
   @Get(':id')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get coupon by ID' })
   @ApiResponse({ status: 200, description: 'Coupon details' })
   @Roles('admin')
@@ -40,6 +43,7 @@ export class CouponsController {
   }
 
   @Post()
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Create new coupon' })
   @ApiResponse({ status: 201, description: 'Coupon created' })
   @Roles('admin')
@@ -48,6 +52,7 @@ export class CouponsController {
   }
 
   @Put(':id')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update coupon' })
   @ApiResponse({ status: 200, description: 'Coupon updated' })
   @Roles('admin')
@@ -56,6 +61,7 @@ export class CouponsController {
   }
 
   @Delete(':id')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Delete coupon' })
   @ApiResponse({ status: 200, description: 'Coupon deleted' })
   @Roles('admin')

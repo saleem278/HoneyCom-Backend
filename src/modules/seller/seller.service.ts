@@ -19,7 +19,7 @@ export class SellerService {
   async getDashboard(sellerId: string) {
     const totalProducts = await this.productModel.countDocuments({ seller: sellerId });
 
-    const products = await this.productModel.find({ seller: sellerId }).select('_id');
+    const products = await this.productModel.find({ seller: sellerId }).select('_id').limit(10000);
     const productIds = products.map(p => p._id);
 
     const totalOrders = await this.orderModel.countDocuments({
@@ -113,7 +113,7 @@ export class SellerService {
     // backfill won't have the field. We OR-match `items.product` for
     // those to avoid hiding pre-migration orders from the seller view
     // — drop the fallback once a backfill migration has run.
-    const products = await this.productModel.find({ seller: sellerId }).select('_id');
+    const products = await this.productModel.find({ seller: sellerId }).select('_id').limit(10000);
     const productIds = products.map((p) => p._id);
     const filter = {
       $or: [
@@ -159,7 +159,7 @@ export class SellerService {
     }
 
     // Verify seller owns products in this order
-    const products = await this.productModel.find({ seller: sellerId }).select('_id');
+    const products = await this.productModel.find({ seller: sellerId }).select('_id').limit(10000);
     const productIds = products.map(p => p._id);
     const orderHasSellerProducts = (order.items as any[]).some((item: any) => 
       productIds.some(pid => pid.toString() === item.product?.toString() || pid.toString() === item.product?._id?.toString())
@@ -211,7 +211,7 @@ export class SellerService {
     // The clean fix is per-line-item status, but that's a schema redesign.
     // For now, refuse seller updates on multi-seller orders — admin can still
     // take action via the admin panel.
-    const sellerProducts = await this.productModel.find({ seller: sellerId }).select('_id');
+    const sellerProducts = await this.productModel.find({ seller: sellerId }).select('_id').limit(10000);
     const sellerProductIds = new Set(sellerProducts.map(p => p._id.toString()));
 
     const orderProductIds = order.items.map((item: any) => item.product.toString());
@@ -268,7 +268,7 @@ export class SellerService {
   }
 
   async getSalesReport(sellerId: string, startDate?: Date, endDate?: Date) {
-    const products = await this.productModel.find({ seller: sellerId }).select('_id');
+    const products = await this.productModel.find({ seller: sellerId }).select('_id').limit(10000);
     const productIds = products.map(p => p._id);
 
     // Default to last 90 days when no date range is provided to prevent
@@ -380,7 +380,7 @@ export class SellerService {
   }
 
   async getProductPerformance(sellerId: string, startDate?: Date, endDate?: Date) {
-    const products = await this.productModel.find({ seller: sellerId }).select('_id name');
+    const products = await this.productModel.find({ seller: sellerId }).select('_id name').limit(10000);
     const productIds = products.map(p => p._id);
 
     const matchQuery: any = { 'items.product': { $in: productIds }, status: 'delivered' };
@@ -428,7 +428,7 @@ export class SellerService {
   }
 
   async getCustomerInsights(sellerId: string) {
-    const products = await this.productModel.find({ seller: sellerId }).select('_id');
+    const products = await this.productModel.find({ seller: sellerId }).select('_id').limit(10000);
     const productIds = products.map(p => p._id);
 
     // Per-customer totals must again only count *this seller's* line items.

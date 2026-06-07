@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { BannersService } from './banners.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -13,6 +14,7 @@ export class BannersController {
 
   @Get('active')
   @UseGuards(OptionalJwtAuthGuard)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
   @ApiOperation({ summary: 'Get active banners (public)' })
   @ApiResponse({ status: 200, description: 'List of active banners' })
   async getActiveBanners(@Query('position') position?: string) {
@@ -23,6 +25,7 @@ export class BannersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get all banners (admin)' })
   @ApiResponse({ status: 200, description: 'List of banners' })
   async findAll(@Query('position') position?: string, @Query('status') status?: string) {
@@ -33,6 +36,7 @@ export class BannersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get banner by ID' })
   @ApiResponse({ status: 200, description: 'Banner details' })
   async findOne(@Param('id') id: string) {
@@ -43,6 +47,7 @@ export class BannersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Create banner' })
   @ApiResponse({ status: 201, description: 'Banner created' })
   async create(@Body() bannerData: any) {
@@ -53,6 +58,7 @@ export class BannersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update banner' })
   @ApiResponse({ status: 200, description: 'Banner updated' })
   async update(@Param('id') id: string, @Body() updateData: any) {
@@ -63,6 +69,7 @@ export class BannersController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
   @ApiBearerAuth('JWT-auth')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Delete banner' })
   @ApiResponse({ status: 200, description: 'Banner deleted' })
   async delete(@Param('id') id: string) {
