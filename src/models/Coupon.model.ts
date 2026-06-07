@@ -8,6 +8,14 @@ export interface ICoupon extends Document {
   maxDiscount?: number;
   usageLimit?: number;
   usedCount: number;
+  // Max redemptions allowed per individual user. null/undefined/0 = unlimited
+  // per user (the pre-existing behaviour). Enforced atomically at order time
+  // alongside the global usageLimit.
+  perUserLimit?: number;
+  // Per-user redemption counts, keyed by userId. Incremented atomically when a
+  // coupon is redeemed so concurrent orders by the same user can't exceed
+  // perUserLimit.
+  userUsage?: Record<string, number>;
   validFrom: Date;
   validUntil: Date;
   status: 'active' | 'inactive';
@@ -52,6 +60,17 @@ const CouponSchema: Schema = new Schema(
       type: Number,
       default: 0,
       min: [0, 'Used count cannot be negative'],
+    },
+    perUserLimit: {
+      type: Number,
+      min: [1, 'Per-user limit must be at least 1'],
+    },
+    // Map of userId -> redemption count. Mongoose `Map` of Number; stored as a
+    // BSON object. Default empty so atomic `$inc` on `userUsage.<id>` works.
+    userUsage: {
+      type: Map,
+      of: Number,
+      default: {},
     },
     validFrom: {
       type: Date,

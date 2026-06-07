@@ -369,25 +369,52 @@ export class OrdersService {
       // expired coupon. Reservation rollback happens in the outer catch.
       if (cart?.couponCode) {
         const now = new Date();
+        // Per-user guard: redeem only if this user is still below perUserLimit.
+        // `$getField` reads userUsage.<userId> dynamically (the userId can't be
+        // a literal dotted key in the filter), coalescing a missing entry to 0.
+        // When perUserLimit is unset/null this clause passes unconditionally,
+        // preserving the previous behaviour. The global and per-user checks
+        // share the same atomic findOneAndUpdate, so concurrent orders by the
+        // same user can't race past either limit.
+        const perUserOk = {
+          $or: [
+            { perUserLimit: { $exists: false } },
+            { perUserLimit: null },
+            {
+              $expr: {
+                $lt: [
+                  { $ifNull: [{ $getField: { field: { $literal: userId }, input: '$userUsage' } }, 0] },
+                  '$perUserLimit',
+                ],
+              },
+            },
+          ],
+        };
         const redeemed = await this.couponModel.findOneAndUpdate(
           {
             code: cart.couponCode.toUpperCase(),
             status: 'active',
             validFrom: { $lte: now },
             validUntil: { $gte: now },
-            // Either no limit, OR current usage strictly below limit.
-            $or: [
-              { usageLimit: { $exists: false } },
-              { usageLimit: null },
-              { $expr: { $lt: ['$usedCount', '$usageLimit'] } },
+            // Both the global usage limit and the per-user limit must pass.
+            $and: [
+              {
+                // Either no global limit, OR current usage strictly below it.
+                $or: [
+                  { usageLimit: { $exists: false } },
+                  { usageLimit: null },
+                  { $expr: { $lt: ['$usedCount', '$usageLimit'] } },
+                ],
+              },
+              perUserOk,
             ],
           },
-          { $inc: { usedCount: 1 } },
+          { $inc: { usedCount: 1, [`userUsage.${userId}`]: 1 } },
           { new: true, session },
         );
         if (!redeemed) {
           throw new BadRequestException(
-            'Coupon is invalid, expired, or has reached its usage limit.',
+            'Coupon is invalid, expired, or has reached its usage limit (including any per-customer limit).',
           );
         }
 
@@ -493,9 +520,20 @@ export class OrdersService {
       await restoreReservations();
       if (cart?.couponCode) {
         try {
+          // Roll back BOTH the global usedCount and this user's per-user count
+          // so a failed order doesn't permanently consume either allotment.
+          // Guard each decrement so we never push a counter below zero.
           await this.couponModel.updateOne(
             { code: cart.couponCode.toUpperCase(), usedCount: { $gt: 0 } },
             { $inc: { usedCount: -1 } },
+            { session },
+          );
+          await this.couponModel.updateOne(
+            {
+              code: cart.couponCode.toUpperCase(),
+              [`userUsage.${userId}`]: { $gt: 0 },
+            },
+            { $inc: { [`userUsage.${userId}`]: -1 } },
             { session },
           );
         } catch (decErr) {
