@@ -23,9 +23,11 @@ async function createServer(): Promise<express.Express> {
     rawBody: true, // Required for Stripe webhook signature verification
   });
 
-  // Match main.ts: cap JSON/urlencoded bodies at 5MB.
-  app.use(json({ limit: '5mb' }));
-  app.use(urlencoded({ extended: true, limit: '5mb' }));
+  // Match main.ts: cap JSON/urlencoded bodies at 1MB. E-commerce payloads are
+  // never legitimately larger; keeping the two deploy targets in sync avoids a
+  // request that passes on Vercel but 413s on the Node server (or vice versa).
+  app.use(json({ limit: '1mb' }));
+  app.use(urlencoded({ extended: true, limit: '1mb' }));
 
   configureApp(app, { swaggerWithCdn: false });
 

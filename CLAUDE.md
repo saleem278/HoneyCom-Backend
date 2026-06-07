@@ -42,12 +42,12 @@ Default dev port is `5000` (`process.env.PORT`). Mongo URI defaults to `mongodb:
 
 ## Two entrypoints — pick the right one
 
-There are **two bootstrap files** that both build the same `AppModule` but for different deploy targets. Changes to global middleware/CORS/Swagger usually need to be mirrored in both:
+There are **two bootstrap files** that both build the same `AppModule` but for different deploy targets. The shared global setup (validation pipe, guards, CORS, Helmet/CSP, Swagger, env assertion) lives in [src/bootstrap.ts](src/bootstrap.ts), which both entrypoints call via `assertRequiredEnv()` + `configureApp(app, ...)`. Put new global pipes/guards/interceptors in `bootstrap.ts` so both targets pick them up automatically:
 
 - [src/main.ts](src/main.ts) — long-lived Node server (used by `start`, `start:prod`, `ecosystem.config.js` PM2 cluster, the `Dockerfile`, and `render.yaml`). Serves `/uploads` static files and uses dynamic `FRONTEND_URL` (comma-separated origins) for CORS.
 - [api/index.ts](api/index.ts) — Vercel serverless handler (`vercel.json` routes `/(.*)` to it). Caches the Express app between cold starts via `cachedServer`. Uses `FRONTEND_URL || '*'` for CORS and does **not** serve static uploads.
 
-When adding a new global pipe, guard, or interceptor, add it to both files — or pull the bootstrap setup into a shared helper. There is no shared bootstrap module today.
+The two files still set their own request-body limits and static-asset serving directly — those are deploy-target-specific. Keep the body limit (currently 1MB) in sync between them.
 
 ## Architecture
 
