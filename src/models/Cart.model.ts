@@ -12,6 +12,8 @@ export interface ICart extends Document {
   items: ICartItem[];
   couponCode?: string;
   couponDiscount?: number;
+  referralCode?: string;
+  referralDiscount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -47,6 +49,13 @@ const CartSchema: Schema = new Schema(
       type: String,
     },
     couponDiscount: {
+      type: Number,
+      default: 0,
+    },
+    referralCode: {
+      type: String,
+    },
+    referralDiscount: {
       type: Number,
       default: 0,
     },
