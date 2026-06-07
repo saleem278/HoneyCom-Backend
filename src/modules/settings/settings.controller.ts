@@ -33,11 +33,19 @@ export class SettingsController {
       this.settingsService.getByCategory('notifications'),
       this.settingsService.getByCategory('platform'),
     ]);
+
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0);
+    const storefrontSettings = storefront.settings ?? {};
+    if (!storefrontSettings['storefront.dealsEndsAt']) {
+      storefrontSettings['storefront.dealsEndsAt'] = nextMidnight.toISOString();
+    }
+
     return {
       success: true,
       settings: {
         branding:      branding.settings,
-        storefront:    storefront.settings,
+        storefront:    storefrontSettings,
         seo:           seo.settings,
         orders:        orders.settings,
         navigation:    navigation.settings,
