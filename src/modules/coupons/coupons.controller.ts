@@ -13,6 +13,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CouponsService } from './coupons.service';
+import { CreateCouponDto, UpdateCouponDto } from './dto/create-coupon.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -47,7 +48,7 @@ export class CouponsController {
   @ApiOperation({ summary: 'Create new coupon' })
   @ApiResponse({ status: 201, description: 'Coupon created' })
   @Roles('admin')
-  async create(@Body() couponData: any) {
+  async create(@Body() couponData: CreateCouponDto) {
     return this.couponsService.create(couponData);
   }
 
@@ -56,7 +57,7 @@ export class CouponsController {
   @ApiOperation({ summary: 'Update coupon' })
   @ApiResponse({ status: 200, description: 'Coupon updated' })
   @Roles('admin')
-  async update(@Param('id') id: string, @Body() couponData: any) {
+  async update(@Param('id') id: string, @Body() couponData: UpdateCouponDto) {
     return this.couponsService.update(id, couponData);
   }
 
