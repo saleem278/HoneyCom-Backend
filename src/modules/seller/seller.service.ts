@@ -6,6 +6,7 @@ import { Order, IOrder } from '../../models/Order.model';
 import { User, IUser } from '../../models/User.model';
 import { assertOrderTransition } from '../orders/order-status';
 import { LoyaltyService } from '../loyalty/loyalty.service';
+import { EmailService } from '../../services/email.service';
 
 @Injectable()
 export class SellerService {
@@ -13,6 +14,7 @@ export class SellerService {
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Order') private orderModel: Model<IOrder>,
     @InjectModel('User') private userModel: Model<IUser>,
+    @Optional() private readonly emailService?: EmailService,
     @Optional() private readonly loyaltyService?: LoyaltyService,
   ) {}
 
@@ -250,6 +252,19 @@ export class SellerService {
       order.carrier = updateData.carrier;
     }
     await order.save();
+
+    // Fire-and-forget: notify the customer of the new order status (shipped/delivered).
+    if (this.emailService) {
+      const emailService = this.emailService;
+      setImmediate(async () => {
+        try {
+          const customer = await this.userModel.findById(order.customer).select('email');
+          if (customer?.email) await emailService.sendOrderStatusUpdateEmail(customer.email, order);
+        } catch {
+          // best-effort; status update is the source of truth, email is secondary
+        }
+      });
+    }
 
     // Fire-and-forget: award loyalty points when order is delivered.
     if (order.status === 'delivered' && this.loyaltyService) {

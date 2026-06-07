@@ -606,6 +606,240 @@ export class EmailTemplatesService {
     return this.getBaseTemplate(content, 'New Seller Registration', `New seller registration: ${opts.sellerName}.`);
   }
 
+  async getWelcomeEmail(): Promise<string> {
+    const frontendUrl = this.frontend();
+    const siteName = this.h(await this.getSiteName());
+    const { primary, primaryAlt } = await this.colors();
+
+    const content = `
+      ${await this.hero('🎉', `Welcome to ${siteName}!`, 'Your email is verified and your account is ready.')}
+      ${this.infoBox('Thanks for joining us! Your account is all set. Explore thousands of products and enjoy a seamless shopping experience.', 'success')}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(`${frontendUrl}/products`, 'Start shopping', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'Welcome', `Welcome to ${siteName} — your account is ready.`);
+  }
+
+  async getPasswordChangedEmail(context: 'reset' | 'changed' = 'changed'): Promise<string> {
+    const frontendUrl = this.frontend();
+    const { primary, primaryAlt } = await this.colors();
+    const verb = context === 'reset' ? 'reset' : 'changed';
+
+    const content = `
+      ${await this.hero('🔐', `Your password was ${verb}`, 'This is a confirmation of a recent change to your account.')}
+      ${this.infoBox(`Your account password was successfully ${verb}. For your security, you may have been signed out on your other devices.`, 'success')}
+      ${this.infoBox(`🛡️ <strong>Didn&apos;t do this?</strong> If you did not ${verb} your password, your account may be at risk. Please reset your password immediately and contact our support team.`, 'error')}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(`${frontendUrl}/forgot-password`, 'Secure my account', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'Password Changed', `Your password was ${verb}.`);
+  }
+
+  async getRefundProcessedEmail(order: any, amount?: number, reason?: string): Promise<string> {
+    const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
+    const orderUrl = `${this.frontend()}/orders/${order._id || ''}`;
+    const { primary, primaryAlt } = await this.colors();
+    const sym = this.getCurrencySymbol(order.currency || 'INR');
+    const refundAmt = amount != null ? amount : order.total || 0;
+
+    const content = `
+      ${await this.hero('💰', 'Refund processed', 'Your refund is on its way.')}
+      <div style="text-align:center;margin-bottom:24px;">${this.pill(`Order #${this.h(orderId)}`, primary)}</div>
+      ${this.infoBox(
+        `We&apos;ve processed a refund of <strong>${sym}${refundAmt.toFixed(0)}</strong> for your order.` +
+        `${reason ? `<br><br><strong>Reason:</strong> ${this.h(reason)}` : ''}` +
+        `<br><br>Depending on your bank or payment provider, it may take 5–10 business days to appear in your account.`,
+        'success',
+      )}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(orderUrl, 'View order details', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, `Refund Processed - #${orderId}`, `Your refund of ${sym}${refundAmt.toFixed(0)} has been processed.`);
+  }
+
+  async getPaymentFailedEmail(order: any): Promise<string> {
+    const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
+    const cartUrl = `${this.frontend()}/cart`;
+    const { primary, primaryAlt } = await this.colors();
+
+    const content = `
+      ${await this.hero('⚠️', 'Payment failed', `We couldn&apos;t process the payment for order #${this.h(orderId)}.`)}
+      ${this.infoBox('Unfortunately your payment didn&apos;t go through, so the order has been cancelled. No money has been taken from your account. You can try placing the order again at any time.', 'error')}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(cartUrl, 'Try again', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, `Payment Failed - #${orderId}`, `Payment for order #${orderId} failed.`);
+  }
+
+  async getNewOrderSellerEmail(opts: { sellerName: string; order: any; items: any[] }): Promise<string> {
+    const T = EmailTemplatesService.T;
+    const { order, items, sellerName } = opts;
+    const orderId = order.orderNumber || (order._id ? order._id.toString().slice(-8) : 'N/A');
+    const { primary, primaryAlt } = await this.colors();
+    const sym = this.getCurrencySymbol(order.currency || 'INR');
+
+    const itemsHtml = (items || []).map((item: any) => `
+      <tr>
+        <td style="padding:12px 0;border-bottom:1px solid ${T.line};color:${T.fg};font-size:14px;">${this.h(item.name || 'Product')} <span style="color:${T.fgMuted};">× ${this.h(item.quantity || 1)}</span></td>
+        <td style="padding:12px 0;border-bottom:1px solid ${T.line};text-align:right;color:${T.fg};font-weight:700;font-size:14px;">${sym}${((item.price || 0) * (item.quantity || 1)).toFixed(0)}</td>
+      </tr>`).join('');
+
+    const content = `
+      ${await this.hero('🛒', 'You have a new order!', `Hi ${this.h(sellerName)}, you&apos;ve received a new order.`)}
+      <div style="text-align:center;margin-bottom:24px;">${this.pill(`Order #${this.h(orderId)}`, primary)}</div>
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-bottom:8px;">${itemsHtml}</table>
+      ${this.infoBox('Please review and fulfil this order from your seller dashboard. Update the status and add tracking details once you&apos;ve shipped it.', 'warning')}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(`${this.frontend()}/seller/orders`, 'Manage order', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, `New Order - #${orderId}`, `New order #${orderId} received.`);
+  }
+
+  async getDisputeConfirmationEmail(dispute: any, order: any): Promise<string> {
+    const orderId = order?.orderNumber || (order?._id ? order._id.toString().slice(-8) : 'N/A');
+    const { primary, primaryAlt } = await this.colors();
+
+    const content = `
+      ${await this.hero('🧾', 'Dispute received', 'We&apos;ve received your dispute and our team will review it.')}
+      <div style="text-align:center;margin-bottom:24px;">${this.pill(`Order #${this.h(orderId)}`, primary)}</div>
+      ${this.infoBox(
+        `<strong>Type:</strong> ${this.h(dispute.type || 'N/A')}<br><strong>Reason:</strong> ${this.h(dispute.reason || 'N/A')}` +
+        `${dispute.description ? `<br><br>${this.h(dispute.description)}` : ''}`,
+        'accent', primary,
+      )}
+      ${this.infoBox('Our support team typically responds within 2–3 business days. We&apos;ll email you as soon as there&apos;s an update.', 'info')}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(`${this.frontend()}/orders/${order?._id || ''}`, 'View order', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'Dispute Received', `We received your dispute for order #${orderId}.`);
+  }
+
+  async getDisputeAlertEmail(opts: { dispute: any; order: any; portal: 'seller' | 'admin' }): Promise<string> {
+    const { dispute, order, portal } = opts;
+    const orderId = order?.orderNumber || (order?._id ? order._id.toString().slice(-8) : 'N/A');
+    const { primary, primaryAlt } = await this.colors();
+    const link = portal === 'admin' ? `${this.frontend()}/admin/disputes` : `${this.frontend()}/seller/disputes`;
+
+    const content = `
+      ${await this.hero('⚠️', 'New dispute raised', `A dispute has been opened on order #${this.h(orderId)}.`)}
+      ${this.infoBox(
+        `<strong>Type:</strong> ${this.h(dispute.type || 'N/A')}<br><strong>Reason:</strong> ${this.h(dispute.reason || 'N/A')}` +
+        `${dispute.description ? `<br><br>${this.h(dispute.description)}` : ''}`,
+        'error',
+      )}
+      ${this.infoBox('Please review this dispute and respond promptly to help resolve it.', 'warning')}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(link, 'Review dispute', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'New Dispute', `New dispute on order #${orderId}.`);
+  }
+
+  async getDisputeResolvedEmail(opts: { dispute: any; order: any; portal: 'customer' | 'seller' }): Promise<string> {
+    const { dispute, order, portal } = opts;
+    const orderId = order?.orderNumber || (order?._id ? order._id.toString().slice(-8) : 'N/A');
+    const { primary, primaryAlt } = await this.colors();
+    const link = portal === 'seller' ? `${this.frontend()}/seller/disputes` : `${this.frontend()}/orders/${order?._id || ''}`;
+
+    const content = `
+      ${await this.hero('✅', 'Dispute resolved', `Your dispute on order #${this.h(orderId)} has been resolved.`)}
+      ${this.infoBox(
+        `<strong>Resolution:</strong> ${this.h(String(dispute.resolution || 'resolved').replace(/_/g, ' '))}` +
+        `${dispute.resolutionNotes ? `<br><br><strong>Notes:</strong> ${this.h(dispute.resolutionNotes)}` : ''}`,
+        'success',
+      )}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(link, 'View details', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'Dispute Resolved', `Your dispute on order #${orderId} is resolved.`);
+  }
+
+  async getReviewNotificationEmail(opts: {
+    sellerName: string;
+    productName: string;
+    productId: string;
+    rating?: number;
+    title?: string;
+    comment?: string;
+  }): Promise<string> {
+    const { primary, primaryAlt } = await this.colors();
+    const rating = Math.max(0, Math.min(5, Math.round(opts.rating || 0)));
+    const stars = '★'.repeat(rating) + '☆'.repeat(5 - rating);
+
+    const content = `
+      ${await this.hero('⭐', 'New product review', `Hi ${this.h(opts.sellerName)}, a customer reviewed your product.`)}
+      ${this.paragraph(`<strong style="color:${EmailTemplatesService.T.fg};">${this.h(opts.productName)}</strong>`)}
+      <div style="margin:8px 0 18px;font-size:22px;color:#f59e0b;letter-spacing:2px;">${stars}</div>
+      ${(opts.title || opts.comment) ? this.infoBox(
+        `${opts.title ? `<strong>${this.h(opts.title)}</strong><br>` : ''}${opts.comment ? `<em>&ldquo;${this.h(opts.comment)}&rdquo;</em>` : ''}`,
+        'accent', primary,
+      ) : ''}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(`${this.frontend()}/seller/products/${opts.productId}`, 'View product', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'New Review', `New ${rating}-star review on ${opts.productName}.`);
+  }
+
+  async getAccountStatusEmail(
+    status: 'active' | 'inactive' | 'suspended',
+    name: string,
+    reason?: string,
+  ): Promise<string> {
+    const frontendUrl = this.frontend();
+    const siteName = this.h(await this.getSiteName());
+    const { primary, primaryAlt } = await this.colors();
+    const reactivated = status === 'active';
+    const emoji = reactivated ? '✅' : status === 'suspended' ? '🚫' : '⏸️';
+    const title = reactivated
+      ? 'Your account is active again'
+      : status === 'suspended'
+        ? 'Your account has been suspended'
+        : 'Your account has been deactivated';
+    const variant: 'success' | 'error' = reactivated ? 'success' : 'error';
+    const body = reactivated
+      ? `Good news, ${this.h(name)}! Your ${siteName} account has been reactivated and you have full access again.`
+      : `Hi ${this.h(name)}, your ${siteName} account has been ${status === 'suspended' ? 'suspended' : 'deactivated'}.` +
+        `${reason ? `<br><br><strong>Reason:</strong> ${this.h(reason)}` : ''}` +
+        `<br><br>If you believe this is a mistake, please contact our support team.`;
+
+    const content = `
+      ${await this.hero(emoji, title)}
+      ${this.infoBox(body, variant)}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(
+          reactivated ? `${frontendUrl}/login` : `${frontendUrl}/contact`,
+          reactivated ? 'Sign in' : 'Contact support',
+          primary, primaryAlt,
+        )}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'Account Status Update', title);
+  }
+
+  async getProductSubmittedEmail(productName: string): Promise<string> {
+    const { primary, primaryAlt } = await this.colors();
+
+    const content = `
+      ${await this.hero('📦', 'Product submitted for review')}
+      ${this.infoBox(
+        `Your product <strong>${this.h(productName)}</strong> has been submitted and is now pending review. We&apos;ll email you as soon as it&apos;s approved and live on the store.`,
+        'warning',
+      )}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(`${this.frontend()}/seller/products`, 'View your products', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'Product Submitted', `Your product "${productName}" is pending review.`);
+  }
+
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   private getCurrencySymbol(currency: string): string {
