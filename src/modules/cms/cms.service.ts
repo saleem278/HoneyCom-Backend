@@ -12,6 +12,7 @@ import { ContentVersion, IContentVersion } from '../../models/ContentVersion.mod
 import { Widget, IWidget } from '../../models/Widget.model';
 import { EmailService } from '../../services/email.service';
 import { ConfigService } from '@nestjs/config';
+import { uploadBufferToCloudinary } from '../../services/fileUpload.service';
 
 @Injectable()
 export class CmsService {
@@ -317,12 +318,60 @@ export class CmsService {
     return { success: true, media };
   }
 
-  async uploadMedia(data: any, userId: string) {
+  async uploadMedia(file: Express.Multer.File, data: any, userId: string) {
+    if (!file) {
+      throw new BadRequestException('A file is required');
+    }
+
+    // Persist the uploaded file via the same Cloudinary storage helper the
+    // rest of the app uses (see fileUpload.service.ts). 'auto' lets Cloudinary
+    // pick image/raw based on the actual bytes so non-image media (PDFs,
+    // videos) are stored correctly too.
+    const { url } = await uploadBufferToCloudinary(file.buffer, {
+      folder: 'honey-ecommerce/cms',
+      resourceType: 'auto',
+    });
+
     const media = await this.mediaModel.create({
-      ...data,
+      fileName: data?.fileName || file.originalname,
+      fileUrl: url,
+      fileType: CmsService.mapMimeToFileType(file.mimetype),
+      fileSize: file.size,
+      mimeType: file.mimetype,
+      folderPath: data?.folderPath,
+      altText: data?.altText,
+      caption: data?.caption,
       uploadedBy: userId,
     });
     return { success: true, media };
+  }
+
+  /**
+   * Map a raw MIME type to the Media schema's `fileType` enum
+   * (image/video/document/other). The schema rejects raw mimetypes, so the
+   * upload handler must never store them directly.
+   */
+  private static mapMimeToFileType(mimeType: string): 'image' | 'video' | 'document' | 'other' {
+    if (!mimeType) {
+      return 'other';
+    }
+    if (mimeType.startsWith('image/')) {
+      return 'image';
+    }
+    if (mimeType.startsWith('video/')) {
+      return 'video';
+    }
+    if (
+      mimeType === 'application/pdf' ||
+      mimeType.startsWith('text/') ||
+      mimeType.includes('msword') ||
+      mimeType.includes('officedocument') ||
+      mimeType.includes('ms-excel') ||
+      mimeType.includes('ms-powerpoint')
+    ) {
+      return 'document';
+    }
+    return 'other';
   }
 
   async updateMedia(id: string, data: any) {
@@ -397,8 +446,22 @@ export class CmsService {
 
   // ========== FORMS ==========
   async getForms() {
-    const forms = await this.formModel.find().sort({ createdAt: -1 }).limit(200);
-    return { success: true, forms };
+    const forms = await this.formModel.find().sort({ createdAt: -1 }).limit(200).lean();
+
+    // Aggregate submission counts per form so the list can show real numbers
+    const counts = await this.formSubmissionModel.aggregate<{ _id: any; count: number }>([
+      { $group: { _id: '$form', count: { $sum: 1 } } },
+    ]);
+    const countMap = new Map<string, number>(
+      counts.map((c) => [String(c._id), c.count]),
+    );
+
+    const formsWithCounts = forms.map((form: any) => ({
+      ...form,
+      submissionsCount: countMap.get(String(form._id)) || 0,
+    }));
+
+    return { success: true, forms: formsWithCounts };
   }
 
   async getForm(id: string) {

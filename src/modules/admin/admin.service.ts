@@ -606,6 +606,9 @@ export class AdminService {
         emailVerified: user.emailVerified,
         phoneVerified: user.phoneVerified,
         sellerInfo: user.sellerInfo,
+        walletBalance: user.walletBalance ?? 0,
+        lastLogin: user.lastLogin,
+        twoFactor: { enabled: user.twoFactor?.enabled ?? false },
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
@@ -947,14 +950,19 @@ export class AdminService {
     reason?: string,
   ) {
     let update: Record<string, unknown> = {};
-    if (action === 'approve') update = { status: 'active' };
-    else if (action === 'reject') update = { status: 'inactive', rejectionReason: reason };
+    // Match single-product approveProduct/rejectProduct semantics: the Product
+    // status enum is ['pending','approved','rejected','inactive'] and the
+    // storefront queries status:'approved'. Writing 'active' here produced an
+    // invalid status that hid bulk-approved products everywhere.
+    if (action === 'approve') update = { status: 'approved', $unset: { rejectionReason: '' } };
+    else if (action === 'reject') update = { status: 'rejected', rejectionReason: reason };
     else if (action === 'feature') update = { featured: true };
     else if (action === 'unfeature') update = { featured: false };
 
     const result = await this.productModel.updateMany(
       { _id: { $in: ids } },
       update,
+      { runValidators: true },
     );
     return { success: true, modified: result.modifiedCount };
   }

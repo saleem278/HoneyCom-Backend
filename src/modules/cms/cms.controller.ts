@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CmsService } from './cms.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -105,9 +106,15 @@ export class CmsController {
   }
 
   @Post('media')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Upload media' })
-  async uploadMedia(@Body() data: any, @Request() req: AuthedRequest) {
-    return this.cmsService.uploadMedia(data, req.user.id);
+  async uploadMedia(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() data: any,
+    @Request() req: AuthedRequest,
+  ) {
+    return this.cmsService.uploadMedia(file, data, req.user.id);
   }
 
   @Put('media/:id')
