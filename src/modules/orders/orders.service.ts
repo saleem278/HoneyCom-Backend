@@ -9,6 +9,7 @@ import { Address, IAddress } from '../../models/Address.model';
 import { Coupon, ICoupon } from '../../models/Coupon.model';
 import { Settings, ISettings } from '../../models/Settings.model';
 import { IUser } from '../../models/User.model';
+import { IDeliverySlot } from '../../models/DeliverySlot.model';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
@@ -27,6 +28,7 @@ export class OrdersService {
     @InjectModel('Coupon') private couponModel: Model<ICoupon>,
     @InjectModel('Settings') private settingsModel: Model<ISettings>,
     @InjectModel('User') private userModel: Model<IUser>,
+    @InjectModel('DeliverySlot') private deliverySlotModel: Model<IDeliverySlot>,
     @InjectConnection() private connection: Connection,
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
@@ -554,6 +556,17 @@ export class OrdersService {
       const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
       const orderNumber = `ORD-${String(Date.now()).slice(-8)}-${String(orderCount + 1).padStart(4, '0')}-${randomSuffix}`;
 
+      // Resolve delivery slot if provided
+      let deliverySlotId: any = undefined;
+      let deliverySlotLabel: string | undefined = undefined;
+      if (orderData.deliverySlotId) {
+        const slot = await this.deliverySlotModel.findById(orderData.deliverySlotId).session(session);
+        if (slot) {
+          deliverySlotId = slot._id;
+          deliverySlotLabel = slot.label;
+        }
+      }
+
       const [createdOrder] = await this.orderModel.create([{
         orderNumber,
         customer: userId,
@@ -572,6 +585,7 @@ export class OrdersService {
         razorpayPaymentId: orderData.razorpayPaymentId,
         status: 'pending',
         paymentStatus: 'pending',
+        ...(deliverySlotId ? { deliverySlot: deliverySlotId, deliverySlotLabel } : {}),
       }], { session });
       order = createdOrder;
     } catch (err) {
