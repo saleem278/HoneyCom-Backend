@@ -10,6 +10,11 @@ export interface IProductQnA {
   a: string;
 }
 
+export interface IProductPriceTier {
+  minQty: number;
+  price: number;
+}
+
 export interface IProduct extends Document {
   name: string;
   description: string;
@@ -35,6 +40,7 @@ export interface IProduct extends Document {
   tags: string[];
   qna?: IProductQnA[];
   specifications?: Array<{ label: string; value: string }>;
+  priceTiers?: IProductPriceTier[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -156,6 +162,12 @@ const ProductSchema: Schema = new Schema(
       {
         label: { type: String, trim: true, maxlength: 100 },
         value: { type: String, trim: true, maxlength: 500 },
+      },
+    ],
+    priceTiers: [
+      {
+        minQty: { type: Number, required: true, min: 2 },
+        price: { type: Number, required: true, min: 0 },
       },
     ],
   },

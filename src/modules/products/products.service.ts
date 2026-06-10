@@ -5,6 +5,9 @@ import { Product, IProduct } from '../../models/Product.model';
 import { Category, ICategory } from '../../models/Category.model';
 import { IProductAlert } from '../../models/ProductAlert.model';
 import { ISettings } from '../../models/Settings.model';
+import { IPriceHistory } from '../../models/PriceHistory.model';
+import { IProductView } from '../../models/ProductView.model';
+import { IOrder } from '../../models/Order.model';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { MobileService } from '../mobile/mobile.service';
 import { EmailService } from '../../services/email.service';
@@ -16,6 +19,9 @@ export class ProductsService {
     @InjectModel('Category') private categoryModel: Model<ICategory>,
     @InjectModel('ProductAlert') private productAlertModel: Model<IProductAlert>,
     @InjectModel('Settings') private settingsModel: Model<ISettings>,
+    @InjectModel('PriceHistory') private priceHistoryModel: Model<IPriceHistory>,
+    @InjectModel('ProductView') private productViewModel: Model<IProductView>,
+    @InjectModel('Order') private orderModel: Model<IOrder>,
     private exchangeRateService: ExchangeRateService,
     private mobileService: MobileService,
     private emailService: EmailService,
@@ -320,6 +326,15 @@ export class ProductsService {
     await product.populate('category', 'name slug');
     await product.populate('seller', 'name email');
 
+    // Record initial price history on product creation
+    this.priceHistoryModel.create({
+      product: product._id,
+      price: product.price,
+      compareAtPrice: product.compareAtPrice,
+      changedAt: new Date(),
+      changedBy: new Types.ObjectId(sellerId),
+    }).catch(() => {});
+
     // Confirm submission to the seller — product is pending admin review. Best-effort.
     const submittedSeller: any = (product as any).seller;
     if (submittedSeller?.email) {
@@ -351,9 +366,9 @@ export class ProductsService {
     let allowedFields = [
       'name', 'description', 'sku', 'price', 'compareAtPrice',
       'category', 'images', 'inventory', 'variants', 'weight',
-      'dimensions', 'featured', 'tags', 'specifications', 'qna',
+      'dimensions', 'featured', 'tags', 'specifications', 'qna', 'priceTiers',
     ];
-    
+
     // Admins can also update status and rejection fields
     if (userRole === 'admin') {
       allowedFields = [...allowedFields, 'status', 'rejectionReason', 'seller', 'rating', 'numReviews'];
@@ -389,6 +404,16 @@ export class ProductsService {
       }
       if (oldInventory === 0 && newInventory > 0) {
         this.triggerBackInStockAlerts(id, updatedProduct.name).catch(() => {});
+      }
+      // Record price history whenever price changes
+      if (filteredUpdateData.price !== undefined && filteredUpdateData.price !== oldPrice) {
+        this.priceHistoryModel.create({
+          product: new Types.ObjectId(id),
+          price: updatedProduct.price,
+          compareAtPrice: updatedProduct.compareAtPrice,
+          changedAt: new Date(),
+          changedBy: new Types.ObjectId(userId),
+        }).catch(() => {});
       }
     }
 
@@ -674,6 +699,56 @@ export class ProductsService {
       priceDrop: alerts.some(a => a.type === 'price_drop'),
       backInStock: alerts.some(a => a.type === 'back_in_stock'),
     };
+  }
+
+  // ── Price History ─────────────────────────────────────────────────────────
+
+  async getPriceHistory(productId: string) {
+    const product = await this.productModel.findById(productId).select('_id').lean();
+    if (!product) throw new NotFoundException('Product not found');
+
+    const history = await this.priceHistoryModel
+      .find({ product: new Types.ObjectId(productId) })
+      .sort({ changedAt: -1 })
+      .limit(30)
+      .lean();
+
+    return { success: true, priceHistory: history };
+  }
+
+  // ── Social Proof ─────────────────────────────────────────────────────────
+
+  async recordView(productId: string) {
+    const product = await this.productModel.findById(productId).select('_id').lean();
+    if (!product) throw new NotFoundException('Product not found');
+
+    await this.productViewModel.create({
+      product: new Types.ObjectId(productId),
+      viewedAt: new Date(),
+    });
+
+    return { success: true };
+  }
+
+  async getSocialProof(productId: string) {
+    const product = await this.productModel.findById(productId).select('_id').lean();
+    if (!product) throw new NotFoundException('Product not found');
+
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const [viewCount24h, soldCount24h] = await Promise.all([
+      this.productViewModel.countDocuments({
+        product: new Types.ObjectId(productId),
+        viewedAt: { $gte: since24h },
+      }),
+      this.orderModel.countDocuments({
+        createdAt: { $gte: since24h },
+        status: { $ne: 'cancelled' },
+        'items.product': new Types.ObjectId(productId),
+      }),
+    ]);
+
+    return { success: true, viewCount24h, soldCount24h };
   }
 
   private async triggerPriceDropAlerts(productId: string, oldPrice: number, newPrice: number, productName: string) {

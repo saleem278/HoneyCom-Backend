@@ -61,6 +61,8 @@ export interface IOrder extends Document {
   estimatedDelivery?: Date;
   couponCode?: string;
   notes?: string;
+  deliverySlot?: mongoose.Types.ObjectId;
+  deliverySlotLabel?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -219,6 +221,14 @@ const OrderSchema: Schema = new Schema(
     },
     notes: {
       type: String,
+    },
+    deliverySlot: {
+      type: Schema.Types.ObjectId,
+      ref: 'DeliverySlot',
+    },
+    deliverySlotLabel: {
+      type: String,
+      trim: true,
     },
   },
   {
