@@ -46,6 +46,12 @@ export class ProductsService {
         if (query.status) {
           filter.status = query.status;
         }
+        // Allow admins to scope the list to a single seller (e.g. drilling in
+        // from the seller-detail "View products" link). Without this the admin
+        // branch silently ignored ?seller and always returned every product.
+        if (query.seller && String(query.seller).match(/^[0-9a-fA-F]{24}$/)) {
+          filter.seller = query.seller;
+        }
         // If no status filter, admin sees all products
       } else if (userRole === 'seller') {
         // Seller always sees their own products, regardless of status
