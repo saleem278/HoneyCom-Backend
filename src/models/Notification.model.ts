@@ -3,6 +3,8 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface INotification extends Document {
   user: mongoose.Types.ObjectId;
   device?: mongoose.Types.ObjectId;
+  /** If this notification was created by an admin broadcast, references the Broadcast doc */
+  broadcastId?: mongoose.Types.ObjectId;
   title: string;
   message: string;
   type: 'order' | 'promotion' | 'system' | 'other';
@@ -41,6 +43,11 @@ const NotificationSchema: Schema = new Schema(
       enum: ['order', 'promotion', 'system', 'other'],
       default: 'other',
     },
+    broadcastId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Broadcast',
+      index: true,
+    },
     data: {
       type: Schema.Types.Mixed,
     },
@@ -64,6 +71,7 @@ NotificationSchema.index({ user: 1 });
 NotificationSchema.index({ read: 1 });
 NotificationSchema.index({ sentAt: -1 });
 NotificationSchema.index({ type: 1 });
+NotificationSchema.index({ broadcastId: 1 });
 
 export const Notification = mongoose.model<INotification>('Notification', NotificationSchema);
 export { NotificationSchema };

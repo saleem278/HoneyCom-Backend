@@ -76,6 +76,13 @@ export class ReferralController {
     return this.referralService.adminUpdateSettings(body);
   }
 
+  @Get('admin/summary')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'superadmin')
+  adminGetSummary() {
+    return this.referralService.adminGetAggregateSummary();
+  }
+
   @Get('admin/stats')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'superadmin')

@@ -25,6 +25,22 @@ import { Roles } from '../auth/decorators/roles.decorator';
 export class CouponsController {
   constructor(private readonly couponsService: CouponsService) {}
 
+  @Get('stats')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({ summary: 'Get aggregate coupon stats' })
+  @Roles('admin')
+  async getStats() {
+    return this.couponsService.getStats();
+  }
+
+  @Post('bulk')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Bulk-generate coupons from a template' })
+  @Roles('admin')
+  async bulkGenerate(@Body() body: { count: number; template: any }) {
+    return this.couponsService.bulkGenerate(body.count, body.template);
+  }
+
   @Get()
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Get all coupons' })

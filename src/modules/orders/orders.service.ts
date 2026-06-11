@@ -9,6 +9,7 @@ import { Address, IAddress } from '../../models/Address.model';
 import { Coupon, ICoupon } from '../../models/Coupon.model';
 import { Settings, ISettings } from '../../models/Settings.model';
 import { IUser } from '../../models/User.model';
+import { IFlashSale } from '../../models/FlashSale.model';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
@@ -27,6 +28,7 @@ export class OrdersService {
     @InjectModel('Coupon') private couponModel: Model<ICoupon>,
     @InjectModel('Settings') private settingsModel: Model<ISettings>,
     @InjectModel('User') private userModel: Model<IUser>,
+    @InjectModel('FlashSale') private flashSaleModel: Model<IFlashSale>,
     @InjectConnection() private connection: Connection,
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
@@ -218,6 +220,29 @@ export class OrdersService {
       sellerEarning?: number;
     }> = [];
 
+    // Pre-fetch active flash sales for all products in this order in one query.
+    // We look up sales whose window covers now and whose stockLimit isn't exhausted
+    // (stockLimit=0 means unlimited). We'll use these to substitute salePrice for
+    // product.price on qualifying items.
+    const productIds = itemsToProcess.map((i: any) => i.productId || (i.product as any)?._id).filter(Boolean);
+    const flashSaleNow = new Date();
+    const activeFlashSales = await this.flashSaleModel
+      .find({
+        product: { $in: productIds },
+        isActive: true,
+        startTime: { $lte: flashSaleNow },
+        endTime: { $gt: flashSaleNow },
+        $or: [{ stockLimit: 0 }, { $expr: { $lt: ['$soldCount', '$stockLimit'] } }],
+      })
+      .lean();
+    // Build a map productId -> flash sale so per-item lookup is O(1).
+    const flashSaleByProduct = new Map<string, any>();
+    for (const fs of activeFlashSales) {
+      flashSaleByProduct.set(fs.product.toString(), fs);
+    }
+    // Track which flash sale IDs need soldCount incremented after order creation.
+    const flashSaleIncrements: Array<{ id: string; qty: number }> = [];
+
     // Reserve inventory atomically, item by item. Each `$inc` is conditional on
     // sufficient stock, so concurrent orders cannot oversell. If any reservation
     // fails (out of stock or product gone), we restore previously-reserved items
@@ -261,7 +286,14 @@ export class OrdersService {
 
         reserved.push({ productId: product._id, quantity: item.quantity });
 
-        const itemTotal = product.price * item.quantity;
+        // Apply flash-sale price if an active sale exists for this product.
+        const flashSale = flashSaleByProduct.get(product._id.toString());
+        const effectivePrice = flashSale ? flashSale.salePrice : product.price;
+        if (flashSale) {
+          flashSaleIncrements.push({ id: flashSale._id.toString(), qty: item.quantity });
+        }
+
+        const itemTotal = effectivePrice * item.quantity;
         subtotal += itemTotal;
 
         const commissionAmount = Number((itemTotal * commissionRate).toFixed(2));
@@ -276,7 +308,7 @@ export class OrdersService {
           seller: (product as any).seller,
           name: product.name,
           quantity: item.quantity,
-          price: product.price,
+          price: effectivePrice,
           image: product.images?.[0] || '',
           variants: item.variants || {},
           // Snapshot commission at order time — rate changes don't
@@ -657,6 +689,20 @@ export class OrdersService {
 
     // Notify the seller(s) of the new order so they can begin fulfilment.
     this.notifySellersOfNewOrder(order);
+
+    // Increment flash-sale soldCount outside the session — these counters
+    // are best-effort analytics. A failure here must not roll back the order.
+    if (flashSaleIncrements.length > 0) {
+      setImmediate(async () => {
+        for (const inc of flashSaleIncrements) {
+          try {
+            await this.flashSaleModel.findByIdAndUpdate(inc.id, { $inc: { soldCount: inc.qty } });
+          } catch (err: any) {
+            this.logger.warn(`Flash sale soldCount increment failed for ${inc.id}: ${err?.message || err}`);
+          }
+        }
+      });
+    }
 
     return {
       success: true,

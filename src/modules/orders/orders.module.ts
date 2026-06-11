@@ -9,6 +9,7 @@ import { Address, AddressSchema } from '../../models/Address.model';
 import { Coupon, CouponSchema } from '../../models/Coupon.model';
 import { Settings, SettingsSchema } from '../../models/Settings.model';
 import { UserSchema } from '../../models/User.model';
+import { FlashSaleSchema } from '../../models/FlashSale.model';
 import { AuthModule } from '../auth/auth.module';
 import { EmailService } from '../../services/email.service';
 import { PdfService } from '../../services/pdf.service';
@@ -25,6 +26,7 @@ import { PaymentsModule } from '../payments/payments.module';
       { name: 'Coupon', schema: CouponSchema },
       { name: 'Settings', schema: SettingsSchema },
       { name: 'User', schema: UserSchema },
+      { name: 'FlashSale', schema: FlashSaleSchema },
     ]),
     AuthModule,
     forwardRef(() => PaymentsModule),

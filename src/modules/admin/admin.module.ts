@@ -1,8 +1,10 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
+import { NotificationSchedulerService } from './notification-scheduler.service';
 import { User, UserSchema } from '../../models/User.model';
 import { Product, ProductSchema } from '../../models/Product.model';
 import { Order, OrderSchema } from '../../models/Order.model';
@@ -10,6 +12,7 @@ import { Category, CategorySchema } from '../../models/Category.model';
 import { ImpersonationEventSchema } from '../../models/ImpersonationEvent.model';
 import { SettingsSchema } from '../../models/Settings.model';
 import { NotificationSchema } from '../../models/Notification.model';
+import { BroadcastSchema } from '../../models/Broadcast.model';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { UsersModule } from '../users/users.module';
@@ -27,7 +30,9 @@ import { LoyaltyModule } from '../loyalty/loyalty.module';
       { name: 'ImpersonationEvent', schema: ImpersonationEventSchema },
       { name: 'Settings', schema: SettingsSchema },
       { name: 'Notification', schema: NotificationSchema },
+      { name: 'Broadcast', schema: BroadcastSchema },
     ]),
+    ScheduleModule.forRoot(),
     ConfigModule,
     AuthModule,
     PaymentsModule,
@@ -35,7 +40,7 @@ import { LoyaltyModule } from '../loyalty/loyalty.module';
     forwardRef(() => LoyaltyModule),
   ],
   controllers: [AdminController],
-  providers: [AdminService, EmailService, ExchangeRateService],
+  providers: [AdminService, NotificationSchedulerService, EmailService, ExchangeRateService],
   exports: [AdminService],
 })
 export class AdminModule {}

@@ -271,16 +271,36 @@ export class AdminController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('type') type?: string,
+    @Query('q') q?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     return this.adminService.getNotifications(
       parseInt(page || '', 10) || 1,
       parseInt(limit || '', 10) || 20,
       type,
+      q,
+      from,
+      to,
     );
   }
 
+  @Get('notifications/audience-count')
+  @ApiOperation({ summary: 'Preview recipient count for a targeting config' })
+  async getAudienceCount(
+    @Query('targetRole') targetRole?: string,
+    @Query('targetRoles') targetRoles?: string,
+    @Query('userIds') userIds?: string,
+  ) {
+    return this.adminService.getAudienceCount({
+      targetRole,
+      targetRoles: targetRoles ? targetRoles.split(',') : undefined,
+      userIds: userIds ? userIds.split(',') : undefined,
+    });
+  }
+
   @Post('notifications/broadcast')
-  @ApiOperation({ summary: 'Broadcast notification to users' })
+  @ApiOperation({ summary: 'Broadcast notification to users (legacy endpoint)' })
   async broadcastNotification(
     @Body() body: {
       title: string;
@@ -294,9 +314,53 @@ export class AdminController {
   }
 
   @Delete('notifications/:id')
-  @ApiOperation({ summary: 'Delete a notification' })
+  @ApiOperation({ summary: 'Delete a single notification row' })
   async deleteNotification(@Param('id') id: string) {
     return this.adminService.deleteNotification(id);
+  }
+
+  // -------- Broadcast / Campaign management --------
+
+  @Get('broadcasts/stats')
+  @ApiOperation({ summary: 'Get aggregate broadcast stats for the last 30 days' })
+  async getBroadcastStats() {
+    return this.adminService.getBroadcastStats();
+  }
+
+  @Get('broadcasts')
+  @ApiOperation({ summary: 'List broadcast campaigns' })
+  async getBroadcasts(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.getBroadcasts(
+      parseInt(page || '', 10) || 1,
+      parseInt(limit || '', 10) || 20,
+    );
+  }
+
+  @Post('broadcasts')
+  @ApiOperation({ summary: 'Create and optionally schedule a broadcast campaign' })
+  async createBroadcast(
+    @Request() req: AuthedRequest,
+    @Body() body: {
+      title: string;
+      message: string;
+      type: 'promotion' | 'system' | 'other';
+      channels?: ('inApp' | 'email')[];
+      targetRoles?: string[];
+      targetUserIds?: string[];
+      actionUrl?: string;
+      scheduledAt?: string;
+    },
+  ) {
+    return this.adminService.createBroadcast(body, req.user.id);
+  }
+
+  @Delete('broadcasts/:id')
+  @ApiOperation({ summary: 'Delete a broadcast campaign and its recipient notification rows' })
+  async deleteBroadcast(@Param('id') id: string) {
+    return this.adminService.deleteBroadcast(id);
   }
 
   @Get('impersonate/audit')

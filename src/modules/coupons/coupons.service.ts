@@ -9,6 +9,20 @@ export class CouponsService {
     @InjectModel('Coupon') private couponModel: Model<ICoupon>,
   ) {}
 
+  async getStats() {
+    const [activeCount, usageAgg] = await Promise.all([
+      this.couponModel.countDocuments({ status: 'active' }),
+      this.couponModel.aggregate([
+        { $group: { _id: null, totalRedemptions: { $sum: '$usedCount' } } },
+      ]),
+    ]);
+    const totalRedemptions = usageAgg[0]?.totalRedemptions ?? 0;
+    return {
+      success: true,
+      stats: { activeCount, totalRedemptions },
+    };
+  }
+
   async findAll(filters?: { status?: string; search?: string }) {
     const query: any = {};
     
@@ -147,6 +161,32 @@ export class CouponsService {
       success: true,
       message: 'Coupon deleted successfully',
     };
+  }
+
+  async bulkGenerate(count: number, template: any) {
+    if (count < 1 || count > 100) {
+      throw new BadRequestException('count must be between 1 and 100');
+    }
+    // Validate dates
+    if (new Date(template.validFrom) >= new Date(template.validUntil)) {
+      throw new BadRequestException('Valid until date must be after valid from date');
+    }
+    if (template.type === 'percentage' && template.value > 100) {
+      throw new BadRequestException('Percentage value cannot exceed 100');
+    }
+
+    const generated: any[] = [];
+    for (let i = 0; i < count; i++) {
+      // 8-char unique uppercase suffix
+      const suffix = Math.random().toString(36).slice(2, 6).toUpperCase() +
+                     Math.random().toString(36).slice(2, 6).toUpperCase();
+      const prefix = (template.codePrefix || 'BULK').toUpperCase().slice(0, 8);
+      const code = `${prefix}-${suffix}`.slice(0, 24).toUpperCase();
+      generated.push({ ...template, code, codePrefix: undefined });
+    }
+
+    const docs = await this.couponModel.insertMany(generated, { ordered: false });
+    return { success: true, created: docs.length, coupons: docs };
   }
 
   async incrementUsage(code: string) {

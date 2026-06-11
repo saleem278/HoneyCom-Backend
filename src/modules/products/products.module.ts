@@ -7,6 +7,7 @@ import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 import { Product, ProductSchema } from '../../models/Product.model';
 import { Category, CategorySchema } from '../../models/Category.model';
+import { BrandSchema } from '../../models/Brand.model';
 import { ProductAlert, ProductAlertSchema } from '../../models/ProductAlert.model';
 import { SettingsSchema } from '../../models/Settings.model';
 import { AuthModule } from '../auth/auth.module';
@@ -19,6 +20,7 @@ import { EmailService } from '../../services/email.service';
     MongooseModule.forFeature([
       { name: 'Product', schema: ProductSchema },
       { name: 'Category', schema: CategorySchema },
+      { name: 'Brand', schema: BrandSchema },
       { name: 'ProductAlert', schema: ProductAlertSchema },
       { name: 'Settings', schema: SettingsSchema },
     ]),

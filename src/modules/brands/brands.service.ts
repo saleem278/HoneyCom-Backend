@@ -9,8 +9,12 @@ export class BrandsService {
     @InjectModel('Brand') private brandModel: Model<IBrand>,
   ) {}
 
-  async findAll() {
-    const brands = await this.brandModel.find({ status: 'active' }).sort({ name: 1 }).limit(500).lean();
+  async findAll(status?: string, isAdmin?: boolean) {
+    // Admin can see all brands (with optional status filter); public path is active-only.
+    const query: Record<string, unknown> = isAdmin
+      ? status ? { status } : {}
+      : { status: 'active' };
+    const brands = await this.brandModel.find(query).sort({ name: 1 }).limit(500).lean();
     return {
       success: true,
       brands,

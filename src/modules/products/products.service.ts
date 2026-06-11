@@ -139,12 +139,30 @@ export class ProductsService {
       };
       const sortSpec = sortMap[query.sort as string] || { createdAt: -1 };
 
+      // Brand filter (by id or slug)
+      if (query.brand) {
+        if (String(query.brand).match(/^[0-9a-fA-F]{24}$/)) {
+          filter.brand = query.brand;
+        } else {
+          // treat as slug — look up Brand model
+          // We do a lazy import to avoid circular deps; brands module is independent
+          const BrandModel = this.productModel.db.model('Brand');
+          const brandDoc = await BrandModel.findOne({ slug: query.brand }).lean();
+          filter.brand = brandDoc ? (brandDoc as any)._id : new Types.ObjectId('000000000000000000000000');
+        }
+      }
+
       // Use regular populate but handle errors gracefully
       const products = await this.productModel
         .find(filter)
         .populate({
           path: 'category',
           select: 'name slug',
+          strictPopulate: false,
+        })
+        .populate({
+          path: 'brand',
+          select: 'name slug logo',
           strictPopulate: false,
         })
         .populate({
@@ -202,6 +220,11 @@ export class ProductsService {
       .populate({
         path: 'category',
         select: 'name slug',
+        strictPopulate: false,
+      })
+      .populate({
+        path: 'brand',
+        select: 'name slug logo',
         strictPopulate: false,
       })
       .populate({

@@ -88,6 +88,14 @@ export class LoyaltyController {
     return this.loyaltyService.updateSettings(dto);
   }
 
+  @Get('admin/loyalty/stats')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'superadmin')
+  @ApiOperation({ summary: 'Get aggregate loyalty program stats' })
+  getAdminStats() {
+    return this.loyaltyService.adminGetStats();
+  }
+
   @Get('admin/loyalty/users')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin', 'superadmin')
