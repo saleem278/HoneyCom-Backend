@@ -238,6 +238,38 @@ export class LoyaltyService {
     return { success: true, loyaltyPoints: (updated as any)?.loyaltyPoints ?? 0 };
   }
 
+  async adminGetStats() {
+    const [totalOutstanding, recentRedeems, activeRedeemers] = await Promise.all([
+      // Sum all current loyalty point balances
+      this.userModel.aggregate([
+        { $match: { role: 'customer' } },
+        { $group: { _id: null, total: { $sum: '$loyaltyPoints' } } },
+      ]).then((r: any[]) => r[0]?.total ?? 0),
+
+      // Points redeemed in last 30 days
+      this.loyaltyTxModel.aggregate([
+        {
+          $match: {
+            type: 'redeem',
+            createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+          },
+        },
+        { $group: { _id: null, total: { $sum: '$points' } } },
+      ]).then((r: any[]) => r[0]?.total ?? 0),
+
+      // Count of users who redeemed in last 30 days
+      this.loyaltyTxModel.countDocuments({
+        type: 'redeem',
+        createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+      }),
+    ]);
+
+    return {
+      success: true,
+      stats: { totalOutstanding, recentRedeems, activeRedeemers },
+    };
+  }
+
   async adminGetUsers(page = 1, limit = 20, search?: string) {
     const query: any = { role: 'customer' };
     if (search) {

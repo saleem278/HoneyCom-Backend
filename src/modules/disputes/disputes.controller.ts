@@ -64,5 +64,26 @@ export class DisputesController {
   async close(@Param('id') id: string, @Request() req: AuthedRequest) {
     return this.disputesService.close(id, req.user.id, req.user.role);
   }
+
+  @Post(':id/messages')
+  @Throttle({ default: { limit: 40, ttl: 60000 } })
+  @ApiOperation({ summary: 'Append a message to the dispute thread (customer/seller/admin)' })
+  @ApiResponse({ status: 201, description: 'Message added' })
+  async addMessage(
+    @Param('id') id: string,
+    @Request() req: AuthedRequest,
+    @Body() body: { body: string; attachments?: string[]; internal?: boolean },
+  ) {
+    return this.disputesService.addMessage(id, req.user.id, req.user.role, body);
+  }
+
+  @Put(':id/reject')
+  @Roles('admin')
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @ApiOperation({ summary: 'Reject/deny a dispute with a reason (admin only)' })
+  @ApiResponse({ status: 200, description: 'Dispute rejected' })
+  async reject(@Param('id') id: string, @Request() req: AuthedRequest, @Body() body: { reason: string }) {
+    return this.disputesService.reject(id, req.user.id, body.reason);
+  }
 }
 

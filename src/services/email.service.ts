@@ -160,7 +160,7 @@ export class EmailService {
   }): Promise<void> {
     const siteName = await this.siteName();
     // Resolve destination from DB settings, fall back to SMTP_USER
-    const settings = await this.settingsModel.findOne({ key: 'supportEmail' }).lean();
+    const settings = await this.settingsModel.findOne({ key: 'branding.supportEmail' }).lean();
     const to: string = (settings?.value as string) || this.configService.get<string>('SMTP_USER') || '';
     if (!to) throw new Error('No support email configured');
     await this.sendEmail({
@@ -323,6 +323,41 @@ export class EmailService {
       to: email,
       subject: `Product submitted for review — ${name}`,
       html: await this.templates.getProductSubmittedEmail(productName),
+    });
+  }
+
+  // ── Payout notifications (PAY-07) ────────────────────────────────────────
+
+  /** Notify a seller that their payout request was approved. */
+  async sendPayoutApprovedEmail(email: string, opts: { sellerName: string; amount: number; currency: string; adminNotes?: string }): Promise<void> {
+    const name = await this.siteName();
+    const amtStr = `${opts.currency} ${Number(opts.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    await this.sendEmail({
+      to: email,
+      subject: `Payout approved: ${amtStr} — ${name}`,
+      html: await this.templates.getPayoutApprovedEmail(opts),
+    });
+  }
+
+  /** Notify a seller that their payout request was rejected. */
+  async sendPayoutRejectedEmail(email: string, opts: { sellerName: string; amount: number; currency: string; rejectionReason: string; adminNotes?: string }): Promise<void> {
+    const name = await this.siteName();
+    const amtStr = `${opts.currency} ${Number(opts.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    await this.sendEmail({
+      to: email,
+      subject: `Payout request rejected: ${amtStr} — ${name}`,
+      html: await this.templates.getPayoutRejectedEmail(opts),
+    });
+  }
+
+  /** Notify a seller that their payout has been transferred. */
+  async sendPayoutPaidEmail(email: string, opts: { sellerName: string; amount: number; currency: string; adminNotes?: string }): Promise<void> {
+    const name = await this.siteName();
+    const amtStr = `${opts.currency} ${Number(opts.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    await this.sendEmail({
+      to: email,
+      subject: `Payout transferred: ${amtStr} — ${name}`,
+      html: await this.templates.getPayoutPaidEmail(opts),
     });
   }
 }

@@ -10,6 +10,7 @@ import { Form, IForm } from '../../models/Form.model';
 import { IFormSubmission } from '../../models/FormSubmission.model';
 import { ContentVersion, IContentVersion } from '../../models/ContentVersion.model';
 import { Widget, IWidget } from '../../models/Widget.model';
+import { ISettings } from '../../models/Settings.model';
 import { EmailService } from '../../services/email.service';
 import { ConfigService } from '@nestjs/config';
 import { uploadBufferToCloudinary } from '../../services/fileUpload.service';
@@ -28,6 +29,7 @@ export class CmsService {
     @InjectModel('FormSubmission') private formSubmissionModel: Model<IFormSubmission>,
     @InjectModel('ContentVersion') private contentVersionModel: Model<IContentVersion>,
     @InjectModel('Widget') private widgetModel: Model<IWidget>,
+    @InjectModel('Settings') private settingsModel: Model<ISettings>,
     private emailService: EmailService,
     private configService: ConfigService,
   ) {}
@@ -81,10 +83,15 @@ export class CmsService {
   }
 
   // ========== PAGES ==========
-  async getPages(status?: string, page: number = 1, limit: number = 20) {
+  async getPages(status?: string, page: number = 1, limit: number = 20, search?: string) {
     const filter: any = {};
     if (status) {
       filter.status = status;
+    }
+    if (search) {
+      const escaped = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rx = new RegExp(escaped, 'i');
+      filter.$or = [{ title: rx }, { slug: rx }];
     }
     const skip = (page - 1) * limit;
     const pages = await this.pageModel
@@ -111,6 +118,17 @@ export class CmsService {
 
   async getPage(id: string) {
     const page = await this.pageModel.findById(id).populate('author', 'name email');
+    if (!page) {
+      throw new NotFoundException('Page not found');
+    }
+    return { success: true, page };
+  }
+
+  async getPageBySlug(slug: string) {
+    const page = await this.pageModel
+      .findOne({ slug, status: 'published' })
+      .populate('author', 'name email')
+      .lean();
     if (!page) {
       throw new NotFoundException('Page not found');
     }
@@ -180,11 +198,22 @@ export class CmsService {
   }
 
   // ========== BLOG ==========
-  async getBlogPosts(status?: string, category?: string, page: number = 1, limit: number = 20) {
+  async getBlogPosts(
+    status?: string,
+    category?: string,
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+  ) {
     const filter: any = {};
     if (status) filter.status = status;
     if (category) filter.category = category;
-    
+    if (search) {
+      const escaped = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rx = new RegExp(escaped, 'i');
+      filter.$or = [{ title: rx }, { slug: rx }, { excerpt: rx }];
+    }
+
     const skip = (page - 1) * limit;
     const posts = await this.blogModel
       .find(filter)
@@ -213,6 +242,18 @@ export class CmsService {
     const post = await this.blogModel.findById(id)
       .populate('author', 'name email')
       .populate('category', 'name slug');
+    if (!post) {
+      throw new NotFoundException('Blog post not found');
+    }
+    return { success: true, post };
+  }
+
+  async getBlogPostBySlug(slug: string) {
+    const post = await this.blogModel
+      .findOne({ slug, status: 'published' })
+      .populate('author', 'name email')
+      .populate('category', 'name slug')
+      .lean();
     if (!post) {
       throw new NotFoundException('Blog post not found');
     }
@@ -282,11 +323,17 @@ export class CmsService {
   }
 
   // ========== MEDIA ==========
-  async getMedia(type?: string, folder?: string, page: number = 1, limit: number = 20) {
-    const filter: any = {};
+  async getMedia(type?: string, folder?: string, page: number = 1, limit: number = 20, search?: string) {
+    const filter: Record<string, unknown> = {};
     if (type) filter.fileType = type;
     if (folder) filter.folderPath = folder;
-    
+    if (search) {
+      // Build a safe case-insensitive regex from the search term (escape regex metachars)
+      const escaped = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rx = new RegExp(escaped, 'i');
+      filter['$or'] = [{ fileName: rx }, { altText: rx }, { caption: rx }];
+    }
+
     const skip = (page - 1) * limit;
     const media = await this.mediaModel
       .find(filter)
@@ -295,9 +342,9 @@ export class CmsService {
       .skip(skip)
       .limit(limit)
       .lean();
-    
+
     const total = await this.mediaModel.countDocuments(filter);
-    
+
     return {
       success: true,
       media,
@@ -308,6 +355,11 @@ export class CmsService {
         pages: Math.ceil(total / limit),
       },
     };
+  }
+
+  async getMediaFolders() {
+    const folders = await this.mediaModel.distinct('folderPath');
+    return { success: true, folders: (folders as string[]).filter(Boolean).sort() };
   }
 
   async getMediaById(id: string) {
@@ -390,6 +442,18 @@ export class CmsService {
     return { success: true, message: 'Media deleted successfully' };
   }
 
+  async deleteMediaBulk(ids: string[]) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new BadRequestException('A non-empty array of media IDs is required');
+    }
+    const result = await this.mediaModel.deleteMany({ _id: { $in: ids } });
+    return {
+      success: true,
+      deleted: result.deletedCount ?? 0,
+      message: `${result.deletedCount ?? 0} media item(s) deleted successfully`,
+    };
+  }
+
   // ========== MENUS ==========
   async getMenus(location?: string) {
     const filter: any = {};
@@ -464,6 +528,45 @@ export class CmsService {
     return { success: true, forms: formsWithCounts };
   }
 
+  /**
+   * Like getForms() but also returns the number of unread (status 'new')
+   * submissions per form so the UI can render an attention badge.
+   */
+  async getFormsWithUnread() {
+    const forms = await this.formModel.find().sort({ createdAt: -1 }).limit(200).lean();
+
+    const counts = await this.formSubmissionModel.aggregate<{
+      _id: any;
+      total: number;
+      unread: number;
+    }>([
+      {
+        $group: {
+          _id: '$form',
+          total: { $sum: 1 },
+          unread: {
+            $sum: { $cond: [{ $eq: ['$status', 'new'] }, 1, 0] },
+          },
+        },
+      },
+    ]);
+
+    const countMap = new Map<string, { total: number; unread: number }>(
+      counts.map((c) => [String(c._id), { total: c.total, unread: c.unread }]),
+    );
+
+    const formsWithCounts = forms.map((form: any) => {
+      const entry = countMap.get(String(form._id));
+      return {
+        ...form,
+        submissionsCount: entry?.total || 0,
+        unreadCount: entry?.unread || 0,
+      };
+    });
+
+    return { success: true, forms: formsWithCounts };
+  }
+
   async getForm(id: string) {
     const form = await this.formModel.findById(id);
     if (!form) {
@@ -520,6 +623,59 @@ export class CmsService {
 
     const submissions = await this.formSubmissionModel.find({ form: formId }).sort({ createdAt: -1 }).limit(500);
     return { success: true, submissions };
+  }
+
+  /**
+   * Get a form's submissions, optionally filtered by status
+   * ('new' | 'read' | 'archived').
+   */
+  async getFormSubmissionsFiltered(formId: string, status?: string) {
+    const form = await this.formModel.findById(formId);
+    if (!form) {
+      throw new NotFoundException('Form not found');
+    }
+
+    const filter: Record<string, unknown> = { form: formId };
+    if (status) {
+      filter.status = status;
+    }
+
+    const submissions = await this.formSubmissionModel
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .limit(500);
+    return { success: true, submissions };
+  }
+
+  async updateSubmissionStatus(
+    formId: string,
+    submissionId: string,
+    status: 'new' | 'read' | 'archived',
+  ) {
+    if (!['new', 'read', 'archived'].includes(status)) {
+      throw new BadRequestException('Invalid submission status');
+    }
+
+    const submission = await this.formSubmissionModel.findOneAndUpdate(
+      { _id: submissionId, form: formId },
+      { status },
+      { new: true, runValidators: true },
+    );
+    if (!submission) {
+      throw new NotFoundException('Submission not found');
+    }
+    return { success: true, submission };
+  }
+
+  async deleteSubmission(formId: string, submissionId: string) {
+    const submission = await this.formSubmissionModel.findOneAndDelete({
+      _id: submissionId,
+      form: formId,
+    });
+    if (!submission) {
+      throw new NotFoundException('Submission not found');
+    }
+    return { success: true, message: 'Submission deleted successfully' };
   }
 
   async submitForm(formId: string, submissionData: any) {
@@ -836,6 +992,155 @@ Sitemap: ${baseUrl}/sitemap.xml`;
       throw new NotFoundException('Widget not found');
     }
     return { success: true, message: 'Widget deleted successfully' };
+  }
+
+  // ========== PUBLIC STOREFRONT ENDPOINTS ==========
+  /**
+   * Return the menu configured for a storefront location (e.g. 'header',
+   * 'footer'). Public endpoint — returns null when no menu is configured so
+   * the storefront can gracefully render without one.
+   */
+  async getPublicMenu(location: string) {
+    if (!location) {
+      throw new BadRequestException('A menu location is required');
+    }
+    const menu = await this.menuModel.findOne({ location }).sort({ updatedAt: -1 }).lean();
+    return { success: true, menu: menu || null };
+  }
+
+  /**
+   * Return active widgets for a storefront slot, sorted for deterministic
+   * rendering. When no location is supplied, returns all active widgets.
+   */
+  async getPublicWidgets(location?: string) {
+    const filter: Record<string, unknown> = { isActive: true };
+    if (location) {
+      filter.location = location;
+    }
+    const widgets = await this.widgetModel.find(filter).sort({ name: 1 }).lean();
+    return { success: true, widgets };
+  }
+
+  // ========== SEO ==========
+  private static readonly SEO_DEFAULTS_KEY = 'seo_defaults';
+
+  private static readonly SEO_FALLBACK_DEFAULTS = {
+    siteName: '',
+    titleTemplate: '%s',
+    metaTitle: '',
+    metaDescription: '',
+    keywords: [] as string[],
+    ogImage: '',
+    twitterHandle: '',
+  };
+
+  /**
+   * SEO audit — counts of published content missing key meta fields so the
+   * dashboard can surface optimisation opportunities.
+   */
+  async getSeoAudit() {
+    const [
+      totalPages,
+      pagesMissingMetaTitle,
+      pagesMissingMetaDescription,
+      totalPosts,
+      postsMissingMetaTitle,
+      postsMissingMetaDescription,
+      postsMissingExcerpt,
+      postsMissingFeaturedImage,
+    ] = await Promise.all([
+      this.pageModel.countDocuments({ status: 'published' }),
+      this.pageModel.countDocuments({
+        status: 'published',
+        $or: [{ metaTitle: { $exists: false } }, { metaTitle: null }, { metaTitle: '' }],
+      }),
+      this.pageModel.countDocuments({
+        status: 'published',
+        $or: [
+          { metaDescription: { $exists: false } },
+          { metaDescription: null },
+          { metaDescription: '' },
+        ],
+      }),
+      this.blogModel.countDocuments({ status: 'published' }),
+      this.blogModel.countDocuments({
+        status: 'published',
+        $or: [{ metaTitle: { $exists: false } }, { metaTitle: null }, { metaTitle: '' }],
+      }),
+      this.blogModel.countDocuments({
+        status: 'published',
+        $or: [
+          { metaDescription: { $exists: false } },
+          { metaDescription: null },
+          { metaDescription: '' },
+        ],
+      }),
+      this.blogModel.countDocuments({
+        status: 'published',
+        $or: [{ excerpt: { $exists: false } }, { excerpt: null }, { excerpt: '' }],
+      }),
+      this.blogModel.countDocuments({
+        status: 'published',
+        $or: [{ featuredImage: { $exists: false } }, { featuredImage: null }, { featuredImage: '' }],
+      }),
+    ]);
+
+    const issues =
+      pagesMissingMetaTitle +
+      pagesMissingMetaDescription +
+      postsMissingMetaTitle +
+      postsMissingMetaDescription +
+      postsMissingExcerpt +
+      postsMissingFeaturedImage;
+
+    return {
+      success: true,
+      audit: {
+        pages: {
+          total: totalPages,
+          missingMetaTitle: pagesMissingMetaTitle,
+          missingMetaDescription: pagesMissingMetaDescription,
+        },
+        blogPosts: {
+          total: totalPosts,
+          missingMetaTitle: postsMissingMetaTitle,
+          missingMetaDescription: postsMissingMetaDescription,
+          missingExcerpt: postsMissingExcerpt,
+          missingFeaturedImage: postsMissingFeaturedImage,
+        },
+        totalIssues: issues,
+      },
+    };
+  }
+
+  async getSeoDefaults() {
+    const setting = await this.settingsModel.findOne({ key: CmsService.SEO_DEFAULTS_KEY }).lean();
+    const defaults = {
+      ...CmsService.SEO_FALLBACK_DEFAULTS,
+      ...((setting?.value as Record<string, any>) || {}),
+    };
+    return { success: true, defaults };
+  }
+
+  async updateSeoDefaults(data: Record<string, any>) {
+    if (!data || typeof data !== 'object') {
+      throw new BadRequestException('SEO defaults payload is required');
+    }
+
+    const existing = await this.settingsModel.findOne({ key: CmsService.SEO_DEFAULTS_KEY }).lean();
+    const merged = {
+      ...CmsService.SEO_FALLBACK_DEFAULTS,
+      ...((existing?.value as Record<string, any>) || {}),
+      ...data,
+    };
+
+    const setting = await this.settingsModel.findOneAndUpdate(
+      { key: CmsService.SEO_DEFAULTS_KEY },
+      { value: merged, category: 'seo', description: 'Global SEO default metadata' },
+      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true },
+    );
+
+    return { success: true, defaults: setting?.value ?? merged };
   }
 }
 

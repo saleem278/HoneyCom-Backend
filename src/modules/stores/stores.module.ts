@@ -4,6 +4,7 @@ import { StoresController } from './stores.controller';
 import { StoresService } from './stores.service';
 import { StoreSchema } from '../../models/Store.model';
 import { UserSchema } from '../../models/User.model';
+import { ProductSchema } from '../../models/Product.model';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
@@ -11,6 +12,7 @@ import { AuthModule } from '../auth/auth.module';
     MongooseModule.forFeature([
       { name: 'Store', schema: StoreSchema },
       { name: 'User', schema: UserSchema },
+      { name: 'Product', schema: ProductSchema },
     ]),
     AuthModule,
   ],

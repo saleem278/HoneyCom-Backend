@@ -1,26 +1,32 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RequestPayoutDto {
-  @ApiProperty({ description: 'Payout amount (must be ≤ available balance)' })
+  @ApiProperty({ description: 'Payout amount (must be >= minimum and <= available balance)' })
   @IsNumber()
   @Min(1)
   amount: number;
 
-  @ApiProperty({ description: 'Bank account holder name' })
+  /** PAY-01: When provided, the service snapshots the saved method bank details */
+  @ApiPropertyOptional({ description: 'ID of a saved payout method. When provided, inline bank fields are not required.' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  bankAccountName: string;
+  payoutMethodId?: string;
 
-  @ApiProperty({ description: 'Bank account number' })
+  @ApiPropertyOptional({ description: 'Bank account holder name (required when payoutMethodId absent)' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  bankAccountNumber: string;
+  bankAccountName?: string;
 
-  @ApiProperty({ description: 'Bank name' })
+  @ApiPropertyOptional({ description: 'Bank account number (required when payoutMethodId absent)' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  bankName: string;
+  bankAccountNumber?: string;
+
+  @ApiPropertyOptional({ description: 'Bank name (required when payoutMethodId absent)' })
+  @IsOptional()
+  @IsString()
+  bankName?: string;
 
   @ApiPropertyOptional({ description: 'IFSC code (India domestic transfers)' })
   @IsOptional()

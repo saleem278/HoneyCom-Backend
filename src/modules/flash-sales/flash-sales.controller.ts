@@ -49,6 +49,15 @@ export class FlashSalesController {
     return { success: true, flashSales };
   }
 
+  @Get('admin/stats')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Admin: get flash-sale aggregate stats' })
+  async getStats() {
+    return this.flashSalesService.getStats();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get single flash sale by ID' })
   async findOne(@Param('id') id: string) {

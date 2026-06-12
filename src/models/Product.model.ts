@@ -17,6 +17,7 @@ export interface IProduct extends Document {
   price: number;
   compareAtPrice?: number;
   category: mongoose.Types.ObjectId;
+  brand?: mongoose.Types.ObjectId;
   seller: mongoose.Types.ObjectId;
   images: string[];
   inventory: number;
@@ -74,6 +75,11 @@ const ProductSchema: Schema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Category',
       required: true,
+    },
+    brand: {
+      type: Schema.Types.ObjectId,
+      ref: 'Brand',
+      index: true,
     },
     seller: {
       type: Schema.Types.ObjectId,
@@ -170,6 +176,8 @@ const ProductSchema: Schema = new Schema(
 ProductSchema.index({ name: 'text', description: 'text', tags: 'text' });
 // Category + status compound (product listing page filter)
 ProductSchema.index({ category: 1, status: 1 });
+// Brand + status compound (brand filter / brand page)
+ProductSchema.index({ brand: 1, status: 1 });
 // Seller product list (seller dashboard)
 ProductSchema.index({ seller: 1, status: 1 });
 // Price range filter — supports minPrice/maxPrice queries efficiently

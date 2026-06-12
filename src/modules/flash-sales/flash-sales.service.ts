@@ -124,4 +124,33 @@ export class FlashSalesService {
   async incrementSold(id: string, qty = 1): Promise<void> {
     await this.flashSaleModel.findByIdAndUpdate(id, { $inc: { soldCount: qty } });
   }
+
+  async getStats(): Promise<{
+    success: boolean;
+    stats: { liveCount: number; totalUnitsSold: number; upcomingCount: number };
+  }> {
+    const now = new Date();
+    const [liveCount, upcomingCount, soldAgg] = await Promise.all([
+      this.flashSaleModel.countDocuments({
+        isActive: true,
+        startTime: { $lte: now },
+        endTime: { $gt: now },
+      }),
+      this.flashSaleModel.countDocuments({
+        isActive: true,
+        startTime: { $gt: now },
+      }),
+      this.flashSaleModel.aggregate([
+        { $group: { _id: null, totalUnitsSold: { $sum: '$soldCount' } } },
+      ]),
+    ]);
+    return {
+      success: true,
+      stats: {
+        liveCount,
+        upcomingCount,
+        totalUnitsSold: soldAgg[0]?.totalUnitsSold ?? 0,
+      },
+    };
+  }
 }

@@ -1016,9 +1016,81 @@ export class AuthService {
   }
 
   /**
-   * Get all sessions for a user
+   * Get 2FA status for the current user. Returns enabled state,
+   * activatedAt, and remaining recovery code count (without exposing
+   * the codes themselves). Uses select:'+twoFactor.recoveryCodes' to
+   * read the count — the field is select:false in the schema.
    */
-  async getUserSessions(userId: string) {
+  async get2FAStatus(userId: string) {
+    const user = await this.userModel
+      .findById(userId)
+      .select('+twoFactor.recoveryCodes')
+      .lean();
+    if (!user) throw new UnauthorizedException('User not found');
+
+    const tf = user.twoFactor;
+    return {
+      success: true,
+      enabled: tf?.enabled ?? false,
+      activatedAt: tf?.activatedAt ?? null,
+      recoveryCodesRemaining: tf?.recoveryCodes?.length ?? 0,
+    };
+  }
+
+  /**
+   * Regenerate recovery codes for a user who already has 2FA enabled.
+   * Requires the current password as a possession check (same bar as
+   * disable2FA). Returns the new plaintext codes once; old codes are
+   * permanently invalidated.
+   */
+  async regenerateRecoveryCodes(userId: string, currentPassword: string) {
+    const user = await this.userModel
+      .findById(userId)
+      .select('+password +twoFactor.recoveryCodes');
+    if (!user) throw new UnauthorizedException('User not found');
+
+    if (!user.twoFactor?.enabled) {
+      throw new BadRequestException('Two-factor authentication is not enabled on this account.');
+    }
+
+    if (!user.password) {
+      throw new BadRequestException(
+        'No password set on this account. Use forgot password to set one first.',
+      );
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const plainRecoveryCodes = generateRecoveryCodes(8);
+    const hashedRecoveryCodes = await Promise.all(
+      plainRecoveryCodes.map(async (c) => bcrypt.hash(c, 10)),
+    );
+
+    user.twoFactor = {
+      ...user.twoFactor,
+      recoveryCodes: hashedRecoveryCodes,
+    };
+    user.markModified('twoFactor');
+    await user.save();
+
+    return {
+      success: true,
+      message: 'Recovery codes regenerated. Save these now — they will not be shown again.',
+      recoveryCodes: plainRecoveryCodes,
+    };
+  }
+
+  /**
+   * Get all sessions for a user, marking the current session via a
+   * single DB query. Accepts the current token hash so isCurrent can
+   * be computed in one pass — avoids the previous double-query pattern
+   * (getUserSessions + getUserSessionsWithTokens) that existed in the
+   * controller.
+   */
+  async getUserSessions(userId: string, currentTokenHash?: string) {
     const sessions = await this.sessionModel
       .find({
         userId,
@@ -1035,12 +1107,14 @@ export class AuthService {
       lastActivity: session.lastActivity,
       createdAt: session.createdAt,
       expiresAt: session.expiresAt,
-      isCurrent: false, // Will be set by controller if token matches
+      isCurrent: currentTokenHash ? session.token === currentTokenHash : false,
     }));
   }
 
   /**
-   * Get all sessions with tokens for comparison (internal use)
+   * @deprecated Use getUserSessions(userId, currentTokenHash) instead.
+   * Kept to avoid breaking any future callers referencing this name;
+   * delegates to the unified method.
    */
   async getUserSessionsWithTokens(userId: string) {
     const sessions = await this.sessionModel

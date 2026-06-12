@@ -135,6 +135,24 @@ export class ReferralService {
     }
   }
 
+  async adminGetAggregateSummary() {
+    const [totalReferrers, totalSuccessful, bonusAgg] = await Promise.all([
+      this.userModel.countDocuments({ referralCode: { $exists: true, $ne: null } }),
+      this.userModel.aggregate([
+        { $match: { 'referralStats.usedCount': { $gt: 0 } } },
+        { $group: { _id: null, total: { $sum: '$referralStats.usedCount' } } },
+      ]).then((r: any[]) => r[0]?.total ?? 0),
+      this.userModel.aggregate([
+        { $match: { 'referralStats.bonusEarned': { $gt: 0 } } },
+        { $group: { _id: null, total: { $sum: '$referralStats.bonusEarned' } } },
+      ]).then((r: any[]) => r[0]?.total ?? 0),
+    ]);
+    return {
+      success: true,
+      stats: { totalReferrers, totalSuccessful, totalBonusPts: bonusAgg },
+    };
+  }
+
   async adminGetStats(page: number = 1, limit: number = 20, search?: string) {
     const safeLimit = Math.min(Math.max(1, limit), 100);
     const safePage = Math.max(1, page);

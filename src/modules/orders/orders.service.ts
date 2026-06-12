@@ -9,6 +9,7 @@ import { Address, IAddress } from '../../models/Address.model';
 import { Coupon, ICoupon } from '../../models/Coupon.model';
 import { Settings, ISettings } from '../../models/Settings.model';
 import { IUser } from '../../models/User.model';
+import { IFlashSale } from '../../models/FlashSale.model';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
@@ -27,6 +28,7 @@ export class OrdersService {
     @InjectModel('Coupon') private couponModel: Model<ICoupon>,
     @InjectModel('Settings') private settingsModel: Model<ISettings>,
     @InjectModel('User') private userModel: Model<IUser>,
+    @InjectModel('FlashSale') private flashSaleModel: Model<IFlashSale>,
     @InjectConnection() private connection: Connection,
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
@@ -103,26 +105,36 @@ export class OrdersService {
    */
   private async getOrderSettings(): Promise<{
     taxRate: number;
+    taxMethod: 'percentage' | 'fixed';
     shippingFlat: number;
     freeShippingAbove: number;
     returnWindowDays: number;
     commissionRate: number;
+    codEnabled: boolean;
   }> {
     const rows = await this.settingsModel
-      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat', 'order.freeShippingAbove', 'order.returnWindowDays', 'platform.commissionRate'] } })
+      .find({ key: { $in: ['order.taxRate', 'order.taxMethod', 'order.shippingFlat', 'order.freeShippingAbove', 'order.returnWindowDays', 'platform.commissionRate', 'payment.codEnabled'] } })
       .lean();
     const map = new Map(rows.map((r: any) => [r.key, r.value]));
     const taxRate = Number(map.get('order.taxRate') ?? 0.18);
+    const taxMethodRaw = String(map.get('order.taxMethod') ?? 'percentage');
     const shippingFlat = Number(map.get('order.shippingFlat') ?? 99);
     const freeShippingAbove = Number(map.get('order.freeShippingAbove') ?? 499);
     const returnWindowDays = Number(map.get('order.returnWindowDays') ?? 30);
     const commissionRate = Number(map.get('platform.commissionRate') ?? 0.10);
+    // codEnabled defaults to true so existing installs keep working after upgrade.
+    const codEnabledRaw = map.get('payment.codEnabled');
+    const codEnabled = codEnabledRaw === undefined || codEnabledRaw === null
+      ? true
+      : codEnabledRaw === true || codEnabledRaw === 'true' || codEnabledRaw === 'yes' || codEnabledRaw === 1;
     return {
       taxRate: Number.isFinite(taxRate) && taxRate >= 0 ? taxRate : 0.18,
+      taxMethod: taxMethodRaw === 'fixed' ? 'fixed' : 'percentage',
       shippingFlat: Number.isFinite(shippingFlat) && shippingFlat >= 0 ? shippingFlat : 99,
       freeShippingAbove: Number.isFinite(freeShippingAbove) && freeShippingAbove >= 0 ? freeShippingAbove : 499,
       returnWindowDays: Number.isFinite(returnWindowDays) && returnWindowDays > 0 ? returnWindowDays : 30,
       commissionRate: Number.isFinite(commissionRate) && commissionRate >= 0 && commissionRate <= 1 ? commissionRate : 0.10,
+      codEnabled,
     };
   }
 
@@ -202,7 +214,7 @@ export class OrdersService {
     // Fetch all order-level settings upfront so the commission rate is
     // available when building each line item and doesn't require a second
     // DB round-trip later in the method.
-    const { taxRate, shippingFlat, freeShippingAbove, commissionRate } = await this.getOrderSettings();
+    const { taxRate, taxMethod, shippingFlat, freeShippingAbove, commissionRate, codEnabled } = await this.getOrderSettings();
 
     let subtotal = 0;
     const items: Array<{
@@ -217,6 +229,29 @@ export class OrdersService {
       commissionAmount?: number;
       sellerEarning?: number;
     }> = [];
+
+    // Pre-fetch active flash sales for all products in this order in one query.
+    // We look up sales whose window covers now and whose stockLimit isn't exhausted
+    // (stockLimit=0 means unlimited). We'll use these to substitute salePrice for
+    // product.price on qualifying items.
+    const productIds = itemsToProcess.map((i: any) => i.productId || (i.product as any)?._id).filter(Boolean);
+    const flashSaleNow = new Date();
+    const activeFlashSales = await this.flashSaleModel
+      .find({
+        product: { $in: productIds },
+        isActive: true,
+        startTime: { $lte: flashSaleNow },
+        endTime: { $gt: flashSaleNow },
+        $or: [{ stockLimit: 0 }, { $expr: { $lt: ['$soldCount', '$stockLimit'] } }],
+      })
+      .lean();
+    // Build a map productId -> flash sale so per-item lookup is O(1).
+    const flashSaleByProduct = new Map<string, any>();
+    for (const fs of activeFlashSales) {
+      flashSaleByProduct.set(fs.product.toString(), fs);
+    }
+    // Track which flash sale IDs need soldCount incremented after order creation.
+    const flashSaleIncrements: Array<{ id: string; qty: number }> = [];
 
     // Reserve inventory atomically, item by item. Each `$inc` is conditional on
     // sufficient stock, so concurrent orders cannot oversell. If any reservation
@@ -261,7 +296,14 @@ export class OrdersService {
 
         reserved.push({ productId: product._id, quantity: item.quantity });
 
-        const itemTotal = product.price * item.quantity;
+        // Apply flash-sale price if an active sale exists for this product.
+        const flashSale = flashSaleByProduct.get(product._id.toString());
+        const effectivePrice = flashSale ? flashSale.salePrice : product.price;
+        if (flashSale) {
+          flashSaleIncrements.push({ id: flashSale._id.toString(), qty: item.quantity });
+        }
+
+        const itemTotal = effectivePrice * item.quantity;
         subtotal += itemTotal;
 
         const commissionAmount = Number((itemTotal * commissionRate).toFixed(2));
@@ -276,7 +318,7 @@ export class OrdersService {
           seller: (product as any).seller,
           name: product.name,
           quantity: item.quantity,
-          price: product.price,
+          price: effectivePrice,
           image: product.images?.[0] || '',
           variants: item.variants || {},
           // Snapshot commission at order time — rate changes don't
@@ -316,7 +358,8 @@ export class OrdersService {
       );
     };
 
-    const tax = subtotal * taxRate;
+    // Branch on taxMethod: 'percentage' multiplies the subtotal; 'fixed' adds a flat charge.
+    const tax = taxMethod === 'fixed' ? taxRate : subtotal * taxRate;
     const shipping = subtotal > 0 && subtotal < freeShippingAbove ? shippingFlat : 0;
     let discount = 0;
     let total = 0;
@@ -357,6 +400,11 @@ export class OrdersService {
       }
       if (!['razorpay', 'paypal', 'cash_on_delivery'].includes(paymentMethod)) {
         throw new BadRequestException(`Invalid payment method: ${paymentMethod}`);
+      }
+      // Gate COD on the admin toggle (payment.codEnabled). Defaults to true for
+      // backward compatibility so existing installs keep working after upgrade.
+      if (paymentMethod === 'cash_on_delivery' && !codEnabled) {
+        throw new BadRequestException('Cash on Delivery is not available at this time');
       }
 
       // SECURITY: Two Razorpay order-creation patterns coexist:
@@ -658,6 +706,20 @@ export class OrdersService {
     // Notify the seller(s) of the new order so they can begin fulfilment.
     this.notifySellersOfNewOrder(order);
 
+    // Increment flash-sale soldCount outside the session — these counters
+    // are best-effort analytics. A failure here must not roll back the order.
+    if (flashSaleIncrements.length > 0) {
+      setImmediate(async () => {
+        for (const inc of flashSaleIncrements) {
+          try {
+            await this.flashSaleModel.findByIdAndUpdate(inc.id, { $inc: { soldCount: inc.qty } });
+          } catch (err: any) {
+            this.logger.warn(`Flash sale soldCount increment failed for ${inc.id}: ${err?.message || err}`);
+          }
+        }
+      });
+    }
+
     return {
       success: true,
       order: this.convertOrderCurrency(order),
@@ -895,12 +957,21 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
-    // Authorization check: admin can access any order, users can only access their own
+    // Authorization check: admin can access any order; owning customer can access
+    // their own order; sellers can access orders containing their line items (SO-4).
     if (userRole !== 'admin') {
-      const customerId = this.extractCustomerId(order.customer);
-      
-      if (customerId !== userId) {
-        throw new BadRequestException('Not authorized');
+      if (userRole === 'seller') {
+        const sellerProducts = await this.productModel.find({ seller: userId }).select('_id').limit(10000).lean();
+        const sellerProductIds = new Set(sellerProducts.map((p: any) => p._id.toString()));
+        const hasSellerItem = (order.items as any[]).some((item: any) => sellerProductIds.has(item.product?.toString()));
+        if (!hasSellerItem) {
+          throw new BadRequestException('Not authorized');
+        }
+      } else {
+        const customerId = this.extractCustomerId(order.customer);
+        if (customerId !== userId) {
+          throw new BadRequestException('Not authorized');
+        }
       }
     }
 

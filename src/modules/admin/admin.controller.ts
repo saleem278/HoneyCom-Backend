@@ -71,6 +71,35 @@ export class AdminController {
     return this.adminService.processRefund(id, body.amount, body.reason);
   }
 
+  // SS-5: paginated seller list
+  @Get('sellers')
+  @ApiOperation({ summary: 'Get all sellers (server-paginated, filterable)' })
+  @ApiResponse({ status: 200, description: 'Paginated seller list' })
+  async getSellers(
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.getSellers({
+      status,
+      search,
+      page: parseInt(page || '1', 10) || 1,
+      limit: parseInt(limit || '20', 10) || 20,
+    });
+  }
+
+  // SS-3: bulk approve/reject
+  @Post('sellers/bulk')
+  @ApiOperation({ summary: 'Bulk approve or reject sellers' })
+  @ApiResponse({ status: 200, description: 'Bulk action applied' })
+  async adminBulkSellers(
+    @Request() req: AuthedRequest,
+    @Body() body: { ids: string[]; action: 'approve' | 'reject'; reason?: string },
+  ) {
+    return this.adminService.adminBulkSellers(body.ids, body.action, body.reason, req.user.id);
+  }
+
   @Get('sellers/pending')
   @ApiOperation({ summary: 'Get pending seller registrations' })
   @ApiResponse({ status: 200, description: 'List of pending sellers' })
@@ -81,15 +110,27 @@ export class AdminController {
   @Put('sellers/:id/approve')
   @ApiOperation({ summary: 'Approve seller registration' })
   @ApiResponse({ status: 200, description: 'Seller approved' })
-  async approveSeller(@Param('id') id: string) {
-    return this.adminService.approveSeller(id);
+  async approveSeller(@Request() req: AuthedRequest, @Param('id') id: string) {
+    return this.adminService.approveSeller(id, req.user.id);
   }
 
   @Put('sellers/:id/reject')
   @ApiOperation({ summary: 'Reject seller registration' })
   @ApiResponse({ status: 200, description: 'Seller rejected' })
-  async rejectSeller(@Param('id') id: string, @Body() body: { reason?: string }) {
-    return this.adminService.rejectSeller(id, body.reason);
+  async rejectSeller(@Request() req: AuthedRequest, @Param('id') id: string, @Body() body: { reason?: string }) {
+    return this.adminService.rejectSeller(id, body.reason, req.user.id);
+  }
+
+    // SS-10: request more info from seller
+  @Put('sellers/:id/request-info')
+  @ApiOperation({ summary: 'Request more information from a seller applicant' })
+  @ApiResponse({ status: 200, description: 'Info request sent' })
+  async requestSellerInfo(
+    @Request() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() body: { message: string },
+  ) {
+    return this.adminService.requestSellerInfo(id, body.message, req.user.id);
   }
 
   @Get('users/:id')
@@ -227,7 +268,15 @@ export class AdminController {
   @ApiOperation({ summary: 'Admin: update order status / tracking number' })
   async adminUpdateOrder(
     @Param('id') id: string,
-    @Body() body: { status?: string; trackingNumber?: string; note?: string },
+    @Body()
+    body: {
+      status?: string;
+      trackingNumber?: string;
+      carrier?: string;
+      estimatedDelivery?: string;
+      note?: string;
+      notes?: string;
+    },
   ) {
     return this.adminService.adminUpdateOrder(id, body);
   }
@@ -271,16 +320,36 @@ export class AdminController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('type') type?: string,
+    @Query('q') q?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     return this.adminService.getNotifications(
       parseInt(page || '', 10) || 1,
       parseInt(limit || '', 10) || 20,
       type,
+      q,
+      from,
+      to,
     );
   }
 
+  @Get('notifications/audience-count')
+  @ApiOperation({ summary: 'Preview recipient count for a targeting config' })
+  async getAudienceCount(
+    @Query('targetRole') targetRole?: string,
+    @Query('targetRoles') targetRoles?: string,
+    @Query('userIds') userIds?: string,
+  ) {
+    return this.adminService.getAudienceCount({
+      targetRole,
+      targetRoles: targetRoles ? targetRoles.split(',') : undefined,
+      userIds: userIds ? userIds.split(',') : undefined,
+    });
+  }
+
   @Post('notifications/broadcast')
-  @ApiOperation({ summary: 'Broadcast notification to users' })
+  @ApiOperation({ summary: 'Broadcast notification to users (legacy endpoint)' })
   async broadcastNotification(
     @Body() body: {
       title: string;
@@ -294,9 +363,53 @@ export class AdminController {
   }
 
   @Delete('notifications/:id')
-  @ApiOperation({ summary: 'Delete a notification' })
+  @ApiOperation({ summary: 'Delete a single notification row' })
   async deleteNotification(@Param('id') id: string) {
     return this.adminService.deleteNotification(id);
+  }
+
+  // -------- Broadcast / Campaign management --------
+
+  @Get('broadcasts/stats')
+  @ApiOperation({ summary: 'Get aggregate broadcast stats for the last 30 days' })
+  async getBroadcastStats() {
+    return this.adminService.getBroadcastStats();
+  }
+
+  @Get('broadcasts')
+  @ApiOperation({ summary: 'List broadcast campaigns' })
+  async getBroadcasts(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.getBroadcasts(
+      parseInt(page || '', 10) || 1,
+      parseInt(limit || '', 10) || 20,
+    );
+  }
+
+  @Post('broadcasts')
+  @ApiOperation({ summary: 'Create and optionally schedule a broadcast campaign' })
+  async createBroadcast(
+    @Request() req: AuthedRequest,
+    @Body() body: {
+      title: string;
+      message: string;
+      type: 'promotion' | 'system' | 'other';
+      channels?: ('inApp' | 'email')[];
+      targetRoles?: string[];
+      targetUserIds?: string[];
+      actionUrl?: string;
+      scheduledAt?: string;
+    },
+  ) {
+    return this.adminService.createBroadcast(body, req.user.id);
+  }
+
+  @Delete('broadcasts/:id')
+  @ApiOperation({ summary: 'Delete a broadcast campaign and its recipient notification rows' })
+  async deleteBroadcast(@Param('id') id: string) {
+    return this.adminService.deleteBroadcast(id);
   }
 
   @Get('impersonate/audit')

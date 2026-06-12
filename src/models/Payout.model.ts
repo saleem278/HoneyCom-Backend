@@ -4,7 +4,8 @@ export interface IPayout extends Document {
   seller: mongoose.Types.ObjectId;
   amount: number;
   currency: string;
-  status: 'pending' | 'approved' | 'paid' | 'rejected';
+  /** PAY-03: "cancelled" added so sellers can self-cancel pending requests */
+  status: 'pending' | 'approved' | 'paid' | 'rejected' | 'cancelled';
   bankAccountName: string;
   bankAccountNumber: string;
   bankName: string;
@@ -16,6 +17,9 @@ export interface IPayout extends Document {
   processedBy?: mongoose.Types.ObjectId;
   processedAt?: Date;
   rejectionReason?: string;
+  transferReference?: string;
+  paymentMethod?: string;
+  paidAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,7 +31,7 @@ const PayoutSchema: Schema = new Schema(
     currency: { type: String, default: 'INR', trim: true },
     status: {
       type: String,
-      enum: ['pending', 'approved', 'paid', 'rejected'],
+      enum: ['pending', 'approved', 'paid', 'rejected', 'cancelled'],
       default: 'pending',
     },
     bankAccountName: { type: String, required: true, trim: true },
@@ -41,6 +45,9 @@ const PayoutSchema: Schema = new Schema(
     processedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     processedAt: { type: Date },
     rejectionReason: { type: String, trim: true },
+    transferReference: { type: String, trim: true },
+    paymentMethod: { type: String, trim: true },
+    paidAt: { type: Date },
   },
   { timestamps: true, collection: 'payouts' },
 );

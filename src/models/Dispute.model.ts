@@ -1,5 +1,15 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export interface IDisputeMessage {
+  author?: mongoose.Types.ObjectId;
+  authorRole: 'admin' | 'seller' | 'customer';
+  body: string;
+  attachments?: string[];
+  /** Internal notes are visible to admin (and seller) only, never the customer. */
+  internal: boolean;
+  createdAt: Date;
+}
+
 export interface IDispute extends Document {
   order: mongoose.Types.ObjectId;
   customer: mongoose.Types.ObjectId;
@@ -13,9 +23,25 @@ export interface IDispute extends Document {
   resolvedBy?: mongoose.Types.ObjectId;
   resolvedAt?: Date;
   attachments?: string[];
+  /** Threaded conversation between customer, seller and admin. */
+  messages: IDisputeMessage[];
+  /** SLA target — first response/resolution due time, set on create. */
+  slaDueAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const DisputeMessageSchema = new Schema<IDisputeMessage>(
+  {
+    author: { type: Schema.Types.ObjectId, ref: 'User' },
+    authorRole: { type: String, enum: ['admin', 'seller', 'customer'], required: true },
+    body: { type: String, required: true, trim: true },
+    attachments: [{ type: String }],
+    internal: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: true },
+);
 
 const DisputeSchema: Schema = new Schema(
   {
@@ -72,6 +98,10 @@ const DisputeSchema: Schema = new Schema(
         type: String,
       },
     ],
+    messages: { type: [DisputeMessageSchema], default: [] },
+    slaDueAt: {
+      type: Date,
+    },
   },
   {
     timestamps: true,

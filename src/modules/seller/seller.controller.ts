@@ -21,6 +21,15 @@ export class SellerController {
     return this.sellerService.getDashboard(req.user.id);
   }
 
+  /** SP-13/SP-14: Aggregate stats. MUST be declared before @Get('products') so NestJS
+   *  doesn't match the literal string "stats" as a :id dynamic segment. */
+  @Get('products/stats')
+  @ApiOperation({ summary: 'Get seller product stats' })
+  @ApiResponse({ status: 200, description: 'Aggregated product counts' })
+  async getProductStats(@Request() req: AuthedRequest) {
+    return this.sellerService.getProductStats(req.user.id);
+  }
+
   @Get('products')
   @ApiOperation({ summary: 'Get seller products' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -42,11 +51,19 @@ export class SellerController {
 
   @Get('orders')
   @ApiOperation({ summary: 'Get seller orders' })
+  @ApiQuery({ name: 'status', required: false, type: String, description: 'Filter by order status' })
+  @ApiQuery({ name: 'search', required: false, type: String, description: 'Search by order number or customer name/email' })
   @ApiResponse({ status: 200, description: 'List of orders' })
-  async getOrders(@Request() req: AuthedRequest, @Query('page') page?: string, @Query('limit') limit?: string) {
+  async getOrders(
+    @Request() req: AuthedRequest,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
     const pageNum = parseInt(page || '', 10) || 1;
     const limitNum = parseInt(limit || '', 10) || 20;
-    return this.sellerService.getOrders(req.user.id, pageNum, limitNum);
+    return this.sellerService.getOrders(req.user.id, pageNum, limitNum, status, search);
   }
 
   @Get('orders/:id')
@@ -61,7 +78,7 @@ export class SellerController {
   @ApiResponse({ status: 200, description: 'Order status updated' })
   async updateOrderStatus(
     @Param('id') id: string,
-    @Body() body: { status: string; trackingNumber?: string; carrier?: string },
+    @Body() body: { status: string; trackingNumber?: string; carrier?: string; estimatedDelivery?: string; notes?: string },
     @Request() req: AuthedRequest,
   ) {
     return this.sellerService.updateOrderStatus(id, req.user.id, body);
@@ -95,9 +112,18 @@ export class SellerController {
 
   @Get('reports/customer-insights')
   @ApiOperation({ summary: 'Get customer insights' })
+  @ApiQuery({ name: 'startDate', required: false, type: String })
+  @ApiQuery({ name: 'endDate', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Customer insights data' })
-  async getCustomerInsights(@Request() req: AuthedRequest) {
-    return this.sellerService.getCustomerInsights(req.user.id);
+  async getCustomerInsights(
+    @Request() req: AuthedRequest,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    // SDA-08: date range so sellers can answer "who were my top buyers last quarter"
+    const start = startDate ? new Date(startDate) : undefined;
+    const end = endDate ? new Date(endDate) : undefined;
+    return this.sellerService.getCustomerInsights(req.user.id, start, end);
   }
 }
 

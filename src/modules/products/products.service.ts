@@ -8,6 +8,8 @@ import { ISettings } from '../../models/Settings.model';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { MobileService } from '../mobile/mobile.service';
 import { EmailService } from '../../services/email.service';
+// SP-01: used by uploadProductImage to stream image buffers to Cloudinary.
+import { uploadBufferToCloudinary } from '../../services/fileUpload.service';
 
 @Injectable()
 export class ProductsService {
@@ -45,6 +47,12 @@ export class ProductsService {
       if (userRole === 'admin') {
         if (query.status) {
           filter.status = query.status;
+        }
+        // Allow admins to scope the list to a single seller (e.g. drilling in
+        // from the seller-detail "View products" link). Without this the admin
+        // branch silently ignored ?seller and always returned every product.
+        if (query.seller && String(query.seller).match(/^[0-9a-fA-F]{24}$/)) {
+          filter.seller = query.seller;
         }
         // If no status filter, admin sees all products
       } else if (userRole === 'seller') {
@@ -133,12 +141,30 @@ export class ProductsService {
       };
       const sortSpec = sortMap[query.sort as string] || { createdAt: -1 };
 
+      // Brand filter (by id or slug)
+      if (query.brand) {
+        if (String(query.brand).match(/^[0-9a-fA-F]{24}$/)) {
+          filter.brand = query.brand;
+        } else {
+          // treat as slug — look up Brand model
+          // We do a lazy import to avoid circular deps; brands module is independent
+          const BrandModel = this.productModel.db.model('Brand');
+          const brandDoc = await BrandModel.findOne({ slug: query.brand }).lean();
+          filter.brand = brandDoc ? (brandDoc as any)._id : new Types.ObjectId('000000000000000000000000');
+        }
+      }
+
       // Use regular populate but handle errors gracefully
       const products = await this.productModel
         .find(filter)
         .populate({
           path: 'category',
           select: 'name slug',
+          strictPopulate: false,
+        })
+        .populate({
+          path: 'brand',
+          select: 'name slug logo',
           strictPopulate: false,
         })
         .populate({
@@ -196,6 +222,11 @@ export class ProductsService {
       .populate({
         path: 'category',
         select: 'name slug',
+        strictPopulate: false,
+      })
+      .populate({
+        path: 'brand',
+        select: 'name slug logo',
         strictPopulate: false,
       })
       .populate({
@@ -297,6 +328,47 @@ export class ProductsService {
     }
   }
 
+  // ── SP-01: Real Image Upload ──────────────────────────────────────────────────
+
+  /** Upload a product image buffer to Cloudinary. Returns the CDN URL. */
+  async uploadProductImage(file: Express.Multer.File): Promise<{ success: boolean; url: string }> {
+    if (!file) throw new BadRequestException('Image file is required');
+    if (!file.mimetype.startsWith('image/')) throw new BadRequestException('Only image files are accepted');
+    if (file.size > 10 * 1024 * 1024) throw new BadRequestException('Image must be smaller than 10 MB');
+    const { url } = await uploadBufferToCloudinary(file.buffer, {
+      folder: 'honey-ecommerce/products',
+      resourceType: 'image',
+    });
+    return { success: true, url };
+  }
+
+  // ── SP-06: CSV Export ─────────────────────────────────────────────────────────
+
+  /** Export the seller's catalog as a CSV string for download. */
+  async exportProductsCsv(sellerId: string): Promise<string> {
+    const products = await this.productModel
+      .find({ seller: sellerId })
+      .populate('category', 'name')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const header = 'name,description,sku,price,compareAtPrice,category,inventory,status,tags,images';
+    const rows = (products as any[]).map((p) => {
+      const esc = (v: unknown) => {
+        const s = String(v ?? '').replace(/"/g, '""');
+        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+      };
+      return [
+        esc(p.name), esc(p.description), esc(p.sku), esc(p.price),
+        esc(p.compareAtPrice ?? ''), esc(p.category?.name ?? ''),
+        esc(p.inventory), esc(p.status),
+        esc((p.tags ?? []).join(',')), esc((p.images ?? []).join(',')),
+      ].join(',');
+    });
+
+    return [header, ...rows].join('\n');
+  }
+
   async create(createProductDto: any, sellerId: string) {
     // Validate compareAtPrice is not lower than price (would show a fake discount)
     if (
@@ -353,7 +425,12 @@ export class ProductsService {
       'category', 'images', 'inventory', 'variants', 'weight',
       'dimensions', 'featured', 'tags', 'specifications', 'qna',
     ];
-    
+
+    // SP-08: sellers may request status changes (approved↔inactive).
+    if (userRole === 'seller') {
+      allowedFields = [...allowedFields, 'status'];
+    }
+
     // Admins can also update status and rejection fields
     if (userRole === 'admin') {
       allowedFields = [...allowedFields, 'status', 'rejectionReason', 'seller', 'rating', 'numReviews'];
@@ -364,6 +441,38 @@ export class ProductsService {
       if (allowedFields.includes(key)) {
         filteredUpdateData[key] = updateProductDto[key];
       }
+    }
+
+    // SP-08: enforce controlled seller status transitions.
+    // Sellers may only transition approved→inactive (pause) or inactive→approved (resume)
+    // or rejected→pending (resubmit). They cannot self-approve pending products.
+    if (userRole === 'seller' && filteredUpdateData.status !== undefined) {
+      const currentStatus = product.status as string;
+      const requestedStatus = filteredUpdateData.status as string;
+      const sellerAllowedTransitions: Record<string, string[]> = {
+        approved: ['inactive'],
+        inactive: ['approved'],
+        rejected: ['pending'],
+      };
+      const allowed = sellerAllowedTransitions[currentStatus] ?? [];
+      if (!allowed.includes(requestedStatus)) {
+        // Strip the disallowed status change — don't throw; other fields still save.
+        delete filteredUpdateData.status;
+      } else if (currentStatus === 'rejected' && requestedStatus === 'pending') {
+        // SP-12: clear the stale rejection note when the seller resubmits.
+        filteredUpdateData.rejectionReason = '';
+      }
+    }
+
+    // SP-12: editing a rejected product without explicitly setting status
+    // auto-transitions it to 'pending' so it re-enters admin review.
+    if (
+      userRole === 'seller' &&
+      filteredUpdateData.status === undefined &&
+      (product.status as string) === 'rejected'
+    ) {
+      filteredUpdateData.status = 'pending';
+      filteredUpdateData.rejectionReason = '';
     }
 
     // Validate image URLs before persisting to prevent SSRF
@@ -417,9 +526,6 @@ export class ProductsService {
         .on('data', (data: any) => results.push(data))
         .on('end', async () => {
           try {
-            const products = [];
-            const errors: string[] = [];
-
             // Batch-fetch all categories once to avoid N+1 queries in the loop.
             // For each unique category name in the CSV, look it up in one pass.
             const uniqueCategoryNames: string[] = [
@@ -448,7 +554,8 @@ export class ProductsService {
               categoryMap.set(cat.slug, cat._id);
             }
 
-            // Batch-check all existing SKUs once to avoid N+1 (1 query per row).
+            // SP-06: UPSERT by SKU — batch-check existing SKUs and fetch their
+            // owner so we can update seller-owned rows instead of rejecting them.
             const allRowSkus = results
               .map((r: any) => {
                 const rawSku = r.sku || r.SKU;
@@ -456,9 +563,23 @@ export class ProductsService {
               })
               .filter(Boolean) as string[];
             const existingSkuDocs = allRowSkus.length
-              ? await this.productModel.find({ sku: { $in: allRowSkus } }).select('sku').lean()
+              ? await this.productModel
+                  .find({ sku: { $in: allRowSkus } })
+                  .select('sku seller')
+                  .lean()
               : [];
-            const existingSkus = new Set(existingSkuDocs.map((p: any) => p.sku));
+            // Map: normalized SKU → { owned: boolean, _id }
+            const existingSkuMap = new Map<string, { owned: boolean; _id: any }>();
+            for (const doc of existingSkuDocs as any[]) {
+              existingSkuMap.set(doc.sku as string, {
+                owned: String(doc.seller) === String(sellerId),
+                _id: doc._id,
+              });
+            }
+
+            const toInsert: any[] = [];
+            const toUpdate: Array<{ _id: any; data: any }> = [];
+            const errors: string[] = [];
 
             for (let i = 0; i < results.length; i++) {
               const row = results[i];
@@ -487,12 +608,7 @@ export class ProductsService {
                   const skuPrefix = row.name.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, '');
                   sku = `${skuPrefix}-${Date.now()}-${i}`;
                 }
-
-                // Check against pre-fetched set — O(1), no extra DB query per row
-                if (existingSkus.has(sku.toUpperCase())) {
-                  errors.push(`Row ${i + 2}: SKU "${sku}" already exists`);
-                  continue;
-                }
+                const skuUpper = sku.toUpperCase();
 
                 const parsedPrice = parseFloat(row.price);
                 if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
@@ -505,32 +621,70 @@ export class ProductsService {
                   continue;
                 }
 
-                const productData = {
-                  name: row.name,
-                  description: row.description || row.name,
-                  sku: sku.toUpperCase(),
-                  price: parsedPrice,
-                  compareAtPrice: parsedCompareAt,
-                  category: categoryId,
-                  seller: sellerId,
-                  inventory: parseInt(row.inventory || row.stock || '0') || 0,
-                  images: row.images ? row.images.split(',').map((img: string) => img.trim()) : [],
-                  status: 'pending',
-                  featured: row.featured === 'true' || row.featured === '1',
-                  tags: row.tags ? row.tags.split(',').map((tag: string) => tag.trim()) : [],
-                };
+                const parsedInventory = parseInt(row.inventory || row.stock || '0') || 0;
+                const parsedImages = row.images
+                  ? row.images.split(',').map((img: string) => img.trim()).filter(Boolean)
+                  : [];
+                const parsedTags = row.tags
+                  ? row.tags.split(',').map((tag: string) => tag.trim()).filter(Boolean)
+                  : [];
 
-                products.push(productData);
+                // SP-06: UPSERT — if SKU already exists and this seller owns it, update
+                const existing = existingSkuMap.get(skuUpper);
+                if (existing) {
+                  if (!existing.owned) {
+                    errors.push(`Row ${i + 2}: SKU "${skuUpper}" belongs to another seller`);
+                    continue;
+                  }
+                  // Update mutable fields; never touch status/seller/rating
+                  const updateData: any = {
+                    name: row.name,
+                    price: parsedPrice,
+                    inventory: parsedInventory,
+                    category: categoryId,
+                  };
+                  if (row.description) updateData.description = row.description;
+                  if (parsedCompareAt !== undefined) updateData.compareAtPrice = parsedCompareAt;
+                  if (parsedImages.length > 0) updateData.images = parsedImages;
+                  if (parsedTags.length > 0) updateData.tags = parsedTags;
+                  toUpdate.push({ _id: existing._id, data: updateData });
+                } else {
+                  toInsert.push({
+                    name: row.name,
+                    description: row.description || row.name,
+                    sku: skuUpper,
+                    price: parsedPrice,
+                    compareAtPrice: parsedCompareAt,
+                    category: categoryId,
+                    seller: sellerId,
+                    inventory: parsedInventory,
+                    images: parsedImages,
+                    status: 'pending',
+                    featured: row.featured === 'true' || row.featured === '1',
+                    tags: parsedTags,
+                  });
+                }
               } catch (error: any) {
                 errors.push(`Row ${i + 2}: ${error.message}`);
               }
             }
 
-            // Insert products in bulk
+            // Insert new products in bulk
             let createdCount = 0;
-            if (products.length > 0) {
-              const created = await this.productModel.insertMany(products);
+            if (toInsert.length > 0) {
+              const created = await this.productModel.insertMany(toInsert);
               createdCount = created.length;
+            }
+
+            // Update existing products in parallel (bounded by batch size)
+            let updatedCount = 0;
+            if (toUpdate.length > 0) {
+              await Promise.all(
+                toUpdate.map(({ _id, data }) =>
+                  this.productModel.findByIdAndUpdate(_id, data, { runValidators: false }),
+                ),
+              );
+              updatedCount = toUpdate.length;
             }
 
             // Clean up uploaded file
@@ -542,8 +696,9 @@ export class ProductsService {
 
             resolve({
               success: true,
-              message: `Successfully uploaded ${createdCount} products`,
+              message: `Created ${createdCount}, updated ${updatedCount} product(s)`,
               created: createdCount,
+              updated: updatedCount,
               errors: errors.length > 0 ? errors : undefined,
               totalRows: results.length,
             });

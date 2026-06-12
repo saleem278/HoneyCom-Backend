@@ -1,7 +1,10 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Query, Req } from '@nestjs/common';
+import { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { BrandsService } from './brands.service';
+import { CreateBrandDto } from './dto/create-brand.dto';
+import { UpdateBrandDto } from './dto/update-brand.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -15,10 +18,12 @@ export class BrandsController {
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
   @Throttle({ default: { limit: 60, ttl: 60000 } })
-  @ApiOperation({ summary: 'Get all brands' })
+  @ApiOperation({ summary: 'Get all brands (admin sees all; public sees active only)' })
+  @ApiQuery({ name: 'status', required: false, type: String })
   @ApiResponse({ status: 200, description: 'List of brands' })
-  async findAll() {
-    return this.brandsService.findAll();
+  async findAll(@Query('status') status?: string, @Req() req?: Request) {
+    const isAdmin = (req as any)?.user?.role === 'admin';
+    return this.brandsService.findAll(status, isAdmin);
   }
 
   @Get('slug/:slug')
@@ -46,7 +51,7 @@ export class BrandsController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Create brand' })
   @ApiResponse({ status: 201, description: 'Brand created' })
-  async create(@Body() brandData: any) {
+  async create(@Body() brandData: CreateBrandDto) {
     return this.brandsService.create(brandData);
   }
 
@@ -57,7 +62,7 @@ export class BrandsController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update brand' })
   @ApiResponse({ status: 200, description: 'Brand updated' })
-  async update(@Param('id') id: string, @Body() updateData: any) {
+  async update(@Param('id') id: string, @Body() updateData: UpdateBrandDto) {
     return this.brandsService.update(id, updateData);
   }
 

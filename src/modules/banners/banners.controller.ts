@@ -2,6 +2,8 @@ import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Query } fro
 import { Throttle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { BannersService } from './banners.service';
+import { CreateBannerDto } from './dto/create-banner.dto';
+import { UpdateBannerDto } from './dto/update-banner.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -50,7 +52,7 @@ export class BannersController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Create banner' })
   @ApiResponse({ status: 201, description: 'Banner created' })
-  async create(@Body() bannerData: any) {
+  async create(@Body() bannerData: CreateBannerDto) {
     return this.bannersService.create(bannerData);
   }
 
@@ -61,7 +63,7 @@ export class BannersController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update banner' })
   @ApiResponse({ status: 200, description: 'Banner updated' })
-  async update(@Param('id') id: string, @Body() updateData: any) {
+  async update(@Param('id') id: string, @Body() updateData: UpdateBannerDto) {
     return this.bannersService.update(id, updateData);
   }
 
