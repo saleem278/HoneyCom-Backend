@@ -268,7 +268,15 @@ export class AdminController {
   @ApiOperation({ summary: 'Admin: update order status / tracking number' })
   async adminUpdateOrder(
     @Param('id') id: string,
-    @Body() body: { status?: string; trackingNumber?: string; note?: string },
+    @Body()
+    body: {
+      status?: string;
+      trackingNumber?: string;
+      carrier?: string;
+      estimatedDelivery?: string;
+      note?: string;
+      notes?: string;
+    },
   ) {
     return this.adminService.adminUpdateOrder(id, body);
   }

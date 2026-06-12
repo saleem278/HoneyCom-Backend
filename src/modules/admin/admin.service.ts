@@ -1078,15 +1078,62 @@ export class AdminService {
 
   async adminUpdateOrder(
     id: string,
-    data: { status?: string; trackingNumber?: string; note?: string },
+    data: {
+      status?: string;
+      trackingNumber?: string;
+      carrier?: string;
+      estimatedDelivery?: string | Date;
+      note?: string;
+      notes?: string;
+      paymentStatus?: string;
+    },
   ) {
     const order = await this.orderModel.findById(id);
     if (!order) throw new NotFoundException('Order not found');
 
     const update: Record<string, unknown> = {};
-    if (data.status) update.status = data.status;
+
+    // "Mark as paid" for COD / manual-settlement orders. Refunds are NOT
+    // allowed here — they must go through the refund endpoint (gateway call).
+    if (data.paymentStatus !== undefined && data.paymentStatus !== order.paymentStatus) {
+      if (data.paymentStatus !== 'paid') {
+        throw new BadRequestException('Only "paid" can be set here; refunds go through the refund action.');
+      }
+      update.paymentStatus = 'paid';
+    }
+
+    if (data.status && data.status !== order.status) {
+      // Cancelled / refunded must go through the dedicated cancel & refund
+      // endpoints — those restore inventory and process the gateway refund.
+      // Letting them through this raw-update path would skip those side
+      // effects and leave stock/payments out of sync (data-integrity bug).
+      if (data.status === 'cancelled' || data.status === 'refunded') {
+        throw new BadRequestException(
+          `Use the ${data.status === 'cancelled' ? 'cancel' : 'refund'} action — ` +
+            `setting "${data.status}" directly would skip inventory/refund handling.`,
+        );
+      }
+      // Validate against the shared state machine (rejects e.g. delivered->pending).
+      assertOrderTransition(order.status, data.status);
+      update.status = data.status;
+
+      // Carrier is required when an admin marks an order shipped, matching the
+      // seller flow — otherwise the tracking timeline shows "via carrier".
+      if (data.status === 'shipped') {
+        const carrier = data.carrier ?? order.carrier;
+        if (!carrier) {
+          throw new BadRequestException('A carrier is required when marking an order as shipped.');
+        }
+      }
+    }
+
     if (data.trackingNumber !== undefined) update.trackingNumber = data.trackingNumber;
-    if (data.note !== undefined) update.note = data.note;
+    if (data.carrier !== undefined) update.carrier = data.carrier;
+    if (data.estimatedDelivery !== undefined) update.estimatedDelivery = data.estimatedDelivery;
+    // Persist admin notes to the real schema field. (Previously written to
+    // `note`, which does not exist on the Order schema, so it was dropped.)
+    const noteValue = data.notes ?? data.note;
+    if (noteValue !== undefined) update.notes = noteValue;
 
     const updated = await this.orderModel.findByIdAndUpdate(id, update, { new: true });
 
@@ -1117,16 +1164,36 @@ export class AdminService {
   }
 
   async adminBulkUpdateOrders(ids: string[], status: string) {
-    const result = await this.orderModel.updateMany(
-      { _id: { $in: ids } },
-      { status },
-    );
+    // Bulk cancel/refund is forbidden here: each needs inventory restore /
+    // gateway refund, which a bulk path can't safely do. Only forward
+    // fulfillment transitions are allowed in bulk.
+    if (status === 'cancelled' || status === 'refunded') {
+      throw new BadRequestException(
+        'Bulk cancel/refund is not supported — process these individually so inventory and refunds are handled.',
+      );
+    }
 
-    // Notify each affected customer of the status change. Best-effort.
+    const orders = await this.orderModel.find({ _id: { $in: ids } });
+    const okIds: string[] = [];
+    const skipped: { id: string; reason: string }[] = [];
+    for (const o of orders) {
+      try {
+        assertOrderTransition(o.status, status);
+        okIds.push(String(o._id));
+      } catch {
+        skipped.push({ id: String(o._id), reason: `Cannot go ${o.status} → ${status}` });
+      }
+    }
+
+    const result = okIds.length
+      ? await this.orderModel.updateMany({ _id: { $in: okIds } }, { status })
+      : { modifiedCount: 0 };
+
+    // Notify each successfully-updated customer of the status change. Best-effort.
     setImmediate(async () => {
       try {
-        const orders = await this.orderModel.find({ _id: { $in: ids } }).populate('customer');
-        for (const o of orders) {
+        const updated = await this.orderModel.find({ _id: { $in: okIds } }).populate('customer');
+        for (const o of updated) {
           const email = (o as any)?.customer?.email;
           if (email) await this.emailService.sendOrderStatusUpdateEmail(email, o).catch(() => undefined);
         }
@@ -1135,7 +1202,7 @@ export class AdminService {
       }
     });
 
-    return { success: true, modified: result.modifiedCount };
+    return { success: true, modified: result.modifiedCount, skipped };
   }
 
   // -------- User editing --------
