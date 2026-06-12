@@ -37,10 +37,17 @@ export class AdminController {
   @Get('users')
   @ApiOperation({ summary: 'Get all users' })
   @ApiResponse({ status: 200, description: 'List of users' })
-  async getUsers(@Query('page') page?: string, @Query('limit') limit?: string) {
+  async getUsers(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('role') role?: string,
+    @Query('status') status?: string,
+    @Query('sort') sort?: string,
+  ) {
     const pageNum = parseInt(page || '', 10) || 1;
     const limitNum = parseInt(limit || '', 10) || 20;
-    return this.adminService.getUsers(pageNum, limitNum);
+    return this.adminService.getUsers(pageNum, limitNum, search, role, status, sort);
   }
 
   @Put('products/:id/approve')
