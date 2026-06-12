@@ -52,6 +52,9 @@ export class DisputesService {
       }
     }
 
+    // SLA target: first response/resolution due 48h after the dispute opens.
+    const slaDueAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
     const dispute = await this.disputeModel.create({
       order: disputeData.orderId,
       customer: userId,
@@ -61,6 +64,7 @@ export class DisputesService {
       description: disputeData.description,
       attachments: disputeData.attachments || [],
       status: 'open',
+      slaDueAt,
     });
 
     const populated = await this.disputeModel.findById(dispute._id).populate('order customer seller');
@@ -293,6 +297,110 @@ export class DisputesService {
       success: true,
       dispute: await this.disputeModel.findById(dispute._id).populate('order customer seller'),
     };
+  }
+
+  /**
+   * Append a message to the dispute thread. Customer/seller/admin can all post,
+   * but only parties to the dispute, and customers can never post internal notes.
+   * Posting on an 'open' dispute moves it to 'in_review' (first response).
+   */
+  async addMessage(
+    id: string,
+    userId: string,
+    userRole: string,
+    body: { body: string; attachments?: string[]; internal?: boolean },
+  ) {
+    if (!body?.body?.trim()) {
+      throw new BadRequestException('Message body is required');
+    }
+
+    const dispute = await this.disputeModel.findById(id);
+    if (!dispute) {
+      throw new NotFoundException('Dispute not found');
+    }
+
+    // Only parties to the dispute may post.
+    if (userRole === 'customer' && dispute.customer.toString() !== userId) {
+      throw new ForbiddenException('Not authorized');
+    }
+    if (userRole === 'seller' && dispute.seller?.toString() !== userId) {
+      throw new ForbiddenException('Not authorized');
+    }
+
+    // Customers can never post internal (staff-only) notes.
+    const internal = userRole === 'customer' ? false : !!body.internal;
+
+    dispute.messages.push({
+      author: userId as any,
+      authorRole: userRole as 'admin' | 'seller' | 'customer',
+      body: body.body.trim(),
+      attachments: body.attachments || [],
+      internal,
+      createdAt: new Date(),
+    });
+
+    // A reply on a brand-new dispute advances it to in_review.
+    if (dispute.status === 'open' && !internal) {
+      dispute.status = 'in_review';
+    }
+    await dispute.save();
+
+    const populated = await this.disputeModel
+      .findById(id)
+      .populate('order', 'orderNumber total status')
+      .populate('customer', 'name email')
+      .populate('seller', 'name email')
+      .populate('messages.author', 'name email role');
+
+    return { success: true, dispute: populated };
+  }
+
+  /**
+   * Reject/deny a dispute with a mandatory reason (admin only). Records the
+   * reason as the resolution note and notifies the customer.
+   */
+  async reject(id: string, adminId: string, reason: string) {
+    if (!reason?.trim()) {
+      throw new BadRequestException('A rejection reason is required');
+    }
+
+    const dispute = await this.disputeModel.findById(id);
+    if (!dispute) {
+      throw new NotFoundException('Dispute not found');
+    }
+    if (!['open', 'in_review'].includes(dispute.status)) {
+      throw new BadRequestException(
+        `Dispute cannot be rejected in its current status (${dispute.status}).`,
+      );
+    }
+
+    dispute.status = 'rejected';
+    dispute.resolution = 'no_action';
+    dispute.resolutionNotes = reason.trim();
+    dispute.resolvedBy = adminId as any;
+    dispute.resolvedAt = new Date();
+    await dispute.save();
+
+    const populated = await this.disputeModel
+      .findById(id)
+      .populate('order customer seller resolvedBy');
+
+    // Notify the customer of the rejection. Best-effort.
+    setImmediate(async () => {
+      try {
+        const cust: any = populated?.customer;
+        const ord: any = populated?.order;
+        if (cust?.email) {
+          await this.emailService
+            .sendDisputeResolvedEmail({ to: cust.email, dispute: populated, order: ord, portal: 'customer' })
+            .catch(() => undefined);
+        }
+      } catch {
+        // best-effort
+      }
+    });
+
+    return { success: true, message: 'Dispute rejected', dispute: populated };
   }
 }
 

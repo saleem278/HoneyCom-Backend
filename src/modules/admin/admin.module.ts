@@ -13,6 +13,7 @@ import { ImpersonationEventSchema } from '../../models/ImpersonationEvent.model'
 import { SettingsSchema } from '../../models/Settings.model';
 import { NotificationSchema } from '../../models/Notification.model';
 import { BroadcastSchema } from '../../models/Broadcast.model';
+import { StoreSchema } from '../../models/Store.model';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { UsersModule } from '../users/users.module';
@@ -31,6 +32,7 @@ import { LoyaltyModule } from '../loyalty/loyalty.module';
       { name: 'Settings', schema: SettingsSchema },
       { name: 'Notification', schema: NotificationSchema },
       { name: 'Broadcast', schema: BroadcastSchema },
+      { name: 'Store', schema: StoreSchema },
     ]),
     ScheduleModule.forRoot(),
     ConfigModule,

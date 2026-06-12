@@ -30,6 +30,11 @@ export interface IStore extends Document {
     refundPolicy?: string;
     autoAcceptOrders?: boolean;
     shippingMethods?: string[];
+    /** SS-12: SEO/discovery fields for the public storefront */
+    seo?: {
+      title?: string;
+      description?: string;
+    };
   };
   status: 'active' | 'inactive';
   createdAt: Date;
@@ -91,6 +96,11 @@ const StoreSchema: Schema = new Schema(
         default: false,
       },
       shippingMethods: [String],
+      /** SS-12: SEO/discovery fields for the public storefront */
+      seo: {
+        title: String,
+        description: String,
+      },
     },
     status: {
       type: String,
@@ -101,7 +111,7 @@ const StoreSchema: Schema = new Schema(
   {
     timestamps: true,
     collection: 'stores',
-  }
+  },
 );
 
 StoreSchema.index({ seller: 1 });
@@ -110,4 +120,3 @@ StoreSchema.index({ slug: 1 });
 export const Store = mongoose.model<IStore>('Store', StoreSchema);
 export { StoreSchema };
 export default Store;
-

@@ -317,33 +317,49 @@ export class AuthController {
     };
   }
 
+  @Get('2fa/status')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get 2FA enabled state, activatedAt, and remaining recovery-code count' })
+  @ApiResponse({ status: 200, description: '2FA status retrieved' })
+  async get2FAStatus(@Request() req: AuthedRequest) {
+    return this.authService.get2FAStatus(req.user.id);
+  }
+
+  @Post('2fa/recovery-codes/regenerate')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @ApiOperation({ summary: 'Regenerate recovery codes (requires current password; invalidates old codes)' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['currentPassword'],
+      properties: { currentPassword: { type: 'string' } },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'New recovery codes returned once' })
+  async regenerateRecoveryCodes(
+    @Request() req: AuthedRequest,
+    @Body('currentPassword') currentPassword: string,
+  ) {
+    return this.authService.regenerateRecoveryCodes(req.user.id, currentPassword);
+  }
+
   @Get('sessions')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Get all active sessions for current user' })
   @ApiResponse({ status: 200, description: 'Sessions retrieved successfully' })
   async getSessions(@Request() req: AuthedRequest) {
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.replace('Bearer ', '');
-    const sessions = await this.authService.getUserSessions(req.user.id);
-
-    // Mark current session by comparing hashed tokens
-    const hashedCurrentToken = this.authService.hashToken(token);
-    // We need to get sessions with tokens to compare
-    const sessionsWithTokens = await this.authService.getUserSessionsWithTokens(req.user.id);
-    const sessionsWithCurrent = sessions.map((session: any) => {
-      const matchingSession = sessionsWithTokens.find((s: any) => s.id === session.id);
-      const isCurrent = matchingSession?.token === hashedCurrentToken;
-      return {
-        ...session,
-        isCurrent,
-      };
-    });
-
-    return {
-      success: true,
-      sessions: sessionsWithCurrent,
-    };
+    // CPS-9: single query — pass hashed token so isCurrent is set in one pass
+    const token =
+      req.cookies?.[SESSION_COOKIE_NAME] ||
+      (req.headers.authorization || '').replace('Bearer ', '');
+    const hashedCurrentToken = token ? this.authService.hashToken(token) : undefined;
+    const sessions = await this.authService.getUserSessions(req.user.id, hashedCurrentToken);
+    return { success: true, sessions };
   }
 
   @Post('sessions/:sessionId/revoke')

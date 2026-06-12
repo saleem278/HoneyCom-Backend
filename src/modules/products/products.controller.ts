@@ -13,7 +13,9 @@ import {
   UploadedFile,
   HttpCode,
   HttpStatus,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -133,6 +135,38 @@ export class ProductsController {
   @ApiResponse({ status: 201, description: 'Products uploaded' })
   async bulkUpload(@Request() req: AuthedRequest, @UploadedFile() file: Express.Multer.File) {
     return this.productsService.bulkUpload(file, req.user.id);
+  }
+
+  /** SP-01: Upload a product image to Cloudinary. Returns { url }. */
+  @Post('images')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('seller', 'admin')
+  @ApiBearerAuth('JWT-auth')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload a product image to CDN, returns { url }' })
+  @ApiResponse({ status: 201, description: 'Image uploaded' })
+  async uploadProductImage(@UploadedFile() file: Express.Multer.File) {
+    return this.productsService.uploadProductImage(file);
+  }
+
+  /** SP-06: Stream the seller's product catalog as a CSV download. */
+  @Get('export')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('seller', 'admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Export seller products as CSV download' })
+  @ApiResponse({ status: 200, description: 'CSV file' })
+  async exportProducts(
+    @Request() req: AuthedRequest,
+    @Query('seller') sellerQuery: string,
+    @Res() res: Response,
+  ) {
+    const sellerId = req.user.role === 'admin' && sellerQuery ? sellerQuery : req.user.id;
+    const csv = await this.productsService.exportProductsCsv(sellerId);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="products-${Date.now()}.csv"`);
+    res.send(csv);
   }
 
   @Put(':id')

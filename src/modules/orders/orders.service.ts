@@ -105,26 +105,36 @@ export class OrdersService {
    */
   private async getOrderSettings(): Promise<{
     taxRate: number;
+    taxMethod: 'percentage' | 'fixed';
     shippingFlat: number;
     freeShippingAbove: number;
     returnWindowDays: number;
     commissionRate: number;
+    codEnabled: boolean;
   }> {
     const rows = await this.settingsModel
-      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat', 'order.freeShippingAbove', 'order.returnWindowDays', 'platform.commissionRate'] } })
+      .find({ key: { $in: ['order.taxRate', 'order.taxMethod', 'order.shippingFlat', 'order.freeShippingAbove', 'order.returnWindowDays', 'platform.commissionRate', 'payment.codEnabled'] } })
       .lean();
     const map = new Map(rows.map((r: any) => [r.key, r.value]));
     const taxRate = Number(map.get('order.taxRate') ?? 0.18);
+    const taxMethodRaw = String(map.get('order.taxMethod') ?? 'percentage');
     const shippingFlat = Number(map.get('order.shippingFlat') ?? 99);
     const freeShippingAbove = Number(map.get('order.freeShippingAbove') ?? 499);
     const returnWindowDays = Number(map.get('order.returnWindowDays') ?? 30);
     const commissionRate = Number(map.get('platform.commissionRate') ?? 0.10);
+    // codEnabled defaults to true so existing installs keep working after upgrade.
+    const codEnabledRaw = map.get('payment.codEnabled');
+    const codEnabled = codEnabledRaw === undefined || codEnabledRaw === null
+      ? true
+      : codEnabledRaw === true || codEnabledRaw === 'true' || codEnabledRaw === 'yes' || codEnabledRaw === 1;
     return {
       taxRate: Number.isFinite(taxRate) && taxRate >= 0 ? taxRate : 0.18,
+      taxMethod: taxMethodRaw === 'fixed' ? 'fixed' : 'percentage',
       shippingFlat: Number.isFinite(shippingFlat) && shippingFlat >= 0 ? shippingFlat : 99,
       freeShippingAbove: Number.isFinite(freeShippingAbove) && freeShippingAbove >= 0 ? freeShippingAbove : 499,
       returnWindowDays: Number.isFinite(returnWindowDays) && returnWindowDays > 0 ? returnWindowDays : 30,
       commissionRate: Number.isFinite(commissionRate) && commissionRate >= 0 && commissionRate <= 1 ? commissionRate : 0.10,
+      codEnabled,
     };
   }
 
@@ -204,7 +214,7 @@ export class OrdersService {
     // Fetch all order-level settings upfront so the commission rate is
     // available when building each line item and doesn't require a second
     // DB round-trip later in the method.
-    const { taxRate, shippingFlat, freeShippingAbove, commissionRate } = await this.getOrderSettings();
+    const { taxRate, taxMethod, shippingFlat, freeShippingAbove, commissionRate, codEnabled } = await this.getOrderSettings();
 
     let subtotal = 0;
     const items: Array<{
@@ -348,7 +358,8 @@ export class OrdersService {
       );
     };
 
-    const tax = subtotal * taxRate;
+    // Branch on taxMethod: 'percentage' multiplies the subtotal; 'fixed' adds a flat charge.
+    const tax = taxMethod === 'fixed' ? taxRate : subtotal * taxRate;
     const shipping = subtotal > 0 && subtotal < freeShippingAbove ? shippingFlat : 0;
     let discount = 0;
     let total = 0;
@@ -389,6 +400,11 @@ export class OrdersService {
       }
       if (!['razorpay', 'paypal', 'cash_on_delivery'].includes(paymentMethod)) {
         throw new BadRequestException(`Invalid payment method: ${paymentMethod}`);
+      }
+      // Gate COD on the admin toggle (payment.codEnabled). Defaults to true for
+      // backward compatibility so existing installs keep working after upgrade.
+      if (paymentMethod === 'cash_on_delivery' && !codEnabled) {
+        throw new BadRequestException('Cash on Delivery is not available at this time');
       }
 
       // SECURITY: Two Razorpay order-creation patterns coexist:
@@ -941,12 +957,21 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
-    // Authorization check: admin can access any order, users can only access their own
+    // Authorization check: admin can access any order; owning customer can access
+    // their own order; sellers can access orders containing their line items (SO-4).
     if (userRole !== 'admin') {
-      const customerId = this.extractCustomerId(order.customer);
-      
-      if (customerId !== userId) {
-        throw new BadRequestException('Not authorized');
+      if (userRole === 'seller') {
+        const sellerProducts = await this.productModel.find({ seller: userId }).select('_id').limit(10000).lean();
+        const sellerProductIds = new Set(sellerProducts.map((p: any) => p._id.toString()));
+        const hasSellerItem = (order.items as any[]).some((item: any) => sellerProductIds.has(item.product?.toString()));
+        if (!hasSellerItem) {
+          throw new BadRequestException('Not authorized');
+        }
+      } else {
+        const customerId = this.extractCustomerId(order.customer);
+        if (customerId !== userId) {
+          throw new BadRequestException('Not authorized');
+        }
       }
     }
 

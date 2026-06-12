@@ -108,6 +108,16 @@ export class StoresController {
     });
   }
 
+  // SS-7: admin store detail — bypasses active-only filter
+  @Get('admin/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Admin: get any store by id (bypasses active filter)' })
+  @ApiResponse({ status: 200, description: 'Store details' })
+  async adminGetStoreById(@Param('id') id: string) {
+    return this.storesService.adminGetStoreById(id);
+  }
   @Put('admin/:id/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')

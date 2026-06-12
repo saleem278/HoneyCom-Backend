@@ -18,6 +18,7 @@ import { EmailService } from '../../services/email.service';
 import { ExchangeRateService, Currency } from '../../services/exchange-rate.service';
 import { AuthService } from '../auth/auth.service';
 import { assertOrderTransition } from '../orders/order-status';
+import { IStore } from '../../models/Store.model';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 
 @Injectable()
@@ -38,6 +39,7 @@ export class AdminService {
     private jwtService: JwtService,
     private authService: AuthService,
     private exchangeRateService: ExchangeRateService,
+    @InjectModel('Store') private storeModel: Model<IStore>,
     @Optional() private readonly loyaltyService?: LoyaltyService,
   ) {}
 
@@ -448,6 +450,11 @@ export class AdminService {
     user.status = status;
     await user.save();
 
+    // SS-9: cascade seller store to inactive when seller is suspended or inactive
+    if (user.role === 'seller' && (status === 'suspended' || status === 'inactive')) {
+      await this.storeModel.updateMany({ seller: user._id }, { status: 'inactive' });
+    }
+
     // Notify the user their account status changed. Best-effort.
     if (user.email) {
       this.emailService
@@ -533,7 +540,7 @@ export class AdminService {
     };
   }
 
-  async approveSeller(sellerId: string) {
+  async approveSeller(sellerId: string, adminId?: string) {
     const seller = await this.userModel.findById(sellerId);
     if (!seller) {
       throw new NotFoundException('Seller not found');
@@ -548,6 +555,10 @@ export class AdminService {
       seller.sellerInfo = {};
     }
     seller.sellerInfo.approvalStatus = 'approved';
+    // SS-2: persist audit trail
+    (seller.sellerInfo as any).reviewedAt = new Date();
+    if (adminId) (seller.sellerInfo as any).reviewedBy = adminId;
+    (seller.sellerInfo as any).rejectionReason = undefined;
     await seller.save();
 
     // Send approval email to seller (skip if seller has no email — phone-only account)
@@ -572,7 +583,7 @@ export class AdminService {
     };
   }
 
-  async rejectSeller(sellerId: string, reason?: string) {
+  async rejectSeller(sellerId: string, reason?: string, adminId?: string) {
     const seller = await this.userModel.findById(sellerId);
     if (!seller) {
       throw new NotFoundException('Seller not found');
@@ -587,7 +598,14 @@ export class AdminService {
       seller.sellerInfo = {};
     }
     seller.sellerInfo.approvalStatus = 'rejected';
+    // SS-2: persist rejection reason + audit trail
+    if (reason) (seller.sellerInfo as any).rejectionReason = reason;
+    (seller.sellerInfo as any).reviewedAt = new Date();
+    if (adminId) (seller.sellerInfo as any).reviewedBy = adminId;
     await seller.save();
+
+    // SS-9: cascade store to inactive when seller is rejected
+    await this.storeModel.updateMany({ seller: seller._id }, { status: 'inactive' });
 
     // Send rejection email to seller (skip if seller has no email)
     if (seller.email) {
@@ -612,7 +630,87 @@ export class AdminService {
     };
   }
 
-  async getUserDetails(userId: string) {
+
+  // SS-5: server-side paginated seller list
+  async getSellers(params: {
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = params.page || 1;
+    const limit = Math.min(params.limit || 20, 100);
+    const skip = (page - 1) * limit;
+    const filter: Record<string, unknown> = { role: 'seller' };
+    if (params.status && params.status !== 'all') {
+      filter['sellerInfo.approvalStatus'] = params.status;
+    }
+    if (params.search) {
+      const rx = new RegExp(params.search.trim(), 'i');
+      filter['$or'] = [{ name: rx }, { email: rx }, { 'sellerInfo.businessName': rx }];
+    }
+    const [sellers, total] = await Promise.all([
+      this.userModel.find(filter).select('-password').sort({ createdAt: -1 } as any).skip(skip).limit(limit).lean(),
+      this.userModel.countDocuments(filter),
+    ]);
+    return {
+      success: true,
+      sellers,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    };
+  }
+
+  // SS-10: request more info from seller
+  async requestSellerInfo(sellerId: string, message: string, adminId?: string) {
+    const seller = await this.userModel.findById(sellerId);
+    if (!seller) throw new NotFoundException('Seller not found');
+    if (seller.role !== 'seller') throw new BadRequestException('User is not a seller');
+    if (!seller.sellerInfo) seller.sellerInfo = {};
+    seller.sellerInfo.approvalStatus = 'info_requested';
+    (seller.sellerInfo as any).reviewNotes = message;
+    (seller.sellerInfo as any).reviewedAt = new Date();
+    if (adminId) (seller.sellerInfo as any).reviewedBy = adminId;
+    await seller.save();
+    if (seller.email) {
+      try {
+        await this.emailService.sendSellerRejectionEmail(
+          seller.email,
+          seller.name || '',
+          `Information requested: ${message}`,
+        );
+      } catch { /* non-fatal */ }
+    }
+    return { success: true, message: 'Information request sent to seller' };
+  }
+
+  // SS-3: bulk approve/reject sellers
+  async adminBulkSellers(
+    ids: string[],
+    action: 'approve' | 'reject',
+    reason?: string,
+    adminId?: string,
+  ) {
+    if (!ids?.length) throw new BadRequestException('No seller IDs provided');
+    const now = new Date();
+    const update: Record<string, unknown> = {
+      'sellerInfo.approvalStatus': action === 'approve' ? 'approved' : 'rejected',
+      'sellerInfo.reviewedAt': now,
+    };
+    if (adminId) update['sellerInfo.reviewedBy'] = adminId;
+    if (action === 'reject' && reason) update['sellerInfo.rejectionReason'] = reason;
+    if (action === 'approve') update['status'] = 'active';
+    else update['status'] = 'inactive';
+    const result = await this.userModel.updateMany(
+      { _id: { $in: ids }, role: 'seller' },
+      { $set: update },
+    );
+    if (action === 'reject') {
+      await this.storeModel.updateMany({ seller: { $in: ids } }, { status: 'inactive' });
+    }
+    return { success: true, modified: result.modifiedCount };
+  }
+
+    async getUserDetails(userId: string) {
     const user = await this.userModel.findById(userId).select('-password');
     if (!user) {
       throw new NotFoundException('User not found');
@@ -634,10 +732,19 @@ export class AdminService {
       lastLogin: user.lastLogin || user.updatedAt,
     };
 
-    // If seller, get product count
+    // If seller, get product count and store info (SS-8)
+    let storeInfo: { storeId: unknown; storeSlug: string; storeStatus: string } | null = null;
     if (user.role === 'seller') {
       const productCount = await this.productModel.countDocuments({ seller: userId });
       (activity as any).totalProducts = productCount;
+      const store = await this.storeModel.findOne({ seller: userId }).select('_id slug status').lean();
+      if (store) {
+        storeInfo = {
+          storeId: store._id,
+          storeSlug: (store as any).slug ?? '',
+          storeStatus: store.status,
+        };
+      }
     }
 
     return {
@@ -661,6 +768,7 @@ export class AdminService {
       },
       orders,
       activity,
+      storeInfo,
     };
   }
 

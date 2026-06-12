@@ -868,4 +868,70 @@ export class EmailTemplatesService {
     };
     return map[status.toLowerCase()] || 'accent';
   }
+
+  // ── Payout notification emails (PAY-07) ──────────────────────────────────
+
+  /** Notify a seller that their payout request was approved. */
+  async getPayoutApprovedEmail(opts: { sellerName: string; amount: number; currency: string; adminNotes?: string }): Promise<string> {
+    const frontendUrl = this.frontend();
+    const siteName = this.h(await this.getSiteName());
+    const { primary, primaryAlt } = await this.colors();
+    const amtStr = `${opts.currency} ${Number(opts.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    const content = `
+      ${await this.hero('✅', `Payout approved, ${this.h(opts.sellerName)}!`, `Your payout request for ${this.h(amtStr)} has been approved.`)}
+      ${this.infoBox(
+        `<strong>Great news!</strong> Your payout request for <strong>${this.h(amtStr)}</strong> has been approved and will be processed soon. Funds will be transferred to your registered bank/UPI account within the usual processing window.`,
+        'success',
+      )}
+      ${opts.adminNotes ? this.infoBox(`<strong>Admin note:</strong> ${this.h(opts.adminNotes)}`, 'info') : ''}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(`${frontendUrl}/seller/payouts`, 'View payout status', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'Payout Approved', `Your ${siteName} payout of ${amtStr} was approved.`);
+  }
+
+  /** Notify a seller that their payout was rejected. */
+  async getPayoutRejectedEmail(opts: { sellerName: string; amount: number; currency: string; rejectionReason: string; adminNotes?: string }): Promise<string> {
+    const frontendUrl = this.frontend();
+    const siteName = this.h(await this.getSiteName());
+    const { primary, primaryAlt } = await this.colors();
+    const amtStr = `${opts.currency} ${Number(opts.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    const content = `
+      ${await this.hero('❌', 'Payout request rejected')}
+      ${this.infoBox(
+        `Dear ${this.h(opts.sellerName)},<br><br>Unfortunately, your payout request for <strong>${this.h(amtStr)}</strong> was not approved.<br><br><strong>Reason:</strong> ${this.h(opts.rejectionReason)}`,
+        'error',
+      )}
+      ${opts.adminNotes ? this.infoBox(`<strong>Additional note:</strong> ${this.h(opts.adminNotes)}`, 'info') : ''}
+      ${this.infoBox('You can submit a new payout request from your seller dashboard. If you believe this is an error, please contact our support team.', 'warning')}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(`${frontendUrl}/seller/payouts`, 'Return to payouts', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'Payout Request Rejected', `Your ${siteName} payout request for ${amtStr} was rejected.`);
+  }
+
+  /** Notify a seller that their payout funds have been transferred. */
+  async getPayoutPaidEmail(opts: { sellerName: string; amount: number; currency: string; adminNotes?: string }): Promise<string> {
+    const frontendUrl = this.frontend();
+    const siteName = this.h(await this.getSiteName());
+    const { primary, primaryAlt } = await this.colors();
+    const amtStr = `${opts.currency} ${Number(opts.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    const content = `
+      ${await this.hero('💸', `Funds transferred, ${this.h(opts.sellerName)}!`, `${this.h(amtStr)} has been sent to your account.`)}
+      ${this.infoBox(
+        `<strong>Your payout of ${this.h(amtStr)} has been transferred</strong> to your registered bank/UPI account. Please allow 1–3 business days for the funds to reflect in your account depending on your bank's processing time.`,
+        'success',
+      )}
+      ${opts.adminNotes ? this.infoBox(`<strong>Transfer reference / note:</strong> ${this.h(opts.adminNotes)}`, 'info') : ''}
+      <div style="text-align:center;margin:28px 0;">
+        ${this.button(`${frontendUrl}/seller/payouts`, 'View payout history', primary, primaryAlt)}
+      </div>`;
+
+    return this.getBaseTemplate(content, 'Payout Transferred', `Your ${siteName} payout of ${amtStr} has been sent.`);
+  }
 }

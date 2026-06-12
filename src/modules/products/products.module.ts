@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { MulterModule } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+// SP-01: memoryStorage keeps uploaded files in-memory buffers so we can stream
+// them directly to Cloudinary without touching the filesystem.  diskStorage
+// would leave file.buffer undefined, breaking both image upload and CSV import.
+import multer from 'multer';
 import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 import { Product, ProductSchema } from '../../models/Product.model';
@@ -25,18 +27,14 @@ import { EmailService } from '../../services/email.service';
       { name: 'Settings', schema: SettingsSchema },
     ]),
     MulterModule.register({
-      storage: diskStorage({
-        destination: './uploads/temp',
-        filename: (req, file, cb) => {
-          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-          cb(null, `${file.fieldname}-${uniqueSuffix}${extname(file.originalname)}`);
-        },
-      }),
+      storage: multer.memoryStorage(),
       fileFilter: (req, file, cb) => {
-        if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
+        const isImage = file.mimetype.startsWith('image/');
+        const isCsv = file.mimetype === 'text/csv' || file.originalname.endsWith('.csv');
+        if (isImage || isCsv) {
           cb(null, true);
         } else {
-          cb(new Error('Only CSV files are allowed'), false);
+          cb(new Error('Only image or CSV files are accepted'), false);
         }
       },
       limits: {

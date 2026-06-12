@@ -71,6 +71,35 @@ export class AdminController {
     return this.adminService.processRefund(id, body.amount, body.reason);
   }
 
+  // SS-5: paginated seller list
+  @Get('sellers')
+  @ApiOperation({ summary: 'Get all sellers (server-paginated, filterable)' })
+  @ApiResponse({ status: 200, description: 'Paginated seller list' })
+  async getSellers(
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.adminService.getSellers({
+      status,
+      search,
+      page: parseInt(page || '1', 10) || 1,
+      limit: parseInt(limit || '20', 10) || 20,
+    });
+  }
+
+  // SS-3: bulk approve/reject
+  @Post('sellers/bulk')
+  @ApiOperation({ summary: 'Bulk approve or reject sellers' })
+  @ApiResponse({ status: 200, description: 'Bulk action applied' })
+  async adminBulkSellers(
+    @Request() req: AuthedRequest,
+    @Body() body: { ids: string[]; action: 'approve' | 'reject'; reason?: string },
+  ) {
+    return this.adminService.adminBulkSellers(body.ids, body.action, body.reason, req.user.id);
+  }
+
   @Get('sellers/pending')
   @ApiOperation({ summary: 'Get pending seller registrations' })
   @ApiResponse({ status: 200, description: 'List of pending sellers' })
@@ -81,15 +110,27 @@ export class AdminController {
   @Put('sellers/:id/approve')
   @ApiOperation({ summary: 'Approve seller registration' })
   @ApiResponse({ status: 200, description: 'Seller approved' })
-  async approveSeller(@Param('id') id: string) {
-    return this.adminService.approveSeller(id);
+  async approveSeller(@Request() req: AuthedRequest, @Param('id') id: string) {
+    return this.adminService.approveSeller(id, req.user.id);
   }
 
   @Put('sellers/:id/reject')
   @ApiOperation({ summary: 'Reject seller registration' })
   @ApiResponse({ status: 200, description: 'Seller rejected' })
-  async rejectSeller(@Param('id') id: string, @Body() body: { reason?: string }) {
-    return this.adminService.rejectSeller(id, body.reason);
+  async rejectSeller(@Request() req: AuthedRequest, @Param('id') id: string, @Body() body: { reason?: string }) {
+    return this.adminService.rejectSeller(id, body.reason, req.user.id);
+  }
+
+    // SS-10: request more info from seller
+  @Put('sellers/:id/request-info')
+  @ApiOperation({ summary: 'Request more information from a seller applicant' })
+  @ApiResponse({ status: 200, description: 'Info request sent' })
+  async requestSellerInfo(
+    @Request() req: AuthedRequest,
+    @Param('id') id: string,
+    @Body() body: { message: string },
+  ) {
+    return this.adminService.requestSellerInfo(id, body.message, req.user.id);
   }
 
   @Get('users/:id')

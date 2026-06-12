@@ -1,4 +1,18 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request, UseInterceptors, UploadedFile } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Request,
+  UseInterceptors,
+  UploadedFile,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CmsService } from './cms.service';
@@ -8,6 +22,11 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { Public } from '../auth/decorators/public.decorator';
 import type { AuthedRequest } from '../../common/types/request.types';
+import { CreatePageDto } from './dto/create-page.dto';
+import { UpdatePageDto } from './dto/update-page.dto';
+import { CreateBlogDto } from './dto/create-blog.dto';
+import { UpdateBlogDto } from './dto/update-blog.dto';
+import { CreateBlogCategoryDto, UpdateBlogCategoryDto } from './dto/create-blog-category.dto';
 
 @ApiTags('CMS')
 @Controller('cms')
@@ -27,10 +46,23 @@ export class CmsController {
   // ========== PAGES ==========
   @Get('pages')
   @ApiOperation({ summary: 'Get all pages' })
-  async getPages(@Query('status') status?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+  async getPages(
+    @Query('status') status?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
     const pageNum = parseInt(page || '', 10) || 1;
     const limitNum = parseInt(limit || '', 10) || 20;
-    return this.cmsService.getPages(status, pageNum, limitNum);
+    return this.cmsService.getPages(status, pageNum, limitNum, search);
+  }
+
+  @Get('pages/by-slug/:slug')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get published page by slug (public)' })
+  async getPageBySlug(@Param('slug') slug: string) {
+    return this.cmsService.getPageBySlug(slug);
   }
 
   @Get('pages/:id')
@@ -41,13 +73,13 @@ export class CmsController {
 
   @Post('pages')
   @ApiOperation({ summary: 'Create page' })
-  async createPage(@Body() data: any, @Request() req: AuthedRequest) {
+  async createPage(@Body() data: CreatePageDto, @Request() req: AuthedRequest) {
     return this.cmsService.createPage(data, req.user.id);
   }
 
   @Put('pages/:id')
   @ApiOperation({ summary: 'Update page' })
-  async updatePage(@Param('id') id: string, @Body() data: any) {
+  async updatePage(@Param('id') id: string, @Body() data: UpdatePageDto) {
     return this.cmsService.updatePage(id, data);
   }
 
@@ -60,10 +92,24 @@ export class CmsController {
   // ========== BLOG ==========
   @Get('blog')
   @ApiOperation({ summary: 'Get all blog posts' })
-  async getBlogPosts(@Query('status') status?: string, @Query('category') category?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+  async getBlogPosts(
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
     const pageNum = parseInt(page || '', 10) || 1;
     const limitNum = parseInt(limit || '', 10) || 20;
-    return this.cmsService.getBlogPosts(status, category, pageNum, limitNum);
+    return this.cmsService.getBlogPosts(status, category, pageNum, limitNum, search);
+  }
+
+  @Get('blog/by-slug/:slug')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get published blog post by slug (public)' })
+  async getBlogPostBySlug(@Param('slug') slug: string) {
+    return this.cmsService.getBlogPostBySlug(slug);
   }
 
   @Get('blog/:id')
@@ -74,13 +120,13 @@ export class CmsController {
 
   @Post('blog')
   @ApiOperation({ summary: 'Create blog post' })
-  async createBlogPost(@Body() data: any, @Request() req: AuthedRequest) {
+  async createBlogPost(@Body() data: CreateBlogDto, @Request() req: AuthedRequest) {
     return this.cmsService.createBlogPost(data, req.user.id);
   }
 
   @Put('blog/:id')
   @ApiOperation({ summary: 'Update blog post' })
-  async updateBlogPost(@Param('id') id: string, @Body() data: any) {
+  async updateBlogPost(@Param('id') id: string, @Body() data: UpdateBlogDto) {
     return this.cmsService.updateBlogPost(id, data);
   }
 
@@ -92,11 +138,23 @@ export class CmsController {
 
   // ========== MEDIA ==========
   @Get('media')
-  @ApiOperation({ summary: 'Get all media' })
-  async getMedia(@Query('type') type?: string, @Query('folder') folder?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+  @ApiOperation({ summary: 'Get all media with optional server-side search' })
+  async getMedia(
+    @Query('type') type?: string,
+    @Query('folder') folder?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
     const pageNum = parseInt(page || '', 10) || 1;
     const limitNum = parseInt(limit || '', 10) || 20;
-    return this.cmsService.getMedia(type, folder, pageNum, limitNum);
+    return this.cmsService.getMedia(type, folder, pageNum, limitNum, search);
+  }
+
+  @Get('media/folders')
+  @ApiOperation({ summary: 'Get distinct media folder paths' })
+  async getMediaFolders() {
+    return this.cmsService.getMediaFolders();
   }
 
   @Get('media/:id')
@@ -106,9 +164,26 @@ export class CmsController {
   }
 
   @Post('media')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = /^(image\/|video\/|application\/pdf$)/;
+        if (allowed.test(file.mimetype)) {
+          cb(null, true);
+        } else {
+          cb(
+            new Error(
+              `File type ${file.mimetype} is not allowed. Only images, videos, and PDFs are accepted.`,
+            ),
+            false,
+          );
+        }
+      },
+    }),
+  )
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Upload media' })
+  @ApiOperation({ summary: 'Upload media (max 5 MB; images, videos, PDF only)' })
   async uploadMedia(
     @UploadedFile() file: Express.Multer.File,
     @Body() data: any,
@@ -121,6 +196,12 @@ export class CmsController {
   @ApiOperation({ summary: 'Update media metadata' })
   async updateMedia(@Param('id') id: string, @Body() data: any) {
     return this.cmsService.updateMedia(id, data);
+  }
+
+  @Delete('media')
+  @ApiOperation({ summary: 'Bulk delete media by IDs' })
+  async deleteMediaBulk(@Body() body: { ids: string[] }) {
+    return this.cmsService.deleteMediaBulk(body.ids);
   }
 
   @Delete('media/:id')
@@ -162,9 +243,9 @@ export class CmsController {
 
   // ========== FORMS ==========
   @Get('forms')
-  @ApiOperation({ summary: 'Get all forms' })
+  @ApiOperation({ summary: 'Get all forms with submission counts and unread badge' })
   async getForms() {
-    return this.cmsService.getForms();
+    return this.cmsService.getFormsWithUnread();
   }
 
   @Get('forms/:id')
@@ -193,9 +274,28 @@ export class CmsController {
 
   // ========== FORM SUBMISSIONS ==========
   @Get('forms/:id/submissions')
-  @ApiOperation({ summary: 'Get form submissions' })
-  async getFormSubmissions(@Param('id') id: string) {
-    return this.cmsService.getFormSubmissions(id);
+  @ApiOperation({ summary: 'Get form submissions (optionally filter by status)' })
+  async getFormSubmissions(@Param('id') id: string, @Query('status') status?: string) {
+    return this.cmsService.getFormSubmissionsFiltered(id, status);
+  }
+
+  @Patch('forms/:formId/submissions/:submissionId')
+  @ApiOperation({ summary: 'Update submission status (new|read|archived)' })
+  async updateSubmissionStatus(
+    @Param('formId') formId: string,
+    @Param('submissionId') submissionId: string,
+    @Body() body: { status: 'new' | 'read' | 'archived' },
+  ) {
+    return this.cmsService.updateSubmissionStatus(formId, submissionId, body.status);
+  }
+
+  @Delete('forms/:formId/submissions/:submissionId')
+  @ApiOperation({ summary: 'Delete a single submission' })
+  async deleteSubmission(
+    @Param('formId') formId: string,
+    @Param('submissionId') submissionId: string,
+  ) {
+    return this.cmsService.deleteSubmission(formId, submissionId);
   }
 
   @Post('forms/:id/submit')
@@ -220,13 +320,13 @@ export class CmsController {
 
   @Post('blog-categories')
   @ApiOperation({ summary: 'Create blog category' })
-  async createBlogCategory(@Body() data: any) {
+  async createBlogCategory(@Body() data: CreateBlogCategoryDto) {
     return this.cmsService.createBlogCategory(data);
   }
 
   @Put('blog-categories/:id')
   @ApiOperation({ summary: 'Update blog category' })
-  async updateBlogCategory(@Param('id') id: string, @Body() data: any) {
+  async updateBlogCategory(@Param('id') id: string, @Body() data: UpdateBlogCategoryDto) {
     return this.cmsService.updateBlogCategory(id, data);
   }
 
@@ -239,7 +339,7 @@ export class CmsController {
   // ========== SITEMAP ==========
   @Get('sitemap')
   @Public()
-  @UseGuards(OptionalJwtAuthGuard) // Public endpoint for SEO
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Generate sitemap.xml (public)' })
   @ApiResponse({ status: 200, description: 'Sitemap XML' })
   async generateSitemap() {
@@ -249,7 +349,7 @@ export class CmsController {
   // ========== ROBOTS.TXT ==========
   @Get('robots-txt')
   @Public()
-  @UseGuards(OptionalJwtAuthGuard) // Public endpoint for SEO
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Get robots.txt content (public)' })
   @ApiResponse({ status: 200, description: 'Robots.txt content' })
   async getRobotsTxt() {
@@ -318,5 +418,42 @@ export class CmsController {
   async deleteWidget(@Param('id') id: string) {
     return this.cmsService.deleteWidget(id);
   }
-}
 
+  // ========== PUBLIC STOREFRONT ENDPOINTS ==========
+
+  @Get('menus/public')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get active menu for a storefront location (public)' })
+  async getPublicMenu(@Query('location') location: string) {
+    return this.cmsService.getPublicMenu(location);
+  }
+
+  @Get('widgets/public')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get active widgets for a storefront slot (public)' })
+  async getPublicWidgets(@Query('location') location?: string) {
+    return this.cmsService.getPublicWidgets(location);
+  }
+
+  // ========== SEO AUDIT ==========
+
+  @Get('seo/audit')
+  @ApiOperation({ summary: 'SEO audit — pages/posts with meta status' })
+  async getSeoAudit() {
+    return this.cmsService.getSeoAudit();
+  }
+
+  @Get('seo/defaults')
+  @ApiOperation({ summary: 'Get global SEO defaults' })
+  async getSeoDefaults() {
+    return this.cmsService.getSeoDefaults();
+  }
+
+  @Put('seo/defaults')
+  @ApiOperation({ summary: 'Update global SEO defaults' })
+  async updateSeoDefaults(@Body() body: Record<string, any>) {
+    return this.cmsService.updateSeoDefaults(body);
+  }
+}

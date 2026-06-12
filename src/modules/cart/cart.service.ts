@@ -17,15 +17,17 @@ export class CartService {
     private exchangeRateService: ExchangeRateService,
   ) {}
 
-  private async getCartSettings(): Promise<{ taxRate: number; shippingFlat: number; freeShippingAbove: number }> {
+  private async getCartSettings(): Promise<{ taxRate: number; taxMethod: 'percentage' | 'fixed'; shippingFlat: number; freeShippingAbove: number }> {
     const rows = await this.settingsModel
-      .find({ key: { $in: ['order.taxRate', 'order.shippingFlat', 'order.freeShippingAbove'] } })
+      .find({ key: { $in: ['order.taxRate', 'order.taxMethod', 'order.shippingFlat', 'order.freeShippingAbove'] } })
       .lean();
-    const map = new Map(rows.map(r => [r.key, Number(r.value)]));
+    const map = new Map(rows.map(r => [r.key, r.value]));
+    const taxMethodRaw = String(map.get('order.taxMethod') ?? 'percentage');
     return {
-      taxRate:           map.get('order.taxRate')           ?? 0.18,
-      shippingFlat:      map.get('order.shippingFlat')      ?? 99,
-      freeShippingAbove: map.get('order.freeShippingAbove') ?? 499,
+      taxRate:           Number(map.get('order.taxRate') ?? 0.18),
+      taxMethod:         taxMethodRaw === 'fixed' ? 'fixed' : 'percentage',
+      shippingFlat:      Number(map.get('order.shippingFlat') ?? 99),
+      freeShippingAbove: Number(map.get('order.freeShippingAbove') ?? 499),
     };
   }
 
@@ -149,8 +151,9 @@ export class CartService {
       return total + product.price * item.quantity;
     }, 0);
 
-    const { taxRate, shippingFlat, freeShippingAbove } = await this.getCartSettings();
-    const taxBase = subtotalBase * taxRate;
+    const { taxRate, taxMethod, shippingFlat, freeShippingAbove } = await this.getCartSettings();
+    // Branch on taxMethod: 'percentage' multiplies the subtotal; 'fixed' is a flat charge.
+    const taxBase = taxMethod === 'fixed' ? taxRate : subtotalBase * taxRate;
     const shippingBase = subtotalBase > freeShippingAbove ? 0 : subtotalBase > 0 ? shippingFlat : 0;
     const discountBase = cart.couponDiscount || 0;
     const totalBase = Math.max(0, subtotalBase + taxBase + shippingBase - discountBase);

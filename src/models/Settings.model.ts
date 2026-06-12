@@ -3,8 +3,9 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface ISettings extends Document {
   key: string;
   value: any;
-  category: 'payment' | 'shipping' | 'tax' | 'email' | 'general' | 'branding' | 'storefront' | 'navigation' | 'footer' | 'support' | 'about' | 'seo' | 'orders' | 'products' | 'notifications' | 'loyalty';
+  category: 'payment' | 'shipping' | 'tax' | 'email' | 'general' | 'branding' | 'storefront' | 'navigation' | 'footer' | 'support' | 'about' | 'seo' | 'orders' | 'products' | 'notifications' | 'loyalty' | 'platform' | 'theme';
   description?: string;
+  changedBy?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -22,11 +23,15 @@ const SettingsSchema: Schema = new Schema(
     },
     category: {
       type: String,
-      enum: ['payment', 'shipping', 'tax', 'email', 'general', 'branding', 'storefront', 'navigation', 'footer', 'support', 'about', 'seo', 'orders', 'products', 'notifications', 'loyalty'],
+      enum: ['payment', 'shipping', 'tax', 'email', 'general', 'branding', 'storefront', 'navigation', 'footer', 'support', 'about', 'seo', 'orders', 'products', 'notifications', 'loyalty', 'platform', 'theme'],
       required: true,
     },
     description: {
       type: String,
+    },
+    changedBy: {
+      type: String,
+      default: null,
     },
   },
   {

@@ -6,6 +6,7 @@ import { ContactController } from './contact.controller';
 import { SettingsSchema } from '../../models/Settings.model';
 import { AuthModule } from '../auth/auth.module';
 import { EmailService } from '../../services/email.service';
+import { EmailTemplatesService } from '../../services/email-templates.service';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { EmailService } from '../../services/email.service';
     AuthModule,
   ],
   controllers: [SettingsController, ContactController],
-  providers: [SettingsService, EmailService],
+  providers: [SettingsService, EmailService, EmailTemplatesService],
   exports: [SettingsService],
 })
 export class SettingsModule {}
