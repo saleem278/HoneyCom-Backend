@@ -63,6 +63,8 @@ export interface IOrder extends Document {
   estimatedDelivery?: Date;
   couponCode?: string;
   notes?: string;
+  /** AO-12: cumulative amount refunded so far (supports partial refunds). */
+  refundedAmount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -224,6 +226,11 @@ const OrderSchema: Schema = new Schema(
     },
     notes: {
       type: String,
+    },
+    refundedAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   {
