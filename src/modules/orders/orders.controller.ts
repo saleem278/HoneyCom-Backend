@@ -49,10 +49,19 @@ export class OrdersController {
   @Get()
   @ApiOperation({ summary: 'Get all orders' })
   @ApiResponse({ status: 200, description: 'List of orders' })
-  async findAll(@Request() req: AuthedRequest, @Query('page') page?: string, @Query('limit') limit?: string, @Query('status') status?: string) {
+  async findAll(
+    @Request() req: AuthedRequest,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('paymentStatus') paymentStatus?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
     const pageNum = parseInt(page || '', 10) || 1;
     const limitNum = parseInt(limit || '', 10) || 20;
-    return this.ordersService.findAll(req.user.id, req.user.role, pageNum, limitNum, status);
+    return this.ordersService.findAll(req.user.id, req.user.role, pageNum, limitNum, status, search, paymentStatus, startDate, endDate);
   }
 
   @Get(':id')
