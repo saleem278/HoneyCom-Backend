@@ -41,9 +41,16 @@ export class OrdersService {
    * Fire-and-forget: email the order's customer an order-status update.
    * SMTP is not transactional — never let a mail failure surface to the caller.
    */
+  private async isNotificationEnabled(key: string): Promise<boolean> {
+    const row = await this.settingsModel.findOne({ key }).lean() as any;
+    // Default to enabled when the setting is absent; explicit false disables.
+    return row?.value !== false && row?.value !== 'false';
+  }
+
   private notifyCustomerStatus(orderId: any): void {
     setImmediate(async () => {
       try {
+        if (!await this.isNotificationEnabled('notifications.orderStatusEnabled')) return;
         const o = await this.orderModel.findById(orderId).populate('customer');
         const email = (o as any)?.customer?.email;
         if (email) await this.emailService.sendOrderStatusUpdateEmail(email, o);
@@ -57,6 +64,7 @@ export class OrdersService {
   private notifyCustomerRefund(orderId: any, amount?: number, reason?: string): void {
     setImmediate(async () => {
       try {
+        if (!await this.isNotificationEnabled('notifications.orderStatusEnabled')) return;
         const o = await this.orderModel.findById(orderId).populate('customer');
         const email = (o as any)?.customer?.email;
         if (email) await this.emailService.sendOrderRefundedEmail(email, o, amount, reason);
@@ -70,6 +78,7 @@ export class OrdersService {
   private notifySellersOfNewOrder(order: any): void {
     setImmediate(async () => {
       try {
+        if (!await this.isNotificationEnabled('notifications.orderStatusEnabled')) return;
         const bySeller = new Map<string, any[]>();
         for (const it of order.items || []) {
           const sid = it.seller ? it.seller.toString() : null;
@@ -613,6 +622,7 @@ export class OrdersService {
         subtotal,
         tax,
         shipping,
+        shippingMethod: orderData.shippingMethod || undefined,
         discount,
         total,
         couponCode: cart?.couponCode,
@@ -726,7 +736,17 @@ export class OrdersService {
     };
   }
 
-  async findAll(userId: string, userRole: string, page: number = 1, limit: number = 20, status?: string) {
+  async findAll(
+    userId: string,
+    userRole: string,
+    page: number = 1,
+    limit: number = 20,
+    status?: string,
+    search?: string,
+    paymentStatus?: string,
+    startDate?: string,
+    endDate?: string,
+  ) {
     // Clamp to safe ranges to prevent memory exhaustion.
     const safePage = Math.max(1, page);
     const safeLimit = Math.min(Math.max(1, limit), 100);
@@ -740,6 +760,24 @@ export class OrdersService {
     }
     if (status) {
       filter.status = status;
+    }
+    if (paymentStatus) {
+      filter.paymentStatus = paymentStatus;
+    }
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+    if (search?.trim()) {
+      const rx = new RegExp(search.trim(), 'i');
+      // Search on orderNumber; customer email search requires a sub-query
+      const customerIds = await this.userModel
+        .find({ $or: [{ email: rx }, { name: rx }] })
+        .select('_id')
+        .lean()
+        .then(docs => docs.map(d => d._id));
+      filter.$or = [{ orderNumber: rx }, { customer: { $in: customerIds } }];
     }
 
     const skip = (safePage - 1) * safeLimit;
@@ -1287,6 +1325,23 @@ export class OrdersService {
     }
 
     return { success: true, order: updatedOrder };
+  }
+
+  async resendOrderEmail(orderId: string): Promise<{ success: boolean; message: string }> {
+    const order = await this.orderModel.findById(orderId).populate('customer').lean();
+    if (!order) throw new NotFoundException('Order not found');
+    const email = (order as any).customer?.email;
+    if (!email) return { success: false, message: 'Customer has no email address' };
+    try {
+      if ((order as any).status === 'delivered' || (order as any).status === 'refunded') {
+        await this.emailService.sendOrderStatusUpdateEmail(email, order);
+      } else {
+        await this.emailService.sendOrderConfirmationEmail(email, order);
+      }
+      return { success: true, message: 'Order email resent successfully' };
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to send email: ${err?.message || 'Unknown error'}`);
+    }
   }
 }
 

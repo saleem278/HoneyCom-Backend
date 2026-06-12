@@ -37,10 +37,17 @@ export class AdminController {
   @Get('users')
   @ApiOperation({ summary: 'Get all users' })
   @ApiResponse({ status: 200, description: 'List of users' })
-  async getUsers(@Query('page') page?: string, @Query('limit') limit?: string) {
+  async getUsers(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('role') role?: string,
+    @Query('status') status?: string,
+    @Query('sort') sort?: string,
+  ) {
     const pageNum = parseInt(page || '', 10) || 1;
     const limitNum = parseInt(limit || '', 10) || 20;
-    return this.adminService.getUsers(pageNum, limitNum);
+    return this.adminService.getUsers(pageNum, limitNum, search, role, status, sort);
   }
 
   @Put('products/:id/approve')
@@ -131,6 +138,13 @@ export class AdminController {
     @Body() body: { message: string },
   ) {
     return this.adminService.requestSellerInfo(id, body.message, req.user.id);
+  }
+
+  @Get('users/stats')
+  @ApiOperation({ summary: 'Get aggregated user statistics (counts by role/status + new this week)' })
+  @ApiResponse({ status: 200, description: 'User statistics' })
+  async getUserStats() {
+    return this.adminService.getUserStats();
   }
 
   @Get('users/:id')
@@ -451,6 +465,44 @@ export class AdminController {
     @Body() body: AdminWalletActionDto,
   ) {
     return this.usersService.adminDebitWallet(userId, body.amount, body.description, req.user.id);
+  }
+
+  @Get('users/:id/wallet/transactions')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @ApiOperation({ summary: 'Admin: get user wallet transaction history' })
+  @ApiResponse({ status: 200, description: 'Wallet transactions' })
+  async adminGetWalletTransactions(
+    @Param('id') userId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const pageNum = parseInt(page || '', 10) || 1;
+    const limitNum = parseInt(limit || '', 10) || 20;
+    return this.usersService.getWalletTransactions(userId, pageNum, limitNum);
+  }
+
+  @Post('orders/:id/resend-email')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Admin: resend order confirmation/status email' })
+  @ApiResponse({ status: 200, description: 'Email resent' })
+  async adminResendOrderEmail(@Param('id') id: string) {
+    return this.adminService.adminResendOrderEmail(id);
+  }
+
+  @Post('users/:id/force-logout')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Admin: invalidate all sessions for a user' })
+  @ApiResponse({ status: 200, description: 'User logged out' })
+  async adminForceLogout(@Param('id') userId: string) {
+    return this.adminService.adminForceLogout(userId);
+  }
+
+  @Post('users/:id/resend-verification')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @ApiOperation({ summary: 'Admin: resend email verification to user' })
+  @ApiResponse({ status: 200, description: 'Verification email sent' })
+  async adminResendVerification(@Param('id') userId: string) {
+    return this.adminService.adminResendVerification(userId);
   }
 }
 

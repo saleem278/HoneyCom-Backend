@@ -53,6 +53,8 @@ export interface IOrder extends Document {
   subtotal: number;
   tax: number;
   shipping: number;
+  /** Carrier / method label chosen at checkout (e.g. "Standard Delivery"). */
+  shippingMethod?: string;
   discount: number;
   total: number;
   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
@@ -61,6 +63,8 @@ export interface IOrder extends Document {
   estimatedDelivery?: Date;
   couponCode?: string;
   notes?: string;
+  /** AO-12: cumulative amount refunded so far (supports partial refunds). */
+  refundedAmount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -192,6 +196,9 @@ const OrderSchema: Schema = new Schema(
       type: Number,
       default: 0,
     },
+    shippingMethod: {
+      type: String,
+    },
     discount: {
       type: Number,
       default: 0,
@@ -219,6 +226,11 @@ const OrderSchema: Schema = new Schema(
     },
     notes: {
       type: String,
+    },
+    refundedAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   {

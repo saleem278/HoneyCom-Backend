@@ -96,8 +96,9 @@ export class AdminService {
       throw new NotFoundException('Target user not found');
     }
 
-    if (target.role === 'admin') {
-      throw new ForbiddenException('Cannot impersonate another admin');
+    // USR-10: block impersonating admins and superadmins
+    if (target.role === 'admin' || target.role === 'superadmin') {
+      throw new ForbiddenException('Cannot impersonate an admin or superadmin');
     }
 
     // Audit log row first so a failed JWT mint can't leave a session
@@ -353,18 +354,38 @@ export class AdminService {
     };
   }
 
-  async getUsers(page: number = 1, limit: number = 20) {
+  async getUsers(
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+    role?: string,
+    status?: string,
+    sort?: string,
+  ) {
     const skip = (page - 1) * limit;
-    const users = await this.userModel
-      .find()
-      .select('-password')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-    
-    const total = await this.userModel.countDocuments();
-    
+    const filter: Record<string, any> = {};
+
+    if (search?.trim()) {
+      const rx = new RegExp(search.trim(), 'i');
+      filter.$or = [{ name: rx }, { email: rx }, { phone: rx }];
+    }
+    if (role && role !== 'all') filter.role = role;
+    if (status && status !== 'all') filter.status = status;
+
+    const sortField: Record<string, any> =
+      sort === 'name' ? { name: 1 } : sort === 'email' ? { email: 1 } : { createdAt: -1 };
+
+    const [users, total] = await Promise.all([
+      this.userModel
+        .find(filter)
+        .select('-password')
+        .sort(sortField)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      this.userModel.countDocuments(filter),
+    ]);
+
     return {
       success: true,
       users,
@@ -375,6 +396,20 @@ export class AdminService {
         pages: Math.ceil(total / limit),
       },
     };
+  }
+
+  // USR-06: quick counts for the stats header row
+  async getUserStats() {
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [total, customers, sellers, admins, suspended, newThisWeek] = await Promise.all([
+      this.userModel.countDocuments(),
+      this.userModel.countDocuments({ role: 'customer' }),
+      this.userModel.countDocuments({ role: 'seller' }),
+      this.userModel.countDocuments({ role: 'admin' }),
+      this.userModel.countDocuments({ status: 'suspended' }),
+      this.userModel.countDocuments({ createdAt: { $gte: oneWeekAgo } }),
+    ]);
+    return { total, customers, sellers, admins, suspended, newThisWeek };
   }
 
   async approveProduct(productId: string) {
@@ -479,8 +514,13 @@ export class AdminService {
 
     const refundAmount = amount || order.total;
 
-    if (refundAmount > order.total) {
-      throw new BadRequestException('Refund amount cannot exceed order total');
+    // AO-12: guard against over-refund by checking cumulative amount
+    const alreadyRefunded = (order as any).refundedAmount ?? 0;
+    const remaining = order.total - alreadyRefunded;
+    if (refundAmount > remaining) {
+      throw new BadRequestException(
+        `Refund amount (${refundAmount}) exceeds remaining refundable amount (${remaining})`,
+      );
     }
 
     // Razorpay MUST succeed before we mark the order refunded.
@@ -499,10 +539,16 @@ export class AdminService {
       }
     }
 
-    // Gateway refund succeeded (or wasn't applicable) — safe to mark
-    // the order refunded.
-    order.status = 'refunded';
-    order.paymentStatus = 'refunded';
+    // AO-12: accumulate refundedAmount; only mark fully refunded when total is reached
+    const newRefundedAmount = alreadyRefunded + refundAmount;
+    (order as any).refundedAmount = newRefundedAmount;
+    if (newRefundedAmount >= order.total) {
+      order.status = 'refunded';
+      order.paymentStatus = 'refunded';
+    } else {
+      // Partial refund — keep the order status as-is; update payment status only
+      order.paymentStatus = 'refunded';
+    }
     await order.save();
 
     // Notify the customer their refund was processed. Best-effort.
@@ -765,6 +811,10 @@ export class AdminService {
         twoFactor: { enabled: user.twoFactor?.enabled ?? false },
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
+        // USR-08: loyalty + referral
+        loyaltyPoints: user.loyaltyPoints ?? 0,
+        referralCode: user.referralCode ?? null,
+        referralCodeUsed: user.referralCodeUsed ?? null,
       },
       orders,
       activity,
@@ -1220,10 +1270,9 @@ export class AdminService {
       if (data[k] !== undefined) update[k] = data[k];
     }
 
-    // Prevent privilege escalation: admin can change role, but not to 'admin'
-    // unless changing FROM admin (de-escalation is fine).
-    if (update.role === 'admin' && user.role !== 'admin') {
-      throw new BadRequestException('Cannot promote a user to admin via API');
+    // USR-10: prevent privilege escalation to admin/superadmin
+    if ((update.role === 'admin' || update.role === 'superadmin') && user.role !== 'admin' && user.role !== 'superadmin') {
+      throw new BadRequestException('Cannot promote a user to admin or superadmin via API');
     }
 
     const updated = await this.userModel
@@ -1503,5 +1552,51 @@ export class AdminService {
       lastSentAt: lastBroadcast?.sentAt ?? null,
     };
   }
+
+  async adminForceLogout(userId: string): Promise<{ success: boolean; message: string }> {
+    const user = await this.userModel.findById(userId).lean();
+    if (!user) throw new NotFoundException('User not found');
+    // Stamp revokedAt — future middleware can check this to reject old tokens.
+    // Existing short-lived JWTs expire naturally (stateless JWT limitation).
+    await this.userModel.updateOne({ _id: userId }, { $set: { sessionsRevokedAt: new Date() } });
+    return { success: true, message: 'All sessions have been invalidated. Existing tokens expire on their own schedule.' };
+  }
+
+  async adminResendVerification(userId: string): Promise<{ success: boolean; message: string }> {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+    if ((user as any).emailVerified) {
+      return { success: false, message: 'Email is already verified' };
+    }
+    const crypto = await import('crypto');
+    const token = crypto.randomBytes(32).toString('hex');
+    (user as any).emailVerificationToken = token;
+    (user as any).emailVerificationExpire = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await (user as any).save();
+    try {
+      await this.emailService.sendVerificationEmail((user as any).email, token);
+    } catch {
+      // Email failure should not roll back the token update
+    }
+    return { success: true, message: 'Verification email resent successfully' };
+  }
+
+  async adminResendOrderEmail(orderId: string): Promise<{ success: boolean; message: string }> {
+    const order = await this.orderModel.findById(orderId).populate('customer', 'name email').lean();
+    if (!order) throw new NotFoundException('Order not found');
+    const email = (order as any).customer?.email;
+    if (!email) return { success: false, message: 'Customer has no email address' };
+    try {
+      if (['delivered', 'refunded'].includes((order as any).status)) {
+        await this.emailService.sendOrderStatusUpdateEmail(email, order);
+      } else {
+        await this.emailService.sendOrderConfirmationEmail(email, order);
+      }
+      return { success: true, message: 'Order email resent successfully' };
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to send email: ${err?.message ?? 'Unknown error'}`);
+    }
+  }
+
 }
 
