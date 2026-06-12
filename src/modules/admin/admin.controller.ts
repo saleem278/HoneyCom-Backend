@@ -140,6 +140,13 @@ export class AdminController {
     return this.adminService.requestSellerInfo(id, body.message, req.user.id);
   }
 
+  @Get('users/stats')
+  @ApiOperation({ summary: 'Get aggregated user statistics (counts by role/status + new this week)' })
+  @ApiResponse({ status: 200, description: 'User statistics' })
+  async getUserStats() {
+    return this.adminService.getUserStats();
+  }
+
   @Get('users/:id')
   @ApiOperation({ summary: 'Get user details with orders and activity' })
   @ApiResponse({ status: 200, description: 'User details' })

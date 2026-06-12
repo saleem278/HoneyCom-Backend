@@ -397,6 +397,20 @@ export class AdminService {
     };
   }
 
+  // USR-06: quick counts for the stats header row
+  async getUserStats() {
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [total, customers, sellers, admins, suspended, newThisWeek] = await Promise.all([
+      this.userModel.countDocuments(),
+      this.userModel.countDocuments({ role: 'customer' }),
+      this.userModel.countDocuments({ role: 'seller' }),
+      this.userModel.countDocuments({ role: 'admin' }),
+      this.userModel.countDocuments({ status: 'suspended' }),
+      this.userModel.countDocuments({ createdAt: { $gte: oneWeekAgo } }),
+    ]);
+    return { total, customers, sellers, admins, suspended, newThisWeek };
+  }
+
   async approveProduct(productId: string) {
     // Clear any prior rejectionReason on approval — the product is live now.
     const product = await this.productModel.findByIdAndUpdate(
