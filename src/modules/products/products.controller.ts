@@ -122,7 +122,7 @@ export class ProductsController {
   @ApiOperation({ summary: 'Create product' })
   @ApiResponse({ status: 201, description: 'Product created' })
   async create(@Request() req: AuthedRequest, @Body() createProductDto: any) {
-    return this.productsService.create(createProductDto, req.user.id);
+    return this.productsService.create(createProductDto, req.user.id, req.user.role);
   }
 
   @Post('bulk-upload')

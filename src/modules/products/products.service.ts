@@ -369,7 +369,11 @@ export class ProductsService {
     return [header, ...rows].join('\n');
   }
 
-  async create(createProductDto: any, sellerId: string) {
+  async create(createProductDto: any, userId: string, userRole = 'seller') {
+    const sellerId =
+      userRole === 'admin' && createProductDto.seller
+        ? createProductDto.seller
+        : userId;
     // Validate compareAtPrice is not lower than price (would show a fake discount)
     if (
       createProductDto.compareAtPrice !== undefined &&
