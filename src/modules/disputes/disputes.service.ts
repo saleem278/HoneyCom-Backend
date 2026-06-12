@@ -102,6 +102,11 @@ export class DisputesService {
   }
 
   async findAll(userId: string, userRole: string, filters?: any) {
+    const page = parseInt(filters?.page || '1', 10) || 1;
+    const limit = parseInt(filters?.limit || '20', 10) || 20;
+    const safeLimit = Math.min(limit, 100);
+    const skip = (page - 1) * safeLimit;
+
     const query: any = {};
 
     if (userRole === 'customer') {
@@ -117,18 +122,33 @@ export class DisputesService {
     if (filters?.type) {
       query.type = filters.type;
     }
+    if (filters?.search?.trim()) {
+      const rx = new RegExp(filters.search.trim(), 'i');
+      query.$or = [{ 'orderNumber': rx }, { description: rx }];
+    }
 
-    const disputes = await this.disputeModel
-      .find(query)
-      .populate('order', 'orderNumber total status')
-      .populate('customer', 'name email')
-      .populate('seller', 'name email')
-      .populate('resolvedBy', 'name email')
-      .sort({ createdAt: -1 });
+    const [disputes, total] = await Promise.all([
+      this.disputeModel
+        .find(query)
+        .populate('order', 'orderNumber total status paymentMethod razorpayPaymentId')
+        .populate('customer', 'name email')
+        .populate('seller', 'name email')
+        .populate('resolvedBy', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(safeLimit),
+      this.disputeModel.countDocuments(query),
+    ]);
 
     return {
       success: true,
       disputes,
+      pagination: {
+        page,
+        limit: safeLimit,
+        total,
+        pages: Math.ceil(total / safeLimit),
+      },
     };
   }
 
