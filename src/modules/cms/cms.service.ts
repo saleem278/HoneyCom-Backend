@@ -844,7 +844,6 @@ ${posts.map((post: any) => `  <url>
 
   // ========== ROBOTS.TXT ==========
   async getRobotsTxt() {
-    // Try to get from database or return default
     const baseUrl = this.configService.get<string>('FRONTEND_URL')?.split(',')[0] || 'http://localhost:3000';
     const defaultRobots = `User-agent: *
 Allow: /
@@ -855,25 +854,28 @@ Disallow: /api/
 
 Sitemap: ${baseUrl}/sitemap.xml`;
 
-    // In a real implementation, you might store this in a database
-    // For now, return default
-    return { success: true, content: defaultRobots };
+    const setting = await this.settingsModel.findOne({ key: CmsService.ROBOTS_TXT_KEY }).lean();
+    const content = (setting?.value as any)?.content ?? defaultRobots;
+    return { success: true, content };
   }
 
   async updateRobotsTxt(content: string) {
-    // In a real implementation, save to database or file system
-    // For now, just validate and return
     if (!content || content.trim().length === 0) {
       throw new BadRequestException('Robots.txt content cannot be empty');
     }
-
-    // Basic validation
     if (content.length > 10000) {
       throw new BadRequestException('Robots.txt content is too long (max 10000 characters)');
     }
 
-    // TODO: Save to database or file system
-    // For now, return success
+    const existing = await this.settingsModel.findOne({ key: CmsService.ROBOTS_TXT_KEY }).lean();
+    if (existing) {
+      await this.settingsModel.updateOne(
+        { key: CmsService.ROBOTS_TXT_KEY },
+        { $set: { value: { content } } },
+      );
+    } else {
+      await this.settingsModel.create({ key: CmsService.ROBOTS_TXT_KEY, value: { content } });
+    }
     return { success: true, message: 'Robots.txt updated successfully', content };
   }
 
@@ -1023,6 +1025,7 @@ Sitemap: ${baseUrl}/sitemap.xml`;
 
   // ========== SEO ==========
   private static readonly SEO_DEFAULTS_KEY = 'seo_defaults';
+  private static readonly ROBOTS_TXT_KEY = 'robots_txt';
 
   private static readonly SEO_FALLBACK_DEFAULTS = {
     siteName: '',

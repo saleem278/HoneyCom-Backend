@@ -353,18 +353,38 @@ export class AdminService {
     };
   }
 
-  async getUsers(page: number = 1, limit: number = 20) {
+  async getUsers(
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+    role?: string,
+    status?: string,
+    sort?: string,
+  ) {
     const skip = (page - 1) * limit;
-    const users = await this.userModel
-      .find()
-      .select('-password')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-    
-    const total = await this.userModel.countDocuments();
-    
+    const filter: Record<string, any> = {};
+
+    if (search?.trim()) {
+      const rx = new RegExp(search.trim(), 'i');
+      filter.$or = [{ name: rx }, { email: rx }, { phone: rx }];
+    }
+    if (role && role !== 'all') filter.role = role;
+    if (status && status !== 'all') filter.status = status;
+
+    const sortField: Record<string, any> =
+      sort === 'name' ? { name: 1 } : sort === 'email' ? { email: 1 } : { createdAt: -1 };
+
+    const [users, total] = await Promise.all([
+      this.userModel
+        .find(filter)
+        .select('-password')
+        .sort(sortField)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      this.userModel.countDocuments(filter),
+    ]);
+
     return {
       success: true,
       users,
