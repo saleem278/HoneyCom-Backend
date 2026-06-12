@@ -87,6 +87,11 @@ export class CreateOrderDto {
   @IsString()
   razorpaySignature?: string;
 
+  @ApiPropertyOptional({ example: 'Standard Delivery', description: 'Carrier / method chosen at checkout' })
+  @IsOptional()
+  @IsString()
+  shippingMethod?: string;
+
   @ApiPropertyOptional({ example: 'INR', description: 'Overwritten by the X-Currency header' })
   @IsOptional()
   @IsString()

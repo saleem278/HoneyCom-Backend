@@ -53,6 +53,8 @@ export interface IOrder extends Document {
   subtotal: number;
   tax: number;
   shipping: number;
+  /** Carrier / method label chosen at checkout (e.g. "Standard Delivery"). */
+  shippingMethod?: string;
   discount: number;
   total: number;
   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
@@ -191,6 +193,9 @@ const OrderSchema: Schema = new Schema(
     shipping: {
       type: Number,
       default: 0,
+    },
+    shippingMethod: {
+      type: String,
     },
     discount: {
       type: Number,
