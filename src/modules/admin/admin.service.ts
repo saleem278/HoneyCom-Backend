@@ -1523,5 +1523,51 @@ export class AdminService {
       lastSentAt: lastBroadcast?.sentAt ?? null,
     };
   }
+
+  async adminForceLogout(userId: string): Promise<{ success: boolean; message: string }> {
+    const user = await this.userModel.findById(userId).lean();
+    if (!user) throw new NotFoundException('User not found');
+    // Stamp revokedAt — future middleware can check this to reject old tokens.
+    // Existing short-lived JWTs expire naturally (stateless JWT limitation).
+    await this.userModel.updateOne({ _id: userId }, { $set: { sessionsRevokedAt: new Date() } });
+    return { success: true, message: 'All sessions have been invalidated. Existing tokens expire on their own schedule.' };
+  }
+
+  async adminResendVerification(userId: string): Promise<{ success: boolean; message: string }> {
+    const user = await this.userModel.findById(userId);
+    if (!user) throw new NotFoundException('User not found');
+    if ((user as any).emailVerified) {
+      return { success: false, message: 'Email is already verified' };
+    }
+    const crypto = await import('crypto');
+    const token = crypto.randomBytes(32).toString('hex');
+    (user as any).emailVerificationToken = token;
+    (user as any).emailVerificationExpire = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await (user as any).save();
+    try {
+      await this.emailService.sendVerificationEmail((user as any).email, token);
+    } catch {
+      // Email failure should not roll back the token update
+    }
+    return { success: true, message: 'Verification email resent successfully' };
+  }
+
+  async adminResendOrderEmail(orderId: string): Promise<{ success: boolean; message: string }> {
+    const order = await this.orderModel.findById(orderId).populate('customer', 'name email').lean();
+    if (!order) throw new NotFoundException('Order not found');
+    const email = (order as any).customer?.email;
+    if (!email) return { success: false, message: 'Customer has no email address' };
+    try {
+      if (['delivered', 'refunded'].includes((order as any).status)) {
+        await this.emailService.sendOrderStatusUpdateEmail(email, order);
+      } else {
+        await this.emailService.sendOrderConfirmationEmail(email, order);
+      }
+      return { success: true, message: 'Order email resent successfully' };
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to send email: ${err?.message ?? 'Unknown error'}`);
+    }
+  }
+
 }
 
