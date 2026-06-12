@@ -96,8 +96,9 @@ export class AdminService {
       throw new NotFoundException('Target user not found');
     }
 
-    if (target.role === 'admin') {
-      throw new ForbiddenException('Cannot impersonate another admin');
+    // USR-10: block impersonating admins and superadmins
+    if (target.role === 'admin' || target.role === 'superadmin') {
+      throw new ForbiddenException('Cannot impersonate an admin or superadmin');
     }
 
     // Audit log row first so a failed JWT mint can't leave a session
@@ -513,8 +514,13 @@ export class AdminService {
 
     const refundAmount = amount || order.total;
 
-    if (refundAmount > order.total) {
-      throw new BadRequestException('Refund amount cannot exceed order total');
+    // AO-12: guard against over-refund by checking cumulative amount
+    const alreadyRefunded = (order as any).refundedAmount ?? 0;
+    const remaining = order.total - alreadyRefunded;
+    if (refundAmount > remaining) {
+      throw new BadRequestException(
+        `Refund amount (${refundAmount}) exceeds remaining refundable amount (${remaining})`,
+      );
     }
 
     // Razorpay MUST succeed before we mark the order refunded.
@@ -533,10 +539,16 @@ export class AdminService {
       }
     }
 
-    // Gateway refund succeeded (or wasn't applicable) — safe to mark
-    // the order refunded.
-    order.status = 'refunded';
-    order.paymentStatus = 'refunded';
+    // AO-12: accumulate refundedAmount; only mark fully refunded when total is reached
+    const newRefundedAmount = alreadyRefunded + refundAmount;
+    (order as any).refundedAmount = newRefundedAmount;
+    if (newRefundedAmount >= order.total) {
+      order.status = 'refunded';
+      order.paymentStatus = 'refunded';
+    } else {
+      // Partial refund — keep the order status as-is; update payment status only
+      order.paymentStatus = 'refunded';
+    }
     await order.save();
 
     // Notify the customer their refund was processed. Best-effort.
@@ -799,6 +811,10 @@ export class AdminService {
         twoFactor: { enabled: user.twoFactor?.enabled ?? false },
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
+        // USR-08: loyalty + referral
+        loyaltyPoints: user.loyaltyPoints ?? 0,
+        referralCode: user.referralCode ?? null,
+        referralCodeUsed: user.referralCodeUsed ?? null,
       },
       orders,
       activity,
@@ -1254,10 +1270,9 @@ export class AdminService {
       if (data[k] !== undefined) update[k] = data[k];
     }
 
-    // Prevent privilege escalation: admin can change role, but not to 'admin'
-    // unless changing FROM admin (de-escalation is fine).
-    if (update.role === 'admin' && user.role !== 'admin') {
-      throw new BadRequestException('Cannot promote a user to admin via API');
+    // USR-10: prevent privilege escalation to admin/superadmin
+    if ((update.role === 'admin' || update.role === 'superadmin') && user.role !== 'admin' && user.role !== 'superadmin') {
+      throw new BadRequestException('Cannot promote a user to admin or superadmin via API');
     }
 
     const updated = await this.userModel
