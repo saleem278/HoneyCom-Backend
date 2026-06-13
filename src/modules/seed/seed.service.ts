@@ -60,6 +60,15 @@ export class SeedService {
       await this.seedWidgets();
       await this.seedDisputes(users, products);
       await this.seedSettings();
+      // Newly-seeded domain collections (previously empty).
+      await this.seedEmailTemplates();
+      await this.seedStores(users);
+      await this.seedFlashSales(users, products);
+      await this.seedPayouts(users);
+      await this.seedWalletTransactions(users);
+      await this.seedLoyaltyTransactions(users);
+      await this.seedNotifications(users);
+      await this.seedBroadcasts(users);
 
       this.logger.log('✅ Database seeding completed successfully!');
       return { success: true, message: 'Database seeded successfully' };
@@ -67,6 +76,146 @@ export class SeedService {
       this.logger.error('❌ Error seeding database:', error);
       throw error;
     }
+  }
+
+  // ── Email templates ────────────────────────────────────────────────────────
+  // Keys are the bare prefixes the mailer resolves (<key>Subject/Cta/Intro).
+  private async seedEmailTemplates() {
+    this.logger.log('Seeding email templates...');
+    const mod = await import('../../models/EmailTemplate.model');
+    const model = this.connection.model('EmailTemplate', mod.EmailTemplateSchema);
+    await model.insertMany([
+      { key: 'orderConfirm', name: 'Order Confirmation', subject: 'Order Confirmed #{{orderNumber}} - {{siteName}}', cta: 'Track My Order', intro: 'Thank you for your order! Here is a summary of what you ordered.', isActive: true },
+      { key: 'shipping', name: 'Shipping Update', subject: 'Your order #{{orderNumber}} has shipped! - {{siteName}}', cta: 'Track Shipment', intro: 'Great news! Your order is on its way.', isActive: true },
+      { key: 'verify', name: 'Email Verification', subject: 'Verify your email for {{siteName}}', cta: 'Verify Email', intro: 'Welcome to {{siteName}}! Please verify your email to start shopping.', isActive: true },
+      { key: 'reset', name: 'Password Reset', subject: 'Reset your {{siteName}} password', cta: 'Reset Password', intro: 'We received a request to reset your password.', isActive: true },
+      { key: 'sellerApproved', name: 'Seller Approved', subject: 'Congratulations! Your seller account is approved - {{siteName}}', cta: 'Go to Dashboard', intro: 'Your seller account has been approved. You can now list products.', isActive: true },
+      { key: 'sellerRejected', name: 'Seller Rejected', subject: 'Update on your seller application - {{siteName}}', cta: 'Contact Support', intro: 'Thank you for your interest. Unfortunately we could not approve your application at this time.', isActive: true },
+    ]);
+    this.logger.log('✅ Created 6 email templates');
+  }
+
+  // ── Stores (one per seller) ──────────────────────────────────────────────────
+  private async seedStores(users: any[]) {
+    this.logger.log('Seeding stores...');
+    const sellers = users.filter(u => u.role === 'seller');
+    if (sellers.length === 0) return;
+    const mod = await import('../../models/Store.model');
+    const model = this.connection.model('Store', mod.StoreSchema);
+    const docs = sellers.map((s, i) => ({
+      seller: s._id,
+      storeName: i === 0 ? 'Priya Fashion Store' : 'Raj Electronics',
+      slug: i === 0 ? 'priya-fashion-store' : 'raj-electronics',
+      contact: { email: s.email, phone: s.phone || '' },
+      settings: {},
+    }));
+    await model.insertMany(docs);
+    this.logger.log(`✅ Created ${docs.length} stores`);
+  }
+
+  // ── Flash sales ──────────────────────────────────────────────────────────────
+  private async seedFlashSales(users: any[], products: any[]) {
+    this.logger.log('Seeding flash sales...');
+    const admin = users.find(u => u.role === 'admin') || users.find(u => u.role === 'superadmin');
+    if (!admin || !products || products.length === 0) return;
+    const mod = await import('../../models/FlashSale.model');
+    const model = this.connection.model('FlashSale', mod.FlashSaleSchema);
+    const now = Date.now();
+    const docs = products.slice(0, 3).map((p, i) => {
+      const original = p.price ?? 999;
+      const sale = Math.round(original * 0.7 * 100) / 100;
+      return {
+        product: p._id,
+        originalPrice: original,
+        salePrice: sale,
+        discountPercent: 30,
+        startTime: new Date(now - (i === 0 ? 3600_000 : -86400_000 * (i))),
+        endTime: new Date(now + 86400_000 * (i + 2)),
+        createdBy: admin._id,
+      };
+    });
+    await model.insertMany(docs);
+    this.logger.log(`✅ Created ${docs.length} flash sales`);
+  }
+
+  // ── Payouts ────────────────────────────────────────────────────────────────
+  private async seedPayouts(users: any[]) {
+    this.logger.log('Seeding payouts...');
+    const sellers = users.filter(u => u.role === 'seller');
+    if (sellers.length === 0) return;
+    const mod = await import('../../models/Payout.model');
+    const model = this.connection.model('Payout', mod.PayoutSchema);
+    const docs = sellers.map((s, i) => ({
+      seller: s._id,
+      amount: 5000 + i * 2500,
+      bankAccountName: s.name || 'Seller Account',
+      bankAccountNumber: `XXXXXXXX${1000 + i}`,
+      bankName: 'HDFC Bank',
+    }));
+    await model.insertMany(docs);
+    this.logger.log(`✅ Created ${docs.length} payouts`);
+  }
+
+  // ── Wallet transactions ──────────────────────────────────────────────────────
+  private async seedWalletTransactions(users: any[]) {
+    this.logger.log('Seeding wallet transactions...');
+    const customers = users.filter(u => u.role === 'customer');
+    if (customers.length === 0) return;
+    const mod = await import('../../models/WalletTransaction.model');
+    const model = this.connection.model('WalletTransaction', mod.WalletTransactionSchema);
+    const docs: any[] = [];
+    customers.forEach(c => {
+      docs.push({ user: c._id, amount: 1000, type: 'credit', reason: 'topup', description: 'Wallet top-up', balanceAfter: 1000 });
+      docs.push({ user: c._id, amount: 200, type: 'debit', reason: 'order_payment', description: 'Order payment', balanceAfter: 800 });
+    });
+    await model.insertMany(docs);
+    this.logger.log(`✅ Created ${docs.length} wallet transactions`);
+  }
+
+  // ── Loyalty transactions ──────────────────────────────────────────────────────
+  private async seedLoyaltyTransactions(users: any[]) {
+    this.logger.log('Seeding loyalty transactions...');
+    const customers = users.filter(u => u.role === 'customer');
+    if (customers.length === 0) return;
+    const mod = await import('../../models/LoyaltyTransaction.model');
+    const model = this.connection.model('LoyaltyTransaction', mod.LoyaltyTransactionSchema);
+    const docs: any[] = [];
+    customers.forEach(c => {
+      docs.push({ user: c._id, points: 100, type: 'earn', description: 'Welcome bonus', balanceAfter: 100 });
+      docs.push({ user: c._id, points: 50, type: 'redeem', description: 'Redeemed at checkout', balanceAfter: 50 });
+    });
+    await model.insertMany(docs);
+    this.logger.log(`✅ Created ${docs.length} loyalty transactions`);
+  }
+
+  // ── Notifications ──────────────────────────────────────────────────────────────
+  private async seedNotifications(users: any[]) {
+    this.logger.log('Seeding notifications...');
+    if (!users || users.length === 0) return;
+    const mod = await import('../../models/Notification.model');
+    const model = this.connection.model('Notification', mod.NotificationSchema);
+    const docs = users.slice(0, 4).map(u => ({
+      user: u._id,
+      title: 'Welcome to the platform',
+      message: 'Thanks for joining. Explore the latest deals and offers.',
+      type: 'other',
+    }));
+    await model.insertMany(docs);
+    this.logger.log(`✅ Created ${docs.length} notifications`);
+  }
+
+  // ── Broadcasts ──────────────────────────────────────────────────────────────
+  private async seedBroadcasts(users: any[]) {
+    this.logger.log('Seeding broadcasts...');
+    const admin = users.find(u => u.role === 'admin') || users.find(u => u.role === 'superadmin');
+    if (!admin) return;
+    const mod = await import('../../models/Broadcast.model');
+    const model = this.connection.model('Broadcast', mod.BroadcastSchema);
+    await model.insertMany([
+      { title: 'Festive Sale is Live', message: 'Up to 40% off across all categories this week only!', createdBy: admin._id, type: 'promotion', status: 'sent', channels: ['inApp'] },
+      { title: 'Scheduled Maintenance', message: 'The platform will undergo brief maintenance this weekend.', createdBy: admin._id, type: 'announcement', status: 'draft', channels: ['inApp'] },
+    ]);
+    this.logger.log('✅ Created 2 broadcasts');
   }
 
   private async clearDatabase() {
@@ -1671,56 +1820,43 @@ export class SeedService {
     // Register Menu model using schema directly
     const menuModel = this.connection.model('Menu', MenuSchema);
 
-    // Menus
+    // Menus. The storefront reads its navigation EXCLUSIVELY from these CMS
+    // menus (no settings fallback), so the header + categories menus must be
+    // seeded with real data. These mirror the canonical nav defaults.
     await menuModel.insertMany([
       {
-        name: 'Main Menu',
+        // Top nav links (storefront header bar). highlight flags the emphasized link.
+        name: 'Header Navigation',
         location: 'header',
         items: [
-          {
-            label: 'Home',
-            url: '/',
-            order: 1,
-          },
-          {
-            label: 'Products',
-            url: '/products',
-            order: 2,
-          },
-          {
-            label: 'About',
-            url: '/about-us',
-            order: 3,
-          },
-          {
-            label: 'Blog',
-            url: '/blog',
-            order: 4,
-          },
+          { label: 'Deals', url: '/products?sort=discount', type: 'custom', highlight: true, order: 1 },
+          { label: 'New Arrivals', url: '/products?sort=newest', type: 'custom', order: 2 },
+          { label: 'Best Sellers', url: '/products?sort=popular', type: 'custom', order: 3 },
+          { label: 'Electronics', url: '/products?category=electronics', type: 'category', order: 4 },
         ],
-        isActive: true,
+      },
+      {
+        // Mega-menu categories (storefront "All Categories" dropdown).
+        // Each item carries emoji + slug + sub-category labels.
+        name: 'Mega Menu Categories',
+        location: 'categories',
+        items: [
+          { label: 'Electronics', url: '/products?category=electronics', type: 'category', emoji: '📱', slug: 'electronics', sub: ['Smartphones', 'Laptops', 'Audio', 'Cameras', 'Accessories'], order: 1 },
+          { label: 'Fashion', url: '/products?category=fashion', type: 'category', emoji: '👗', slug: 'fashion', sub: ["Men's Clothing", "Women's Clothing", 'Footwear', 'Accessories', 'Kids'], order: 2 },
+          { label: 'Home & Kitchen', url: '/products?category=home-kitchen', type: 'category', emoji: '🏠', slug: 'home-kitchen', sub: ['Appliances', 'Cookware', 'Furniture', 'Decor', 'Storage'], order: 3 },
+          { label: 'Beauty', url: '/products?category=beauty', type: 'category', emoji: '💄', slug: 'beauty', sub: ['Skincare', 'Haircare', 'Makeup', 'Fragrances', 'Personal Care'], order: 4 },
+          { label: 'Sports', url: '/products?category=sports', type: 'category', emoji: '🏋️', slug: 'sports', sub: ['Gym Equipment', 'Sportswear', 'Outdoor Gear', 'Cycles', 'Yoga'], order: 5 },
+          { label: 'Grocery', url: '/products?category=grocery', type: 'category', emoji: '🛒', slug: 'grocery', sub: ['Staples', 'Snacks', 'Beverages', 'Health Foods', 'Organic'], order: 6 },
+        ],
       },
       {
         name: 'Footer Menu',
         location: 'footer',
         items: [
-          {
-            label: 'Privacy Policy',
-            url: '/privacy-policy',
-            order: 1,
-          },
-          {
-            label: 'Terms of Service',
-            url: '/terms-of-service',
-            order: 2,
-          },
-          {
-            label: 'Contact',
-            url: '/contact',
-            order: 3,
-          },
+          { label: 'Privacy Policy', url: '/privacy-policy', order: 1 },
+          { label: 'Terms of Service', url: '/terms-of-service', order: 2 },
+          { label: 'Contact', url: '/contact', order: 3 },
         ],
-        isActive: true,
       },
     ]);
 
