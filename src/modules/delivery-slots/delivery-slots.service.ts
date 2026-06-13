@@ -45,6 +45,15 @@ export class DeliverySlotsService {
     return { success: true, today, tomorrow };
   }
 
+  /** Admin: every slot (active and inactive), newest first. */
+  async findAll() {
+    const slots = await this.deliverySlotModel
+      .find()
+      .sort({ isActive: -1, startTime: 1 })
+      .lean();
+    return { success: true, slots };
+  }
+
   async create(dto: CreateDeliverySlotDto) {
     const slot = await this.deliverySlotModel.create(dto);
     return { success: true, slot };

@@ -35,6 +35,16 @@ export class DeliverySlotsController {
     return this.deliverySlotsService.findAvailable();
   }
 
+  @Get('all')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'List all delivery slots incl. inactive (admin only)' })
+  @ApiResponse({ status: 200, description: 'All delivery slots' })
+  async findAll() {
+    return this.deliverySlotsService.findAll();
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')
