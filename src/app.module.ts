@@ -27,6 +27,10 @@ import { FlashSalesModule } from './modules/flash-sales/flash-sales.module';
 import { LoyaltyModule } from './modules/loyalty/loyalty.module';
 import { ReferralModule } from './modules/referral/referral.module';
 import { EmailTemplatesModule } from './modules/email-templates/email-templates.module';
+import { BundlesModule } from './modules/bundles/bundles.module';
+import { DeliverySlotsModule } from './modules/delivery-slots/delivery-slots.module';
+import { CollectionsModule } from './modules/collections/collections.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
@@ -79,6 +83,10 @@ import { EmailTemplatesModule } from './modules/email-templates/email-templates.
     LoyaltyModule,
     ReferralModule,
     EmailTemplatesModule,
+    BundlesModule,
+    DeliverySlotsModule,
+    CollectionsModule,
+    SearchModule,
     SeedModule,
   ],
 })

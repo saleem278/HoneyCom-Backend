@@ -12,6 +12,9 @@ import { Category, CategorySchema } from '../../models/Category.model';
 import { BrandSchema } from '../../models/Brand.model';
 import { ProductAlert, ProductAlertSchema } from '../../models/ProductAlert.model';
 import { SettingsSchema } from '../../models/Settings.model';
+import { PriceHistorySchema } from '../../models/PriceHistory.model';
+import { ProductViewSchema } from '../../models/ProductView.model';
+import { OrderSchema } from '../../models/Order.model';
 import { AuthModule } from '../auth/auth.module';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { MobileModule } from '../mobile/mobile.module';
@@ -25,6 +28,9 @@ import { EmailService } from '../../services/email.service';
       { name: 'Brand', schema: BrandSchema },
       { name: 'ProductAlert', schema: ProductAlertSchema },
       { name: 'Settings', schema: SettingsSchema },
+      { name: 'PriceHistory', schema: PriceHistorySchema },
+      { name: 'ProductView', schema: ProductViewSchema },
+      { name: 'Order', schema: OrderSchema },
     ]),
     MulterModule.register({
       storage: multer.memoryStorage(),

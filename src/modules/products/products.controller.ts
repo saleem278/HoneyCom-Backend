@@ -214,5 +214,28 @@ export class ProductsController {
     const email = req.user?.email ?? body.customerEmail;
     return this.productsService.askQuestion(id, body.question, email);
   }
+
+  @Get(':id/price-history')
+  @ApiOperation({ summary: 'Get price history for a product (last 30 records)' })
+  @ApiResponse({ status: 200, description: 'Price history records' })
+  async getPriceHistory(@Param('id') id: string) {
+    return this.productsService.getPriceHistory(id);
+  }
+
+  @Post(':id/view')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 60, ttl: 60000 } })
+  @ApiOperation({ summary: 'Record a product view (unauthenticated)' })
+  @ApiResponse({ status: 200, description: 'View recorded' })
+  async recordView(@Param('id') id: string) {
+    return this.productsService.recordView(id);
+  }
+
+  @Get(':id/social-proof')
+  @ApiOperation({ summary: 'Get social proof indicators for a product' })
+  @ApiResponse({ status: 200, description: 'Social proof data' })
+  async getSocialProof(@Param('id') id: string) {
+    return this.productsService.getSocialProof(id);
+  }
 }
 

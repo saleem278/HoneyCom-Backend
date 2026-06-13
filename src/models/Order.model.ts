@@ -65,6 +65,8 @@ export interface IOrder extends Document {
   notes?: string;
   /** AO-12: cumulative amount refunded so far (supports partial refunds). */
   refundedAmount?: number;
+  deliverySlot?: mongoose.Types.ObjectId;
+  deliverySlotLabel?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -231,6 +233,14 @@ const OrderSchema: Schema = new Schema(
       type: Number,
       default: 0,
       min: 0,
+    },
+    deliverySlot: {
+      type: Schema.Types.ObjectId,
+      ref: 'DeliverySlot',
+    },
+    deliverySlotLabel: {
+      type: String,
+      trim: true,
     },
   },
   {
