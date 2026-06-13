@@ -69,6 +69,12 @@ export class SeedService {
       await this.seedLoyaltyTransactions(users);
       await this.seedNotifications(users);
       await this.seedBroadcasts(users);
+      // Premium platform features (merged 45yy62): no storefront fallbacks,
+      // so these must be seeded for the new pages to render real data.
+      await this.seedDeliverySlots();
+      await this.seedCollections(products);
+      await this.seedBundles(users, products);
+      await this.seedPriceHistory(users, products);
 
       this.logger.log('✅ Database seeding completed successfully!');
       return { success: true, message: 'Database seeded successfully' };
@@ -216,6 +222,103 @@ export class SeedService {
       { title: 'Scheduled Maintenance', message: 'The platform will undergo brief maintenance this weekend.', createdBy: admin._id, type: 'system', status: 'draft', channels: ['inApp'] },
     ]);
     this.logger.log('✅ Created 2 broadcasts');
+  }
+
+  // ── Delivery slots ───────────────────────────────────────────────────────────
+  private async seedDeliverySlots() {
+    this.logger.log('Seeding delivery slots...');
+    const mod = await import('../../models/DeliverySlot.model');
+    const model = this.connection.model('DeliverySlot', mod.DeliverySlotSchema);
+    const allDays = [0, 1, 2, 3, 4, 5, 6];
+    const docs = [
+      { label: 'Morning (8 AM – 12 PM)', startTime: '08:00', endTime: '12:00', cutoffTime: '06:00', isExpress: false, daysAvailable: allDays, maxOrders: 50, extraCharge: 0 },
+      { label: 'Afternoon (12 PM – 4 PM)', startTime: '12:00', endTime: '16:00', cutoffTime: '10:00', isExpress: false, daysAvailable: allDays, maxOrders: 50, extraCharge: 0 },
+      { label: 'Evening (4 PM – 8 PM)', startTime: '16:00', endTime: '20:00', cutoffTime: '14:00', isExpress: false, daysAvailable: allDays, maxOrders: 50, extraCharge: 0 },
+      { label: 'Express (within 2 hours)', startTime: '09:00', endTime: '21:00', cutoffTime: '19:00', isExpress: true, daysAvailable: allDays, maxOrders: 15, extraCharge: 99 },
+      { label: 'Weekend Slot (10 AM – 2 PM)', startTime: '10:00', endTime: '14:00', cutoffTime: '08:00', isExpress: false, daysAvailable: [0, 6], maxOrders: 30, extraCharge: 0 },
+    ];
+    await model.insertMany(docs);
+    this.logger.log(`✅ Created ${docs.length} delivery slots`);
+  }
+
+  // ── Collections ──────────────────────────────────────────────────────────────
+  private async seedCollections(products: any[]) {
+    this.logger.log('Seeding collections...');
+    if (!products || products.length === 0) return;
+    const mod = await import('../../models/Collection.model');
+    const model = this.connection.model('Collection', mod.CollectionSchema);
+    const pick = (n: number) => products.slice(0, Math.min(n, products.length)).map(p => p._id);
+    const docs = [
+      { name: 'Trending Now', slug: 'trending-now', description: 'The products everyone is buying this season.', products: pick(8), isFeatured: true, displayOrder: 1, isActive: true },
+      { name: 'New Arrivals', slug: 'new-arrivals', description: 'Fresh picks just added to the catalogue.', products: products.slice(-6).map(p => p._id), isFeatured: true, displayOrder: 2, isActive: true },
+      { name: 'Editor’s Choice', slug: 'editors-choice', description: 'Hand-curated favourites from our team.', products: pick(5), isFeatured: true, displayOrder: 3, isActive: true },
+      { name: 'Budget Finds', slug: 'budget-finds', description: 'Great quality without breaking the bank.', products: pick(6), isFeatured: false, displayOrder: 4, isActive: true },
+    ];
+    await model.insertMany(docs);
+    this.logger.log(`✅ Created ${docs.length} collections`);
+  }
+
+  // ── Bundles ──────────────────────────────────────────────────────────────────
+  private async seedBundles(users: any[], products: any[]) {
+    this.logger.log('Seeding bundles...');
+    if (!products || products.length < 2) return;
+    const seller = users.find(u => u.role === 'seller');
+    const mod = await import('../../models/Bundle.model');
+    const model = this.connection.model('Bundle', mod.BundleSchema);
+    const makeBundle = (name: string, description: string, items: any[], discount: number) => {
+      const originalPrice = Math.round(items.reduce((sum, p) => sum + (p.price ?? 0), 0) * 100) / 100;
+      const bundlePrice = Math.round(originalPrice * (1 - discount / 100) * 100) / 100;
+      return {
+        name,
+        description,
+        products: items.map(p => p._id),
+        seller: seller?._id,
+        bundlePrice,
+        originalPrice,
+        discountPercent: discount,
+        image: items[0]?.images?.[0],
+        isActive: true,
+      };
+    };
+    const docs = [
+      makeBundle('Starter Combo', 'Two best-sellers bundled at a saving.', products.slice(0, 2), 15),
+      makeBundle('Value Pack', 'Three products, one great price.', products.slice(0, 3), 20),
+      makeBundle('Premium Bundle', 'Our top picks together for maximum value.', products.slice(0, Math.min(4, products.length)), 25),
+    ];
+    await model.insertMany(docs);
+    this.logger.log(`✅ Created ${docs.length} bundles`);
+  }
+
+  // ── Price history ──────────────────────────────────────────────────────────────
+  private async seedPriceHistory(users: any[], products: any[]) {
+    this.logger.log('Seeding price history...');
+    if (!products || products.length === 0) return;
+    const admin = users.find(u => u.role === 'admin') || users.find(u => u.role === 'superadmin');
+    const mod = await import('../../models/PriceHistory.model');
+    const model = this.connection.model('PriceHistory', mod.PriceHistorySchema);
+    const now = Date.now();
+    const docs: any[] = [];
+    // Give the first few products a 90/60/30-day price trail ending at today's price.
+    products.slice(0, 6).forEach(p => {
+      const current = p.price ?? 999;
+      const points = [
+        { daysAgo: 90, factor: 1.2 },
+        { daysAgo: 60, factor: 1.1 },
+        { daysAgo: 30, factor: 1.05 },
+        { daysAgo: 0, factor: 1 },
+      ];
+      points.forEach(pt => {
+        docs.push({
+          product: p._id,
+          price: Math.round(current * pt.factor * 100) / 100,
+          compareAtPrice: p.compareAtPrice,
+          changedAt: new Date(now - pt.daysAgo * 86400_000),
+          changedBy: admin?._id,
+        });
+      });
+    });
+    await model.insertMany(docs);
+    this.logger.log(`✅ Created ${docs.length} price history records`);
   }
 
   private async clearDatabase() {
