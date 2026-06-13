@@ -26,6 +26,7 @@ import { PayoutsModule } from './modules/payouts/payouts.module';
 import { FlashSalesModule } from './modules/flash-sales/flash-sales.module';
 import { LoyaltyModule } from './modules/loyalty/loyalty.module';
 import { ReferralModule } from './modules/referral/referral.module';
+import { EmailTemplatesModule } from './modules/email-templates/email-templates.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { ReferralModule } from './modules/referral/referral.module';
     FlashSalesModule,
     LoyaltyModule,
     ReferralModule,
+    EmailTemplatesModule,
     SeedModule,
   ],
 })

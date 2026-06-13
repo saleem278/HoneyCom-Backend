@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ISettings } from '../models/Settings.model';
+import { IEmailTemplate } from '../models/EmailTemplate.model';
 
 /**
  * Email templates service.
@@ -26,6 +27,12 @@ export class EmailTemplatesService {
   constructor(
     private configService: ConfigService,
     @InjectModel('Settings') private settingsModel: Model<ISettings>,
+    // Optional so the manual `new EmailTemplatesService(config, settings)` in
+    // email.service.ts keeps working. When present (DI path), managed
+    // EmailTemplate records override the legacy flat email.* settings.
+    @Optional()
+    @InjectModel('EmailTemplate')
+    private emailTemplateModel?: Model<IEmailTemplate>,
   ) {}
 
   // ── Design tokens (mirrors frontend globals.css) ───────────────────────────
@@ -108,6 +115,24 @@ export class EmailTemplatesService {
       const k = r.key.replace(/^email\./, '');
       map[k] = String(r.value ?? '');
     }
+
+    // Managed EmailTemplate records (when the model is available via DI) take
+    // precedence over the legacy flat settings. Each template's `key` maps to
+    // the `<key>Subject` / `<key>Cta` / `<key>Intro` suffixes the body
+    // builders already read, so an active record overrides those three.
+    if (this.emailTemplateModel) {
+      try {
+        const templates = await this.emailTemplateModel.find({ isActive: true }).lean();
+        for (const t of templates) {
+          if (t.subject) map[`${t.key}Subject`] = String(t.subject);
+          if (t.cta) map[`${t.key}Cta`] = String(t.cta);
+          if (t.intro) map[`${t.key}Intro`] = String(t.intro);
+        }
+      } catch {
+        // Non-fatal: fall back to the flat settings already in `map`.
+      }
+    }
+
     this.emailCache = map;
     this.emailCacheAt = now;
     return map;
