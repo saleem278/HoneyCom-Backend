@@ -217,6 +217,16 @@ export class CmsController {
     return this.cmsService.getMenus(location);
   }
 
+  // Public route MUST be declared before menus/:id, otherwise Express matches
+  // ":id" with id="public" first and the public endpoint is unreachable.
+  @Get('menus/public')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get active menu for a storefront location (public)' })
+  async getPublicMenu(@Query('location') location: string) {
+    return this.cmsService.getPublicMenu(location);
+  }
+
   @Get('menus/:id')
   @ApiOperation({ summary: 'Get menu by ID' })
   async getMenu(@Param('id') id: string) {
@@ -395,6 +405,15 @@ export class CmsController {
     return this.cmsService.getWidgets(location);
   }
 
+  // Public route MUST precede widgets/:id (same :id-shadowing reason as menus).
+  @Get('widgets/public')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get active widgets for a storefront slot (public)' })
+  async getPublicWidgets(@Query('location') location?: string) {
+    return this.cmsService.getPublicWidgets(location);
+  }
+
   @Get('widgets/:id')
   @ApiOperation({ summary: 'Get widget by ID' })
   async getWidget(@Param('id') id: string) {
@@ -417,24 +436,6 @@ export class CmsController {
   @ApiOperation({ summary: 'Delete widget' })
   async deleteWidget(@Param('id') id: string) {
     return this.cmsService.deleteWidget(id);
-  }
-
-  // ========== PUBLIC STOREFRONT ENDPOINTS ==========
-
-  @Get('menus/public')
-  @Public()
-  @UseGuards(OptionalJwtAuthGuard)
-  @ApiOperation({ summary: 'Get active menu for a storefront location (public)' })
-  async getPublicMenu(@Query('location') location: string) {
-    return this.cmsService.getPublicMenu(location);
-  }
-
-  @Get('widgets/public')
-  @Public()
-  @UseGuards(OptionalJwtAuthGuard)
-  @ApiOperation({ summary: 'Get active widgets for a storefront slot (public)' })
-  async getPublicWidgets(@Query('location') location?: string) {
-    return this.cmsService.getPublicWidgets(location);
   }
 
   // ========== SEO AUDIT ==========

@@ -6,6 +6,13 @@ export interface IMenuItem {
   type: 'page' | 'category' | 'custom' | 'external';
   children?: IMenuItem[];
   order: number;
+  // Mega-menu category fields (so CMS menus can drive the storefront
+  // mega-menu, not just flat nav links).
+  emoji?: string;
+  slug?: string;
+  sub?: string[];
+  // Top nav link emphasis (e.g. a "Deals" link rendered highlighted).
+  highlight?: boolean;
 }
 
 export interface IMenu extends Document {
@@ -40,6 +47,12 @@ const MenuItemSchema: Schema = new Schema(
       type: Number,
       default: 0,
     },
+    // Mega-menu category fields.
+    emoji: { type: String, trim: true, default: '' },
+    slug: { type: String, trim: true, default: '' },
+    sub: { type: [String], default: [] },
+    // Top-nav highlight flag.
+    highlight: { type: Boolean, default: false },
   },
   { _id: false }
 );
