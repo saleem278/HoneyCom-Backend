@@ -213,7 +213,7 @@ export class SeedService {
     const model = this.connection.model('Broadcast', mod.BroadcastSchema);
     await model.insertMany([
       { title: 'Festive Sale is Live', message: 'Up to 40% off across all categories this week only!', createdBy: admin._id, type: 'promotion', status: 'sent', channels: ['inApp'] },
-      { title: 'Scheduled Maintenance', message: 'The platform will undergo brief maintenance this weekend.', createdBy: admin._id, type: 'announcement', status: 'draft', channels: ['inApp'] },
+      { title: 'Scheduled Maintenance', message: 'The platform will undergo brief maintenance this weekend.', createdBy: admin._id, type: 'system', status: 'draft', channels: ['inApp'] },
     ]);
     this.logger.log('✅ Created 2 broadcasts');
   }
@@ -1532,7 +1532,7 @@ export class SeedService {
           },
         ],
         shippingAddress: address1 || customer1._id, // Fallback to customer ID if no address
-        paymentMethod: 'stripe', // Changed from 'card' to 'stripe'
+        paymentMethod: 'razorpay', // must match Order schema enum (razorpay/paypal/cash_on_delivery)
         paymentStatus: 'paid',
         subtotal: 77.97,
         tax: 7.80,
@@ -2054,7 +2054,7 @@ export class SeedService {
         reason: 'Item not as described',
         description: 'Requested a refund but seller has not responded in 5 days.',
         status: 'resolved',
-        resolution: 'full_refund',
+        resolution: 'refund',
         resolutionNotes: 'Full refund processed. Customer has been notified.',
         resolvedBy: users.find(u => u.role === 'admin')?._id,
         resolvedAt: new Date(),
