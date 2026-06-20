@@ -25,7 +25,7 @@ export class SettingsController {
   @Public()
   @ApiOperation({ summary: 'Get public storefront settings (no auth)' })
   async getPublic() {
-    const [branding, storefront, seo, orders, navigation, footer, support, about, products, notifications, platform, payment] = await Promise.all([
+    const [branding, storefront, seo, orders, navigation, footer, support, about, products, notifications, platform, payment, theme] = await Promise.all([
       this.settingsService.getByCategory('branding'),
       this.settingsService.getByCategory('storefront'),
       this.settingsService.getByCategory('seo'),
@@ -38,6 +38,7 @@ export class SettingsController {
       this.settingsService.getByCategory('notifications'),
       this.settingsService.getByCategory('platform'),
       this.settingsService.getByCategory('payment'),
+      this.settingsService.getByCategory('theme'),
     ]);
 
     const now = new Date();
@@ -71,6 +72,7 @@ export class SettingsController {
         notifications: notifications.settings,
         platform:      platform.settings,
         payment:       paymentPublic,
+        theme:         theme.settings,
       },
     };
   }
@@ -143,6 +145,44 @@ export class SettingsController {
       text: `HoneyCom SMTP test email — sent at ${new Date().toISOString()}. If you received this, your SMTP configuration is working correctly.`,
     });
     return { success: true, message: `Test email sent to ${to}` };
+  }
+
+  /** GET /settings/theme-config — get role defaults + allowOverride */
+  @Get('theme-config')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get theme role defaults and override settings' })
+  async getThemeConfig() {
+    const [defaults, allowOverride] = await Promise.all([
+      this.settingsService.getByKey('theme.roleDefaults').catch(() => ({ setting: { value: {} } })),
+      this.settingsService.getByKey('theme.allowOverride').catch(() => ({ setting: { value: {} } })),
+    ]);
+    return {
+      success: true,
+      defaults: (defaults as any).setting?.value ?? {},
+      allowOverride: (allowOverride as any).setting?.value ?? {},
+    };
+  }
+
+  /** PUT /settings/theme-config — set role defaults + allowOverride */
+  @Put('theme-config')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Set theme role defaults and override settings' })
+  async setThemeConfig(
+    @Body() body: {
+      defaults?: { customer?: string; seller?: string; contentEditor?: string; guest?: string };
+      allowOverride?: { customer?: boolean; seller?: boolean; contentEditor?: boolean };
+    },
+    @Request() req: AuthedRequest,
+  ) {
+    const ops: Array<{ key: string; value: any; category: string }> = [];
+    if (body.defaults !== undefined) ops.push({ key: 'theme.roleDefaults', value: body.defaults, category: 'theme' });
+    if (body.allowOverride !== undefined) ops.push({ key: 'theme.allowOverride', value: body.allowOverride, category: 'theme' });
+    if (ops.length) await this.settingsService.setMultiple(ops, req.user?.id);
+    return { success: true, message: 'Theme config updated' };
   }
 
   @Delete(':key')

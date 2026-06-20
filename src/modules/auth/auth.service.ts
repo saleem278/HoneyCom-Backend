@@ -16,6 +16,7 @@ import {
   verifyTotp,
   generateRecoveryCodes,
 } from '../../common/utils/totp';
+import { ThemesService } from '../themes/themes.service';
 
 @Injectable()
 export class AuthService {
@@ -27,6 +28,7 @@ export class AuthService {
     private jwtService: JwtService,
     private emailService: EmailService,
     private smsService: SmsService,
+    private readonly themesService: ThemesService,
   ) {}
 
   async register(registerDto: {
@@ -255,6 +257,20 @@ export class AuthService {
     user.lastLogin = new Date();
     await user.save();
 
+    // Resolve the effective theme for the user. Wrapped in try/catch so
+    // a theme resolution failure never breaks the login flow.
+    let effectiveTheme: { theme: any; isDark: boolean; source: string } | null = null;
+    try {
+      const resolvedTheme = await this.themesService.resolveEffectiveTheme(user);
+      effectiveTheme = {
+        theme: resolvedTheme.theme,
+        isDark: resolvedTheme.isDark,
+        source: resolvedTheme.source,
+      };
+    } catch (err: any) {
+      this.logger.warn(`Failed to resolve effective theme for user ${user._id}: ${err?.message || err}`);
+    }
+
     return {
       success: true,
       token,
@@ -265,6 +281,7 @@ export class AuthService {
         role: user.role,
         emailVerified: user.emailVerified,
       },
+      effectiveTheme,
     };
   }
 

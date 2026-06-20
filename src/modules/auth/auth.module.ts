@@ -13,6 +13,7 @@ import { Session, SessionSchema } from '../../models/Session.model';
 import { Settings, SettingsSchema } from '../../models/Settings.model';
 import { EmailService } from '../../services/email.service';
 import { SmsService } from '../../services/sms.service';
+import { ThemesModule } from '../themes/themes.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { SmsService } from '../../services/sms.service';
       { name: 'Session', schema: SessionSchema },
       { name: 'Settings', schema: SettingsSchema },
     ]),
+    ThemesModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

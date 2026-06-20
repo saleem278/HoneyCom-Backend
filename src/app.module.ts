@@ -31,6 +31,7 @@ import { BundlesModule } from './modules/bundles/bundles.module';
 import { DeliverySlotsModule } from './modules/delivery-slots/delivery-slots.module';
 import { CollectionsModule } from './modules/collections/collections.module';
 import { SearchModule } from './modules/search/search.module';
+import { ThemesModule } from './modules/themes/themes.module';
 
 @Module({
   imports: [
@@ -87,6 +88,7 @@ import { SearchModule } from './modules/search/search.module';
     DeliverySlotsModule,
     CollectionsModule,
     SearchModule,
+    ThemesModule,
     SeedModule,
   ],
 })

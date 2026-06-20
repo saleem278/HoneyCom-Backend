@@ -71,6 +71,12 @@ export interface IUser extends Document {
     reviewedAt?: Date;
     reviewedBy?: mongoose.Types.ObjectId;
   };
+  themePreference?: {
+    canChangeTheme?: 'inherit' | boolean;  // 'inherit' = follow role global setting
+    assignedThemeId?: string | null;        // admin force-assign
+    chosenThemeId?: string | null;          // user's own pick
+    prefersDark?: boolean;
+  };
   lastLogin?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -155,6 +161,12 @@ const UserSchema: Schema = new Schema(
       reviewNotes: String,
       reviewedAt: Date,
       reviewedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    },
+    themePreference: {
+      canChangeTheme: { type: Schema.Types.Mixed, default: 'inherit' }, // 'inherit' | true | false
+      assignedThemeId: { type: Schema.Types.ObjectId, ref: 'Theme', default: null },
+      chosenThemeId: { type: Schema.Types.ObjectId, ref: 'Theme', default: null },
+      prefersDark: { type: Boolean, default: false },
     },
     lastLogin: { type: Date },
   },
