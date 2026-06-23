@@ -89,64 +89,6 @@ export class SettingsController {
     return this.settingsService.getAll();
   }
 
-  @Get(':key')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Get setting by key' })
-  async getByKey(@Param('key') key: string) {
-    // Guard: don't let :key match 'public' and fall through to the wrong handler
-    if (key === 'public') return this.getPublic();
-    return this.settingsService.getByKey(key);
-  }
-
-  @Post()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Set a setting' })
-  async set(
-    @Body() body: { key: string; value: any; category: string; description?: string },
-    @Request() req: AuthedRequest,
-  ) {
-    return this.settingsService.set(body.key, body.value, body.category, body.description, req.user?.id);
-  }
-
-  @Put('bulk')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Set multiple settings at once' })
-  async setMultiple(
-    @Body() body: { settings: Array<{ key: string; value: any; category: string; description?: string }> },
-    @Request() req: AuthedRequest,
-  ) {
-    return this.settingsService.setMultiple(body.settings, req.user?.id);
-  }
-
-  /**
-   * Send a test email to the requesting admin's address.
-   * Verifies that the live SMTP transport is correctly configured.
-   */
-  @Post('email/test')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('admin')
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Send a test email to the admin (SMTP verification)' })
-  async sendTestEmail(@Request() req: AuthedRequest) {
-    const to = req.user?.email;
-    if (!to) throw new BadRequestException('Admin account has no email address on record');
-    await this.emailService.sendEmail({
-      to,
-      subject: 'HoneyCom — SMTP test email',
-      html: `<p>This is a test email sent from the <strong>HoneyCom admin panel</strong>.</p>
-             <p>If you received this, your SMTP configuration is working correctly.</p>
-             <p style="color:#6b7280;font-size:12px;">Sent at ${new Date().toISOString()}</p>`,
-      text: `HoneyCom SMTP test email — sent at ${new Date().toISOString()}. If you received this, your SMTP configuration is working correctly.`,
-    });
-    return { success: true, message: `Test email sent to ${to}` };
-  }
-
   /** GET /settings/theme-config — get role defaults + allowOverride */
   @Get('theme-config')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -183,6 +125,59 @@ export class SettingsController {
     if (body.allowOverride !== undefined) ops.push({ key: 'theme.allowOverride', value: body.allowOverride, category: 'theme' });
     if (ops.length) await this.settingsService.setMultiple(ops, req.user?.id);
     return { success: true, message: 'Theme config updated' };
+  }
+
+  @Get(':key')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get setting by key' })
+  async getByKey(@Param('key') key: string) {
+    if (key === 'public') return this.getPublic();
+    return this.settingsService.getByKey(key);
+  }
+
+  @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Set a setting' })
+  async set(
+    @Body() body: { key: string; value: any; category: string; description?: string },
+    @Request() req: AuthedRequest,
+  ) {
+    return this.settingsService.set(body.key, body.value, body.category, body.description, req.user?.id);
+  }
+
+  @Put('bulk')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Set multiple settings at once' })
+  async setMultiple(
+    @Body() body: { settings: Array<{ key: string; value: any; category: string; description?: string }> },
+    @Request() req: AuthedRequest,
+  ) {
+    return this.settingsService.setMultiple(body.settings, req.user?.id);
+  }
+
+  @Post('email/test')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Send a test email to the admin (SMTP verification)' })
+  async sendTestEmail(@Request() req: AuthedRequest) {
+    const to = req.user?.email;
+    if (!to) throw new BadRequestException('Admin account has no email address on record');
+    await this.emailService.sendEmail({
+      to,
+      subject: 'HoneyCom — SMTP test email',
+      html: `<p>This is a test email sent from the <strong>HoneyCom admin panel</strong>.</p>
+             <p>If you received this, your SMTP configuration is working correctly.</p>
+             <p style="color:#6b7280;font-size:12px;">Sent at ${new Date().toISOString()}</p>`,
+      text: `HoneyCom SMTP test email — sent at ${new Date().toISOString()}. If you received this, your SMTP configuration is working correctly.`,
+    });
+    return { success: true, message: `Test email sent to ${to}` };
   }
 
   @Delete(':key')
