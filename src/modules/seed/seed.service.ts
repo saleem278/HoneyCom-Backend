@@ -3,6 +3,8 @@ import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Connection } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import { User, IUser } from '../../models/User.model';
+import { ThemeSchema } from '../../models/Theme.model';
+import { SEED_THEMES } from './theme.seed-data';
 // Product imported dynamically to avoid global registration
 // Don't import Category, Blog, Page models here - importing them registers models globally
 // They will be imported dynamically when needed
@@ -60,6 +62,9 @@ export class SeedService {
       await this.seedWidgets();
       await this.seedDisputes(users, products);
       await this.seedSettings();
+      // Themes must run AFTER settings: it writes theme.roleDefaults /
+      // theme.allowOverride keyed by the inserted theme _ids.
+      await this.seedThemes();
       // Newly-seeded domain collections (previously empty).
       await this.seedEmailTemplates();
       await this.seedStores(users);
@@ -2425,6 +2430,70 @@ export class SeedService {
 
     await settingsCollection.insertMany(settings);
     this.logger.log(`✅ Created ${settings.length} platform settings`);
+  }
+
+  // ── Themes ──────────────────────────────────────────────────────────────
+  // Seeds the modern palette library + wires per-role defaults and the
+  // user-override permission flags into the settings collection. Runs after
+  // seedSettings() so it can append the theme.* config keys keyed by _id.
+  private async seedThemes() {
+    this.logger.log('Seeding themes...');
+    const now = new Date();
+
+    // The themes collection isn't dropped by name in clearDatabase's critical
+    // list, but the generic sweep clears it; clear explicitly to be safe.
+    const themeModel = this.connection.model('Theme', ThemeSchema);
+    await themeModel.deleteMany({});
+
+    const docs = SEED_THEMES.map((t) => ({
+      name: t.name,
+      description: t.description,
+      lightTokens: t.lightTokens,
+      darkTokens: t.darkTokens,
+      isActive: true,
+      isDefault: !!t.isDefault,
+      createdAt: now,
+      updatedAt: now,
+    }));
+
+    const inserted = await themeModel.insertMany(docs);
+    this.logger.log(`✅ Created ${inserted.length} themes`);
+
+    // Map theme name → inserted _id so we can build the role-defaults config.
+    const idByName = new Map<string, string>();
+    inserted.forEach((doc: any) => idByName.set(doc.name, String(doc._id)));
+
+    // First palette flagged roleDefault for each role wins as that role's
+    // default (the *-alt palettes are selectable but not the default).
+    const pickFirst = (role: string): string | undefined => {
+      const seed = SEED_THEMES.find((t) => t.roleDefault === role);
+      return seed ? idByName.get(seed.name) : undefined;
+    };
+
+    const roleDefaults = {
+      customer: pickFirst('customer') ?? '',
+      seller: pickFirst('seller') ?? '',
+      admin: pickFirst('admin') ?? '',
+      contentEditor: pickFirst('contentEditor') ?? '',
+    };
+
+    // Everyone may pick their own theme by default; admin can lock per-role
+    // or per-user later from the Theme Settings screen.
+    const allowOverride = {
+      customer: true,
+      seller: true,
+      contentEditor: true,
+    };
+
+    const settingsCollection = this.userModel.db.collection('settings');
+    await settingsCollection.deleteMany({
+      key: { $in: ['theme.roleDefaults', 'theme.allowOverride'] },
+    });
+    await settingsCollection.insertMany([
+      { key: 'theme.roleDefaults', value: roleDefaults, category: 'theme', description: 'Default theme _id per role.', createdAt: now, updatedAt: now },
+      { key: 'theme.allowOverride', value: allowOverride, category: 'theme', description: 'Whether users of each role may choose their own theme.', createdAt: now, updatedAt: now },
+    ]);
+    this.logger.log('✅ Wired theme role defaults + override flags');
   }
 }
 
