@@ -254,10 +254,10 @@ export class SeedService {
     const model = this.connection.model('Collection', mod.CollectionSchema);
     const pick = (n: number) => products.slice(0, Math.min(n, products.length)).map(p => p._id);
     const docs = [
-      { name: 'Trending Now', slug: 'trending-now', description: 'The products everyone is buying this season.', products: pick(8), isFeatured: true, displayOrder: 1, isActive: true },
-      { name: 'New Arrivals', slug: 'new-arrivals', description: 'Fresh picks just added to the catalogue.', products: products.slice(-6).map(p => p._id), isFeatured: true, displayOrder: 2, isActive: true },
-      { name: 'Editor’s Choice', slug: 'editors-choice', description: 'Hand-curated favourites from our team.', products: pick(5), isFeatured: true, displayOrder: 3, isActive: true },
-      { name: 'Budget Finds', slug: 'budget-finds', description: 'Great quality without breaking the bank.', products: pick(6), isFeatured: false, displayOrder: 4, isActive: true },
+      { name: 'Trending Now', slug: 'trending-now', description: 'The products everyone is buying this season.', image: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=80', products: pick(8), isFeatured: true, displayOrder: 1, isActive: true },
+      { name: 'New Arrivals', slug: 'new-arrivals', description: 'Fresh picks just added to the catalogue.', image: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1200&q=80', products: products.slice(-6).map(p => p._id), isFeatured: true, displayOrder: 2, isActive: true },
+      { name: 'Editor’s Choice', slug: 'editors-choice', description: 'Hand-curated favourites from our team.', image: 'https://images.unsplash.com/photo-1472851294608-062f824d29cc?auto=format&fit=crop&w=1200&q=80', products: pick(5), isFeatured: true, displayOrder: 3, isActive: true },
+      { name: 'Budget Finds', slug: 'budget-finds', description: 'Great quality without breaking the bank.', image: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?auto=format&fit=crop&w=1200&q=80', products: pick(6), isFeatured: false, displayOrder: 4, isActive: true },
     ];
     await model.insertMany(docs);
     this.logger.log(`✅ Created ${docs.length} collections`);
