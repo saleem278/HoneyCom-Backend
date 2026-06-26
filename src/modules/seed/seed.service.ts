@@ -2480,6 +2480,7 @@ export class SeedService {
     // Everyone may pick their own theme by default; admin can lock per-role
     // or per-user later from the Theme Settings screen.
     const allowOverride = {
+      admin: true,
       customer: true,
       seller: true,
       contentEditor: true,

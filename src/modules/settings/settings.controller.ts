@@ -115,8 +115,8 @@ export class SettingsController {
   @ApiOperation({ summary: 'Set theme role defaults and override settings' })
   async setThemeConfig(
     @Body() body: {
-      defaults?: { customer?: string; seller?: string; contentEditor?: string; guest?: string };
-      allowOverride?: { customer?: boolean; seller?: boolean; contentEditor?: boolean };
+      defaults?: { admin?: string; customer?: string; seller?: string; contentEditor?: string; guest?: string };
+      allowOverride?: { admin?: boolean; customer?: boolean; seller?: boolean; contentEditor?: boolean };
     },
     @Request() req: AuthedRequest,
   ) {
