@@ -82,6 +82,28 @@ export class ThemesService {
     return { theme: null, isDark: false, source: 'none' };
   }
 
+  /** Public — effective theme for a logged-out guest. Resolves the
+   *  theme.roleDefaults.guest, then system default, then first active. */
+  async getGuestTheme(): Promise<{ theme: any; isDark: boolean; source: string; canChange: boolean }> {
+    const themeSettings = await this._getThemeSettings();
+
+    const guestDefaultId = themeSettings.defaults?.['guest'];
+    if (guestDefaultId) {
+      const theme = await this.themeModel.findById(guestDefaultId).lean();
+      if (theme && (theme as any).isActive) {
+        return { theme, isDark: false, source: 'roleDefault', canChange: false };
+      }
+    }
+
+    const systemDefault = await this.themeModel.findOne({ isDefault: true, isActive: true }).lean();
+    if (systemDefault) return { theme: systemDefault, isDark: false, source: 'systemDefault', canChange: false };
+
+    const fallback = await this.themeModel.findOne({ isActive: true }).lean();
+    if (fallback) return { theme: fallback, isDark: false, source: 'fallback', canChange: false };
+
+    return { theme: null, isDark: false, source: 'none', canChange: false };
+  }
+
   /** GET /themes/me — returns user's effective theme + whether they can change it */
   async getMyTheme(userId: string) {
     const user = await this.userModel.findById(userId).lean();

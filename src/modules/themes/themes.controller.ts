@@ -23,6 +23,16 @@ export class ThemesController {
     return { ...result, themes: result.themes.filter((t: any) => t.isActive) };
   }
 
+  /** Public — effective theme for a logged-out guest (role default guest).
+   *  MUST be declared before the `:id` param route below or it gets shadowed. */
+  @Get('guest')
+  @Public()
+  @ApiOperation({ summary: 'Get effective theme for a guest (public)' })
+  async getGuestTheme() {
+    const resolved = await this.themesService.getGuestTheme();
+    return { success: true, ...resolved };
+  }
+
   /** User — get my effective theme */
   @Get('me')
   @UseGuards(JwtAuthGuard)
