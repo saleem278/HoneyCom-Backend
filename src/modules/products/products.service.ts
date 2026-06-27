@@ -73,9 +73,14 @@ export class ProductsService {
 
       const filter: any = {};
 
-      // For regular users (not authenticated or not admin), only show approved products
-      // For admin, allow filtering by status or show all if no status specified
-      if (userRole === 'admin') {
+      // Superadmin is the highest-privilege moderator — treat them like admin
+      // for catalog reads so they can see/filter pending/rejected products and
+      // moderate them (RolesGuard already lets superadmin reach admin screens).
+      const isStaff = userRole === 'admin' || userRole === 'superadmin';
+
+      // For regular users (not authenticated or not staff), only show approved products
+      // For staff, allow filtering by status or show all if no status specified
+      if (isStaff) {
         if (query.status) {
           filter.status = query.status;
         }
@@ -113,20 +118,25 @@ export class ProductsService {
       }
 
       if (query.category) {
+        // For the public storefront, only resolve ACTIVE categories. A category
+        // an admin deactivated must hide its entire catalogue (its products must
+        // not remain shoppable via ?category=<slug>/<id>), mirroring how the
+        // public categories nav/list already gate on status:'active'.
+        const categoryStatusGate = isStaff || userRole === 'seller' ? {} : { status: 'active' };
         // Check if category is a slug or an ID
         // First try to find by slug
-        const categoryBySlug = await this.categoryModel.findOne({ slug: query.category });
+        const categoryBySlug = await this.categoryModel.findOne({ slug: query.category, ...categoryStatusGate });
         if (categoryBySlug) {
           filter.category = categoryBySlug._id;
         } else {
           // If not found by slug, try as ObjectId
           // Check if it's a valid ObjectId format
           if (query.category.match(/^[0-9a-fA-F]{24}$/)) {
-            const categoryById = await this.categoryModel.findById(query.category);
+            const categoryById = await this.categoryModel.findOne({ _id: query.category, ...categoryStatusGate });
             if (categoryById) {
               filter.category = categoryById._id;
             } else {
-              // Category not found, return empty results by using impossible ObjectId
+              // Category not found (or inactive for public), return empty results.
               filter.category = new Types.ObjectId('000000000000000000000000');
             }
           } else {
@@ -134,6 +144,16 @@ export class ProductsService {
             filter.category = new Types.ObjectId('000000000000000000000000');
           }
         }
+      } else if (!isStaff && userRole !== 'seller') {
+        // No specific category requested on the public storefront: exclude any
+        // product whose category has been deactivated, so a deactivated
+        // category's products vanish from the homepage rails, search and the
+        // generic /products grid (not just the per-category route).
+        const activeCategoryIds = await this.categoryModel
+          .find({ status: 'active' })
+          .select('_id')
+          .lean();
+        filter.category = { $in: activeCategoryIds.map((c: any) => c._id) };
       }
 
       if (query.minPrice || query.maxPrice) {
@@ -246,8 +266,12 @@ export class ProductsService {
   async findOne(id: string, currency: string = 'INR', userRole?: string, userId?: string) {
     const filter: any = { _id: id };
 
-    if (userRole === 'admin') {
-      // Admin can view any product regardless of status
+    // Superadmin moderates the catalog like admin — must be able to open a
+    // pending/rejected product detail to approve/reject it.
+    const isStaff = userRole === 'admin' || userRole === 'superadmin';
+
+    if (isStaff) {
+      // Staff can view any product regardless of status
     } else if (userRole === 'seller' && userId) {
       // Sellers can view their own products (any status) and others' approved products
       filter.$or = [{ status: 'approved' }, { seller: userId }];
@@ -260,7 +284,9 @@ export class ProductsService {
       .findOne(filter)
       .populate({
         path: 'category',
-        select: 'name slug',
+        // include `status` so the public branch can 404 products whose
+        // category was deactivated by an admin.
+        select: 'name slug status',
         strictPopulate: false,
       })
       .populate({
@@ -277,6 +303,16 @@ export class ProductsService {
 
     if (!product) {
       throw new NotFoundException('Product not found');
+    }
+
+    // For the public storefront, a product in a deactivated category must 404
+    // (the category was removed from the nav; its detail links must die too).
+    // Staff and the owning seller can still open it.
+    if (!isStaff && userRole !== 'seller') {
+      const cat = (product as any).category;
+      if (cat && typeof cat === 'object' && 'status' in cat && cat.status && cat.status !== 'active') {
+        throw new NotFoundException('Product not found');
+      }
     }
 
     // Convert prices based on currency
@@ -753,7 +789,13 @@ export class ProductsService {
                     inventory: parsedInventory,
                     images: parsedImages,
                     status: 'pending',
-                    featured: row.featured === 'true' || row.featured === '1',
+                    // `featured` is an ADMIN-ONLY curation flag that drives the
+                    // homepage Featured/Deals rails. bulkUpload is a seller path,
+                    // so never honour a CSV `featured` column here — that would let
+                    // a seller self-promote into the storefront's curated rails,
+                    // bypassing the same block create()/update() already enforce.
+                    // Force the schema default (false).
+                    featured: false,
                     tags: parsedTags,
                   });
                 }

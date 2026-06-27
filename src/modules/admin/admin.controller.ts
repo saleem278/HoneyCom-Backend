@@ -208,19 +208,27 @@ export class AdminController {
     }
     const expressReq = req as unknown as ExpressRequest;
     const stashed = expressReq.cookies?.[ADMIN_STASH_COOKIE_NAME];
-    if (!stashed) {
-      throw new BadRequestException('No stashed admin session — cannot restore. Sign in again.');
-    }
 
+    // Always close the audit row and clear the impersonation session cookie,
+    // even when the stash cookie is gone (privacy clear / bearer-only incognito
+    // path / 30d cookie dropped). Throwing here would strand the admin in the
+    // impersonated identity with a permanently-failing "End session" button.
     const result = await this.adminService.endImpersonation(body.eventId, req.user.impersonator);
 
-    // Restore the admin's original session cookie and clear the stash.
-    res.cookie(SESSION_COOKIE_NAME, stashed, sessionCookieOptions(30 * 24 * 60 * 60 * 1000));
-    // clearCookie must mirror the same SameSite/Secure as the original
-    // Set-Cookie or the browser keeps the original around in prod.
-    res.clearCookie(ADMIN_STASH_COOKIE_NAME, clearSessionCookieOptions());
+    if (stashed) {
+      // Restore the admin's original session cookie and clear the stash.
+      res.cookie(SESSION_COOKIE_NAME, stashed, sessionCookieOptions(30 * 24 * 60 * 60 * 1000));
+      // clearCookie must mirror the same SameSite/Secure as the original
+      // Set-Cookie or the browser keeps the original around in prod.
+      res.clearCookie(ADMIN_STASH_COOKIE_NAME, clearSessionCookieOptions());
+      return result;
+    }
 
-    return result;
+    // No stash cookie to restore from: drop the impersonation session cookie so
+    // the browser stops sending the impersonation token, and signal the client
+    // to fall back to its locally-stashed admin token + re-run checkAuth.
+    res.clearCookie(SESSION_COOKIE_NAME, clearSessionCookieOptions());
+    return { ...result, restored: false, fallbackToLocalToken: true };
   }
 
   @Post('impersonate/:userId')

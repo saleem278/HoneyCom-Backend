@@ -5,6 +5,7 @@ import { Dispute, IDispute } from '../../models/Dispute.model';
 import { Order, IOrder } from '../../models/Order.model';
 import { User, IUser } from '../../models/User.model';
 import { Product, IProduct } from '../../models/Product.model';
+import { INotification } from '../../models/Notification.model';
 import { PaymentsService } from '../payments/payments.service';
 import { OrdersService } from '../orders/orders.service';
 import { ResolveDisputeDto } from './dto/resolve-dispute.dto';
@@ -17,10 +18,64 @@ export class DisputesService {
     @InjectModel('Order') private orderModel: Model<IOrder>,
     @InjectModel('User') private userModel: Model<IUser>,
     @InjectModel('Product') private productModel: Model<IProduct>,
+    @InjectModel('Notification') private notificationModel: Model<INotification>,
     private paymentsService: PaymentsService,
     private ordersService: OrdersService,
     private emailService: EmailService,
   ) {}
+
+  /**
+   * Fire-and-forget in-app notifications for a dispute event. Creates a
+   * Notification row for the seller (when known) and for every admin/superadmin,
+   * mirroring the email recipients so disputes surface in the recipient's bell
+   * independent of email (phone-only sellers, admins who only watch the portal).
+   * Notification failures must never break the dispute flow.
+   */
+  private async notifyDisputeParties(params: {
+    sellerId?: string | null;
+    orderId?: string | null;
+    orderNumber?: string | null;
+    disputeId: string;
+    title: string;
+    message: string;
+  }): Promise<void> {
+    try {
+      const data = {
+        disputeId: params.disputeId,
+        orderId: params.orderId ?? undefined,
+        orderNumber: params.orderNumber ?? undefined,
+        kind: 'dispute',
+      };
+      const rows: any[] = [];
+      if (params.sellerId) {
+        rows.push({
+          user: params.sellerId,
+          title: params.title,
+          message: params.message,
+          type: 'system',
+          data,
+        });
+      }
+      const admins = await this.userModel
+        .find({ role: { $in: ['admin', 'superadmin'] } })
+        .select('_id')
+        .lean();
+      for (const a of admins) {
+        rows.push({
+          user: (a as any)._id,
+          title: params.title,
+          message: params.message,
+          type: 'system',
+          data,
+        });
+      }
+      if (rows.length) {
+        await this.notificationModel.insertMany(rows);
+      }
+    } catch {
+      // notification failure must not break the dispute flow
+    }
+  }
 
   async create(userId: string, disputeData: any) {
     const order = await this.orderModel.findById(disputeData.orderId).populate('customer');
@@ -141,6 +196,18 @@ export class DisputesService {
       } catch {
         // best-effort notifications
       }
+      // In-app notifications for seller + admins (mirrors the email recipients;
+      // also reaches phone-only sellers and admins who only watch the portal).
+      const sellerObj: any = populated?.seller;
+      const sellerId = sellerObj?._id?.toString?.() ?? (disputeData.seller ? String(disputeData.seller) : null);
+      await this.notifyDisputeParties({
+        sellerId,
+        orderId: String((order as any)._id),
+        orderNumber: (order as any).orderNumber ?? null,
+        disputeId: String(dispute._id),
+        title: 'New Dispute Opened',
+        message: `A dispute was opened on order ${(order as any).orderNumber ?? ''}.`.trim(),
+      });
     });
 
     return {
@@ -341,6 +408,17 @@ export class DisputesService {
       } catch {
         // best-effort notifications
       }
+      // In-app notifications for seller + admins of the resolution.
+      const ord: any = resolved?.order;
+      const seller: any = resolved?.seller;
+      await this.notifyDisputeParties({
+        sellerId: seller?._id?.toString?.() ?? null,
+        orderId: ord?._id ? String(ord._id) : null,
+        orderNumber: ord?.orderNumber ?? null,
+        disputeId: String(id),
+        title: 'Dispute Resolved',
+        message: `Dispute on order ${ord?.orderNumber ?? ''} was resolved (${resolutionData.resolution}).`.trim(),
+      });
     });
 
     return {
@@ -519,6 +597,17 @@ export class DisputesService {
       } catch {
         // best-effort
       }
+      // In-app notifications for seller + admins of the rejection.
+      const ord: any = populated?.order;
+      const seller: any = populated?.seller;
+      await this.notifyDisputeParties({
+        sellerId: seller?._id?.toString?.() ?? (seller ? String(seller) : null),
+        orderId: ord?._id ? String(ord._id) : null,
+        orderNumber: ord?.orderNumber ?? null,
+        disputeId: String(id),
+        title: 'Dispute Rejected',
+        message: `Dispute on order ${ord?.orderNumber ?? ''} was rejected.`.trim(),
+      });
     });
 
     return { success: true, message: 'Dispute rejected', dispute: populated };

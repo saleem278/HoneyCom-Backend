@@ -7,6 +7,7 @@ import { OrderSchema } from '../../models/Order.model';
 import { UserSchema } from '../../models/User.model';
 import { ProductSchema } from '../../models/Product.model';
 import { SettingsSchema } from '../../models/Settings.model';
+import { NotificationSchema } from '../../models/Notification.model';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { OrdersModule } from '../orders/orders.module';
@@ -20,6 +21,7 @@ import { EmailService } from '../../services/email.service';
       { name: 'User', schema: UserSchema },
       { name: 'Product', schema: ProductSchema },
       { name: 'Settings', schema: SettingsSchema },
+      { name: 'Notification', schema: NotificationSchema },
     ]),
     AuthModule,
     PaymentsModule,

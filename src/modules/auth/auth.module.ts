@@ -11,6 +11,7 @@ import { FacebookStrategy } from './strategies/facebook.strategy';
 import { User, UserSchema } from '../../models/User.model';
 import { Session, SessionSchema } from '../../models/Session.model';
 import { Settings, SettingsSchema } from '../../models/Settings.model';
+import { LoyaltyTransactionSchema } from '../../models/LoyaltyTransaction.model';
 import { EmailService } from '../../services/email.service';
 import { SmsService } from '../../services/sms.service';
 import { ThemesModule } from '../themes/themes.module';
@@ -21,6 +22,7 @@ import { ThemesModule } from '../themes/themes.module';
       { name: 'User', schema: UserSchema },
       { name: 'Session', schema: SessionSchema },
       { name: 'Settings', schema: SettingsSchema },
+      { name: 'LoyaltyTransaction', schema: LoyaltyTransactionSchema },
     ]),
     ThemesModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),

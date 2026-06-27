@@ -7,6 +7,8 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { User, IUser } from '../../models/User.model';
 import { Session, ISession } from '../../models/Session.model';
+import { ISettings } from '../../models/Settings.model';
+import { ILoyaltyTransaction } from '../../models/LoyaltyTransaction.model';
 import { EmailService } from '../../services/email.service';
 import { SmsService } from '../../services/sms.service';
 import { parseDeviceInfo } from '../../utils/deviceParser';
@@ -25,6 +27,8 @@ export class AuthService {
   constructor(
     @InjectModel('User') private userModel: Model<IUser>,
     @InjectModel('Session') private sessionModel: Model<ISession>,
+    @InjectModel('Settings') private settingsModel: Model<ISettings>,
+    @InjectModel('LoyaltyTransaction') private loyaltyTxModel: Model<ILoyaltyTransaction>,
     private jwtService: JwtService,
     private emailService: EmailService,
     private smsService: SmsService,
@@ -608,10 +612,58 @@ export class AuthService {
         .catch((err: any) => this.logger.error(`Failed to send welcome email to ${user.email}: ${err?.message || err}`));
     }
 
+    // Credit the configured loyalty welcome bonus to the new customer.
+    // Idempotent — re-verification will not double-credit. Best-effort:
+    // never block verification on a loyalty failure.
+    await this.awardWelcomeBonus(user).catch((err: any) =>
+      this.logger.error(`Failed to award welcome bonus to user ${user._id}: ${err?.message || err}`),
+    );
+
     return {
       success: true,
       message: 'Email verified successfully',
     };
+  }
+
+  /**
+   * Award the admin-configured loyalty.welcomeBonus points to a customer
+   * exactly once. Mirrors LoyaltyService's $inc + LoyaltyTransaction pattern
+   * (the loyalty module imports AuthModule, so injecting LoyaltyService here
+   * would create a circular dependency — we credit directly instead).
+   */
+  private async awardWelcomeBonus(user: IUser): Promise<void> {
+    if (user.role !== 'customer') return;
+
+    const setting = await this.settingsModel
+      .findOne({ key: 'loyalty.welcomeBonus' })
+      .lean();
+    // Default seeded value is 100; treat a missing setting as the default.
+    const welcomeBonus = Number(setting?.value ?? 100);
+    if (!Number.isFinite(welcomeBonus) || welcomeBonus <= 0) return;
+
+    // Idempotency guard — only award if a welcome-bonus transaction does not
+    // already exist for this user.
+    const existing = await this.loyaltyTxModel.findOne({
+      user: user._id,
+      type: 'earn',
+      description: 'Welcome bonus',
+    });
+    if (existing) return;
+
+    const updated = await this.userModel
+      .findByIdAndUpdate(user._id, { $inc: { loyaltyPoints: welcomeBonus } }, { new: true })
+      .select('loyaltyPoints');
+    if (!updated) return;
+
+    await this.loyaltyTxModel.create({
+      user: user._id,
+      points: welcomeBonus,
+      type: 'earn',
+      description: 'Welcome bonus',
+      balanceAfter: (updated as any).loyaltyPoints ?? welcomeBonus,
+    });
+
+    this.logger.log(`Awarded ${welcomeBonus} welcome-bonus loyalty points to user ${user._id}`);
   }
 
   async forgotPassword(email: string) {

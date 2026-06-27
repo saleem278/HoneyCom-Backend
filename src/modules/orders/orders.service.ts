@@ -13,6 +13,7 @@ import { IFlashSale } from '../../models/FlashSale.model';
 import { IDeliverySlot } from '../../models/DeliverySlot.model';
 import { ILoyaltyTransaction } from '../../models/LoyaltyTransaction.model';
 import { IIdempotencyKey } from '../../models/IdempotencyKey.model';
+import { INotification } from '../../models/Notification.model';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
@@ -35,6 +36,7 @@ export class OrdersService {
     @InjectModel('DeliverySlot') private deliverySlotModel: Model<IDeliverySlot>,
     @InjectModel('LoyaltyTransaction') private loyaltyTxModel: Model<ILoyaltyTransaction>,
     @InjectModel('IdempotencyKey') private idempotencyKeyModel: Model<IIdempotencyKey>,
+    @InjectModel('Notification') private notificationModel: Model<INotification>,
     @InjectConnection() private connection: Connection,
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
@@ -91,7 +93,14 @@ export class OrdersService {
     });
   }
 
-  /** Fire-and-forget: notify each seller of the line items they need to fulfil. */
+  /**
+   * Fire-and-forget: notify each seller of the line items they need to fulfil,
+   * and notify admins/superadmins that a new order was placed. Sellers get an
+   * email (when they have one) AND an in-app Notification row regardless of
+   * email presence (phone-only sellers); admins get an in-app row each. The
+   * in-app rows mirror the payouts notification pattern so they surface in the
+   * recipient's notification bell.
+   */
   private notifySellersOfNewOrder(order: any): void {
     setImmediate(async () => {
       try {
@@ -104,22 +113,63 @@ export class OrdersService {
           bySeller.get(sid)!.push(it);
         }
         if (!bySeller.size) return;
+        const orderId = order?._id?.toString?.() ?? String(order?._id ?? '');
+        const orderNumber = order?.orderNumber ?? '';
+
         const sellers = await this.userModel
           .find({ _id: { $in: [...bySeller.keys()] } })
           .select('name email');
         for (const s of sellers) {
-          if (!s.email) continue;
-          await this.emailService
-            .sendNewOrderToSellerEmail({
-              to: s.email,
-              sellerName: s.name || 'Seller',
-              order,
-              items: bySeller.get(s._id.toString()) || [],
-            })
-            .catch(() => undefined);
+          // Email is best-effort and only when present...
+          if (s.email) {
+            await this.emailService
+              .sendNewOrderToSellerEmail({
+                to: s.email,
+                sellerName: s.name || 'Seller',
+                order,
+                items: bySeller.get(s._id.toString()) || [],
+              })
+              .catch(() => undefined);
+          }
+          // ...but the in-app notification always fires so phone-only sellers
+          // (and email sellers' bells) are informed of the order to fulfil.
+          try {
+            const itemCount = (bySeller.get(s._id.toString()) || []).length;
+            await this.notificationModel.create({
+              user: s._id,
+              title: 'New Order',
+              message: `You have a new order${orderNumber ? ` (${orderNumber})` : ''} with ${itemCount} item(s) to fulfil.`,
+              type: 'order',
+              data: { orderId, orderNumber, kind: 'order_placed' },
+            });
+          } catch {
+            // notification failure must not break the order flow
+          }
+        }
+
+        // In-app notify admins/superadmins of the new order (no email path
+        // exists for admins on new orders; the bell is their surface).
+        try {
+          const admins = await this.userModel
+            .find({ role: { $in: ['admin', 'superadmin'] } })
+            .select('_id')
+            .lean();
+          if (admins.length) {
+            await this.notificationModel.insertMany(
+              admins.map((a: any) => ({
+                user: a._id,
+                title: 'New Order',
+                message: `A new order${orderNumber ? ` (${orderNumber})` : ''} was placed.`,
+                type: 'order',
+                data: { orderId, orderNumber, kind: 'order_placed' },
+              })),
+            );
+          }
+        } catch {
+          // notification failure must not break the order flow
         }
       } catch (err: any) {
-        this.logger.warn(`Seller new-order email failed for order ${order?._id}: ${err?.message || err}`);
+        this.logger.warn(`Seller new-order notification failed for order ${order?._id}: ${err?.message || err}`);
       }
     });
   }

@@ -19,6 +19,7 @@ import { ExchangeRateService, Currency } from '../../services/exchange-rate.serv
 import { AuthService } from '../auth/auth.service';
 import { assertOrderTransition } from '../orders/order-status';
 import { IStore } from '../../models/Store.model';
+import { ISession } from '../../models/Session.model';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 
 @Injectable()
@@ -40,8 +41,29 @@ export class AdminService {
     private authService: AuthService,
     private exchangeRateService: ExchangeRateService,
     @InjectModel('Store') private storeModel: Model<IStore>,
+    @InjectModel('Session') private sessionModel: Model<ISession>,
     @Optional() private readonly loyaltyService?: LoyaltyService,
   ) {}
+
+  /**
+   * Create an in-app Notification row. Best-effort — a notification
+   * failure must never break the admin action that triggered it.
+   * Mirrors the PayoutsService.notifySeller wiring (existing Notification
+   * model, type:'system') so seller/admin bells surface these.
+   */
+  private async createNotification(
+    userId: mongoose.Types.ObjectId | string,
+    title: string,
+    message: string,
+    type: 'order' | 'promotion' | 'system' | 'other' = 'system',
+    data?: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.notificationModel.create({ user: userId, title, message, type, data });
+    } catch {
+      // notification failure must not break the admin action
+    }
+  }
 
   private convertOrderCurrency(order: any): any {
     if (!order) return order;
@@ -433,6 +455,17 @@ export class AdminService {
       }
     }
 
+    // In-app notification (reaches phone-only sellers + the bell). Best-effort.
+    if (product.seller) {
+      await this.createNotification(
+        product.seller as any,
+        'Product approved',
+        `Your product "${product.name}" has been approved and is now live.`,
+        'system',
+        { productId: String(product._id), status: 'approved' },
+      );
+    }
+
     return {
       success: true,
       product,
@@ -458,6 +491,17 @@ export class AdminService {
       } catch {
         // Rejection state is already saved; email is best-effort.
       }
+    }
+
+    // In-app notification carrying the rejection reason. Best-effort.
+    if (product.seller) {
+      await this.createNotification(
+        product.seller as any,
+        'Product rejected',
+        `Your product "${product.name}" was rejected${reason ? `: ${reason}` : '.'}`,
+        'system',
+        { productId: String(product._id), status: 'rejected', rejectionReason: reason },
+      );
     }
 
     return {
@@ -488,6 +532,28 @@ export class AdminService {
     // SS-9: cascade seller store to inactive when seller is suspended or inactive
     if (user.role === 'seller' && (status === 'suspended' || status === 'inactive')) {
       await this.storeModel.updateMany({ seller: user._id }, { status: 'inactive' });
+    }
+
+    // SS-9 (reactivate path): mirror of approveSeller — when a seller is set
+    // back to 'active', re-activate their store(s) so the public store profile
+    // (requires status:'active') is reachable again. Otherwise products show
+    // but the store page 404s after a suspend->reactivate cycle.
+    if (user.role === 'seller' && status === 'active') {
+      await this.storeModel.updateMany({ seller: user._id }, { status: 'active' });
+    }
+
+    // Proactively kill active sessions on suspend/inactive so the next request
+    // 401s immediately rather than waiting for the lazy status check / client
+    // poll. Mirrors auth.service resetPassword session revocation. Best-effort.
+    if (status === 'suspended' || status === 'inactive') {
+      try {
+        await this.sessionModel.updateMany(
+          { userId: user._id, isActive: true },
+          { isActive: false, revokedAt: new Date() },
+        );
+      } catch (err: any) {
+        this.logger.warn(`Failed to revoke sessions for user ${user._id}: ${err?.message || err}`);
+      }
     }
 
     // Notify the user their account status changed. Best-effort.
@@ -542,7 +608,8 @@ export class AdminService {
     // AO-12: accumulate refundedAmount; only mark fully refunded when total is reached
     const newRefundedAmount = alreadyRefunded + refundAmount;
     (order as any).refundedAmount = newRefundedAmount;
-    if (newRefundedAmount >= order.total) {
+    const isFullRefund = newRefundedAmount >= order.total;
+    if (isFullRefund) {
       order.status = 'refunded';
       order.paymentStatus = 'refunded';
     } else {
@@ -550,6 +617,26 @@ export class AdminService {
       order.paymentStatus = 'refunded';
     }
     await order.save();
+
+    // On a FULL refund the goods are coming back, so restock inventory —
+    // matching orders.service.cancel / requestReturn. Partial refunds skip
+    // this (goods not returned). Use $inc so concurrent inventory updates
+    // aren't clobbered. Best-effort: a restock failure must not undo the
+    // already-committed refund.
+    if (isFullRefund && Array.isArray((order as any).items)) {
+      try {
+        await Promise.all(
+          (order as any).items.map((item: any) =>
+            this.productModel.updateOne(
+              { _id: item.product },
+              { $inc: { inventory: item.quantity } },
+            ),
+          ),
+        );
+      } catch (err: any) {
+        this.logger.warn(`Refund restock failed for order ${order._id}: ${err?.message || err}`);
+      }
+    }
 
     // Notify the customer their refund was processed. Best-effort.
     const refundCustomerEmail = (order as any)?.customer?.email;
@@ -607,6 +694,13 @@ export class AdminService {
     (seller.sellerInfo as any).rejectionReason = undefined;
     await seller.save();
 
+    // SS-9: mirror of the reject/suspend cascade — re-activate the seller's
+    // store(s) so the public store profile (which requires status:'active')
+    // comes back online alongside their now-approved products. Without this,
+    // a reject->re-approve or suspend->reactivate cycle leaves products live
+    // but the store page 404'ing.
+    await this.storeModel.updateMany({ seller: seller._id }, { status: 'active' });
+
     // Send approval email to seller (skip if seller has no email — phone-only account)
     if (seller.email) {
       try {
@@ -615,6 +709,15 @@ export class AdminService {
         // Continue even if email fails — approval state is already saved.
       }
     }
+
+    // In-app notification (independent of email — phone-only sellers). Best-effort.
+    await this.createNotification(
+      seller._id as any,
+      'Seller account approved',
+      'Your seller account has been approved. Your store is now live.',
+      'system',
+      { status: 'approved', kind: 'seller_approval' },
+    );
 
     return {
       success: true,
@@ -661,6 +764,15 @@ export class AdminService {
         // Continue even if email fails — rejection state is already saved.
       }
     }
+
+    // In-app notification (independent of email — phone-only sellers). Best-effort.
+    await this.createNotification(
+      seller._id as any,
+      'Seller application rejected',
+      `Your seller application was rejected${reason ? `: ${reason}` : '.'}`,
+      'system',
+      { status: 'rejected', rejectionReason: reason, kind: 'seller_rejection' },
+    );
 
     return {
       success: true,
@@ -763,7 +875,36 @@ export class AdminService {
     );
     if (action === 'reject') {
       await this.storeModel.updateMany({ seller: { $in: ids } }, { status: 'inactive' });
+    } else {
+      // SS-9: mirror approveSeller — re-activate stores so the public store
+      // profile comes back online for re-approved sellers.
+      await this.storeModel.updateMany({ seller: { $in: ids } }, { status: 'active' });
     }
+
+    // In-app notifications for each affected seller (independent of email). Best-effort.
+    const approved = action === 'approve';
+    const title = approved ? 'Seller account approved' : 'Seller application rejected';
+    const message = approved
+      ? 'Your seller account has been approved. Your store is now live.'
+      : `Your seller application was rejected${reason ? `: ${reason}` : '.'}`;
+    try {
+      await this.notificationModel.insertMany(
+        ids.map((id) => ({
+          user: id,
+          title,
+          message,
+          type: 'system',
+          data: {
+            status: approved ? 'approved' : 'rejected',
+            kind: approved ? 'seller_approval' : 'seller_rejection',
+            ...(reason ? { rejectionReason: reason } : {}),
+          },
+        })),
+      );
+    } catch {
+      // notification failure must not break the bulk action
+    }
+
     return { success: true, modified: result.modifiedCount };
   }
 
@@ -1233,6 +1374,18 @@ export class AdminService {
           throw new BadRequestException('A carrier is required when marking an order as shipped.');
         }
       }
+
+      // COD consistency: when an admin marks a COD order delivered, the cash is
+      // collected on delivery — auto-mark it paid, matching seller.service
+      // .updateOrderStatus. Without this an admin-delivered COD order stays
+      // paymentStatus='pending' forever and the refund panel won't offer a refund.
+      if (
+        data.status === 'delivered' &&
+        order.paymentMethod === 'cash_on_delivery' &&
+        order.paymentStatus !== 'paid'
+      ) {
+        update.paymentStatus = 'paid';
+      }
     }
 
     if (data.trackingNumber !== undefined) update.trackingNumber = data.trackingNumber;
@@ -1361,6 +1514,39 @@ export class AdminService {
       update,
       { runValidators: true },
     );
+
+    // In-app notify the owning seller of each product for approve/reject, so
+    // the outcome (and rejection reason) reaches the seller's bell, not just
+    // the product row / email. Best-effort. Feature/unfeature is admin-only
+    // curation and intentionally not seller-notified here.
+    if (action === 'approve' || action === 'reject') {
+      try {
+        const products = await this.productModel
+          .find({ _id: { $in: ids } })
+          .select('_id name seller')
+          .lean();
+        const approved = action === 'approve';
+        const docs = products
+          .filter((p: any) => p.seller)
+          .map((p: any) => ({
+            user: p.seller,
+            title: approved ? 'Product approved' : 'Product rejected',
+            message: approved
+              ? `Your product "${p.name}" has been approved and is now live.`
+              : `Your product "${p.name}" was rejected${reason ? `: ${reason}` : '.'}`,
+            type: 'system',
+            data: {
+              productId: String(p._id),
+              status: approved ? 'approved' : 'rejected',
+              ...(reason ? { rejectionReason: reason } : {}),
+            },
+          }));
+        if (docs.length) await this.notificationModel.insertMany(docs);
+      } catch {
+        // notification failure must not break the bulk action
+      }
+    }
+
     return { success: true, modified: result.modifiedCount };
   }
 
@@ -1614,10 +1800,21 @@ export class AdminService {
   async adminForceLogout(userId: string): Promise<{ success: boolean; message: string }> {
     const user = await this.userModel.findById(userId).lean();
     if (!user) throw new NotFoundException('User not found');
-    // Stamp revokedAt — future middleware can check this to reject old tokens.
-    // Existing short-lived JWTs expire naturally (stateless JWT limitation).
-    await this.userModel.updateOne({ _id: userId }, { $set: { sessionsRevokedAt: new Date() } });
-    return { success: true, message: 'All sessions have been invalidated. Existing tokens expire on their own schedule.' };
+    const now = new Date();
+    // Stamp revokedAt on the user (audit / future iat checks).
+    await this.userModel.updateOne({ _id: userId }, { $set: { sessionsRevokedAt: now } });
+    // Actually revoke the active Session rows so JwtStrategy.validate (which
+    // checks Session.isActive on every request) rejects existing tokens
+    // immediately — mirrors auth.service resetPassword. The stamped
+    // sessionsRevokedAt alone was dead (never read by the strategy).
+    const revoked = await this.sessionModel.updateMany(
+      { userId, isActive: true },
+      { isActive: false, revokedAt: now },
+    );
+    return {
+      success: true,
+      message: `All sessions have been invalidated (${revoked.modifiedCount} active session(s) revoked).`,
+    };
   }
 
   async adminResendVerification(userId: string): Promise<{ success: boolean; message: string }> {

@@ -260,6 +260,68 @@ export class CmsService {
     return { success: true, post };
   }
 
+  /**
+   * Public storefront blog list. ALWAYS forces status:'published' so anonymous
+   * visitors never see drafts/scheduled posts — unlike the admin getBlogPosts,
+   * which accepts an arbitrary status filter. Supports the same category/search
+   * filters the storefront needs for its pills + search box.
+   */
+  async getPublicBlogPosts(
+    category?: string,
+    page: number = 1,
+    limit: number = 20,
+    search?: string,
+  ) {
+    const filter: any = { status: 'published' };
+    if (category) filter.category = category;
+    if (search) {
+      const escaped = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const rx = new RegExp(escaped, 'i');
+      filter.$or = [{ title: rx }, { slug: rx }, { excerpt: rx }];
+    }
+
+    const skip = (page - 1) * limit;
+    const posts = await this.blogModel
+      .find(filter)
+      .populate('author', 'name email')
+      .populate('category', 'name slug')
+      .sort({ publishedAt: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const total = await this.blogModel.countDocuments(filter);
+
+    return {
+      success: true,
+      posts,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  /**
+   * Public storefront blog detail by id. The storefront links by _id
+   * (app/blog/[id]) and the sitemap emits /blog/{_id} URLs, so this mirrors
+   * getBlogPost but adds the status:'published' gate the admin reader omits,
+   * so drafts/scheduled posts can't leak to anonymous visitors.
+   */
+  async getPublicBlogPost(id: string) {
+    const post = await this.blogModel
+      .findOne({ _id: id, status: 'published' })
+      .populate('author', 'name email')
+      .populate('category', 'name slug')
+      .lean();
+    if (!post) {
+      throw new NotFoundException('Blog post not found');
+    }
+    return { success: true, post };
+  }
+
   async createBlogPost(data: any, authorId: string) {
     // Generate slug if not provided
     if (!data.slug && data.title) {
@@ -656,6 +718,23 @@ export class CmsService {
     return { success: true, form };
   }
 
+  /**
+   * Public form definition for the storefront <CmsForm> renderer. Returns ONLY
+   * the fields/labels/messages a visitor needs to render and submit the form —
+   * never the internal email-notification config (emailRecipients /
+   * emailNotification), which must not leak to anonymous clients.
+   */
+  async getPublicForm(id: string) {
+    const form = await this.formModel
+      .findById(id)
+      .select('name description fields submitButtonText successMessage redirectUrl')
+      .lean();
+    if (!form) {
+      throw new NotFoundException('Form not found');
+    }
+    return { success: true, form };
+  }
+
   async createForm(data: any) {
     // Check if form name exists
     const existingForm = await this.formModel.findOne({ name: data.name });
@@ -818,6 +897,21 @@ export class CmsService {
   // ========== BLOG CATEGORIES ==========
   async getBlogCategories() {
     const categories = await this.blogCategoryModel.find().populate('parent', 'name slug').sort({ name: 1 }).limit(200);
+    return { success: true, categories };
+  }
+
+  /**
+   * Public storefront blog categories — used to build the canonical filter
+   * pills on /blog so available categories reflect the CMS rather than only
+   * the categories present on the currently loaded page of posts.
+   */
+  async getPublicBlogCategories() {
+    const categories = await this.blogCategoryModel
+      .find()
+      .select('name slug description')
+      .sort({ name: 1 })
+      .limit(200)
+      .lean();
     return { success: true, categories };
   }
 

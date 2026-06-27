@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Review, IReview } from '../../models/Review.model';
 import { Product, IProduct } from '../../models/Product.model';
 import { IOrder } from '../../models/Order.model';
+import { ISettings } from '../../models/Settings.model';
+import { INotification } from '../../models/Notification.model';
 import { EmailService } from '../../services/email.service';
 import { AdminUpdateReviewStatusDto } from './dto/admin-update-status.dto';
 import { AdminReplyDto } from './dto/admin-reply.dto';
@@ -14,10 +16,22 @@ export class ReviewsService {
     @InjectModel('Review') private reviewModel: Model<IReview>,
     @InjectModel('Product') private productModel: Model<IProduct>,
     @InjectModel('Order') private orderModel: Model<IOrder>,
+    @InjectModel('Settings') private settingsModel: Model<ISettings>,
+    @InjectModel('Notification') private notificationModel: Model<INotification>,
     private emailService: EmailService,
   ) {}
 
   async create(userId: string, productId: string, reviewData: any) {
+    // Respect the admin-controlled global toggle. When products.reviewsEnabled
+    // is explicitly false, reviews must not be accepted. A missing setting is
+    // treated as enabled (seeded default is true).
+    const reviewsSetting = await this.settingsModel
+      .findOne({ key: 'products.reviewsEnabled' })
+      .lean();
+    if (reviewsSetting && reviewsSetting.value === false) {
+      throw new ForbiddenException('Reviews are currently disabled.');
+    }
+
     const product = await this.productModel.findById(productId);
     if (!product) {
       throw new NotFoundException('Product not found');
@@ -63,10 +77,26 @@ export class ReviewsService {
     await this.updateProductRating(productId);
 
     // Notify the seller of the new review. Best-effort, fire-and-forget.
+    // Creates an in-app Notification row (so phone-only sellers and the
+    // seller bell are reached) in addition to the email.
     setImmediate(async () => {
       try {
         const populatedProduct = await this.productModel.findById(productId).populate('seller', 'name email');
         const seller: any = (populatedProduct as any)?.seller;
+        const sellerId = seller?._id ?? (populatedProduct as any)?.seller;
+        if (sellerId) {
+          try {
+            await this.notificationModel.create({
+              user: sellerId,
+              title: 'New product review',
+              message: `Your product "${product.name}" received a ${reviewData.rating}-star review.`,
+              type: 'system',
+              data: { productId, rating: reviewData.rating },
+            });
+          } catch {
+            // best-effort in-app notification
+          }
+        }
         if (seller?.email) {
           await this.emailService.sendReviewNotificationEmail({
             to: seller.email,

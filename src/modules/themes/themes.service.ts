@@ -52,9 +52,10 @@ export class ThemesService {
     const globalAllow = themeSettings.allowOverride?.[role] ?? false;
     const canChange = pref.canChangeTheme === true || (pref.canChangeTheme === 'inherit' && globalAllow);
 
-    // 1. Admin force-assigned
+    // 1. Admin force-assigned (must still be active — a deactivated theme
+    //    should fall through to the next candidate, matching getGuestTheme).
     if (pref.assignedThemeId) {
-      const theme = await this.themeModel.findById(pref.assignedThemeId).lean();
+      const theme = await this.themeModel.findOne({ _id: pref.assignedThemeId, isActive: true }).lean();
       if (theme) return { theme, isDark: pref.prefersDark ?? false, source: 'assigned' };
     }
 
@@ -64,10 +65,11 @@ export class ThemesService {
       if (theme) return { theme, isDark: pref.prefersDark ?? false, source: 'user' };
     }
 
-    // 3. Role default
+    // 3. Role default (must still be active — a deactivated role-default theme
+    //    should fall through to system default, matching getGuestTheme).
     const roleDefaultId = themeSettings.defaults?.[role];
     if (roleDefaultId) {
-      const theme = await this.themeModel.findById(roleDefaultId).lean();
+      const theme = await this.themeModel.findOne({ _id: roleDefaultId, isActive: true }).lean();
       if (theme) return { theme, isDark: pref.prefersDark ?? false, source: 'roleDefault' };
     }
 

@@ -104,6 +104,31 @@ export class CmsController {
     return this.cmsService.getBlogPosts(status, category, pageNum, limitNum, search);
   }
 
+  // Public routes MUST be declared before blog/:id, otherwise Express matches
+  // ":id" with id="public" first and the public endpoints are unreachable.
+  @Get('blog/public')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'List published blog posts (public storefront)' })
+  async getPublicBlogPosts(
+    @Query('category') category?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+  ) {
+    const pageNum = parseInt(page || '', 10) || 1;
+    const limitNum = parseInt(limit || '', 10) || 20;
+    return this.cmsService.getPublicBlogPosts(category, pageNum, limitNum, search);
+  }
+
+  @Get('blog/public/:id')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get published blog post by ID (public storefront)' })
+  async getPublicBlogPost(@Param('id') id: string) {
+    return this.cmsService.getPublicBlogPost(id);
+  }
+
   @Get('blog/by-slug/:slug')
   @Public()
   @UseGuards(OptionalJwtAuthGuard)
@@ -270,6 +295,17 @@ export class CmsController {
     return this.cmsService.getForm(id);
   }
 
+  // Public form definition for the storefront <CmsForm> renderer. Returns only
+  // fields/labels/messages (never emailRecipients) so a storefront page can
+  // fetch a form's shape and POST to /cms/forms/:id/submit (already @Public()).
+  @Get('forms/:id/public')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get form definition for storefront rendering (public)' })
+  async getPublicForm(@Param('id') id: string) {
+    return this.cmsService.getPublicForm(id);
+  }
+
   @Post('forms')
   @ApiOperation({ summary: 'Create form' })
   async createForm(@Body() data: any) {
@@ -326,6 +362,15 @@ export class CmsController {
   @ApiOperation({ summary: 'Get all blog categories' })
   async getBlogCategories() {
     return this.cmsService.getBlogCategories();
+  }
+
+  // Public route MUST precede blog-categories/:id (same :id-shadowing reason).
+  @Get('blog-categories/public')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get blog categories for storefront filter pills (public)' })
+  async getPublicBlogCategories() {
+    return this.cmsService.getPublicBlogCategories();
   }
 
   @Get('blog-categories/:id')

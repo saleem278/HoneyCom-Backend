@@ -2,11 +2,13 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Brand, IBrand } from '../../models/Brand.model';
+import { IProduct } from '../../models/Product.model';
 
 @Injectable()
 export class BrandsService {
   constructor(
     @InjectModel('Brand') private brandModel: Model<IBrand>,
+    @InjectModel('Product') private productModel: Model<IProduct>,
   ) {}
 
   async findAll(status?: string, isAdmin?: boolean) {
@@ -93,6 +95,13 @@ export class BrandsService {
     if (!brand) {
       throw new NotFoundException('Brand not found');
     }
+    // Clear the now-dangling brand reference off every product that pointed at
+    // this brand. The admin delete-confirm explicitly promises "products will
+    // retain their listing but lose the brand association" — without this the
+    // products keep an ObjectId pointing at a deleted brand, which breaks
+    // brand-faceted browsing (the ?brand=<slug> lookup finds nothing and those
+    // products become unreachable) and leaves orphaned refs on detail pages.
+    await this.productModel.updateMany({ brand: id }, { $unset: { brand: '' } });
     return {
       success: true,
       message: 'Brand deleted successfully',

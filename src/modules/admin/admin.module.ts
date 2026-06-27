@@ -14,6 +14,7 @@ import { SettingsSchema } from '../../models/Settings.model';
 import { NotificationSchema } from '../../models/Notification.model';
 import { BroadcastSchema } from '../../models/Broadcast.model';
 import { StoreSchema } from '../../models/Store.model';
+import { SessionSchema } from '../../models/Session.model';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { UsersModule } from '../users/users.module';
@@ -33,6 +34,7 @@ import { LoyaltyModule } from '../loyalty/loyalty.module';
       { name: 'Notification', schema: NotificationSchema },
       { name: 'Broadcast', schema: BroadcastSchema },
       { name: 'Store', schema: StoreSchema },
+      { name: 'Session', schema: SessionSchema },
     ]),
     ScheduleModule.forRoot(),
     ConfigModule,
