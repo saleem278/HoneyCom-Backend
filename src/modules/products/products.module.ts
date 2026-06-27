@@ -15,6 +15,7 @@ import { SettingsSchema } from '../../models/Settings.model';
 import { PriceHistorySchema } from '../../models/PriceHistory.model';
 import { ProductViewSchema } from '../../models/ProductView.model';
 import { OrderSchema } from '../../models/Order.model';
+import { UserSchema } from '../../models/User.model';
 import { AuthModule } from '../auth/auth.module';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { MobileModule } from '../mobile/mobile.module';
@@ -31,6 +32,7 @@ import { EmailService } from '../../services/email.service';
       { name: 'PriceHistory', schema: PriceHistorySchema },
       { name: 'ProductView', schema: ProductViewSchema },
       { name: 'Order', schema: OrderSchema },
+      { name: 'User', schema: UserSchema },
     ]),
     MulterModule.register({
       storage: multer.memoryStorage(),

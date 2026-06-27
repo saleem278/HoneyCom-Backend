@@ -113,10 +113,15 @@ export class SeedService {
     if (sellers.length === 0) return;
     const mod = await import('../../models/Store.model');
     const model = this.connection.model('Store', mod.StoreSchema);
-    const docs = sellers.map((s, i) => ({
+    // Derive the store from the seller's OWN name so ownership always matches —
+    // hardcoding store names by index swapped them (Raj's account showed Priya's
+    // store). The seller user names are already the storefront names.
+    const slugify = (name: string) =>
+      name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const docs = sellers.map((s) => ({
       seller: s._id,
-      storeName: i === 0 ? 'Priya Fashion Store' : 'Raj Electronics',
-      slug: i === 0 ? 'priya-fashion-store' : 'raj-electronics',
+      storeName: s.name,
+      slug: slugify(s.name),
       contact: { email: s.email, phone: s.phone || '' },
       settings: {},
     }));
@@ -434,6 +439,10 @@ export class SeedService {
         role: 'seller',
         status: 'active',
         emailVerified: true,
+        // Seeded sellers are pre-approved so their store + products are live
+        // (otherwise they default to approvalStatus 'pending' and the public
+        // approval gate would hide everything).
+        sellerInfo: { approvalStatus: 'approved', submittedAt: new Date(), reviewedAt: new Date() },
       },
       {
         name: 'Priya Fashion Store',
@@ -442,6 +451,7 @@ export class SeedService {
         role: 'seller',
         status: 'active',
         emailVerified: true,
+        sellerInfo: { approvalStatus: 'approved', submittedAt: new Date(), reviewedAt: new Date() },
       },
       {
         name: 'Ankit Sharma',

@@ -51,16 +51,43 @@ export class StoresService {
     return { success: true, store };
   }
 
+  /** _ids of sellers whose account is approved (admins always allowed). Public
+   *  store listings gate on this so a pending/rejected seller's store profile
+   *  never appears on the storefront. */
+  private async getApprovedSellerIds() {
+    const sellers = await this.userModel
+      .find({
+        $or: [
+          { role: { $in: ['admin', 'superadmin'] } },
+          { role: 'seller', 'sellerInfo.approvalStatus': 'approved' },
+        ],
+      })
+      .select('_id')
+      .lean();
+    return sellers.map((s: any) => s._id);
+  }
+
   async getStoreBySlug(slug: string) {
-    const store = await this.storeModel.findOne({ slug, status: 'active' }).populate('seller', 'name email');
+    const store = await this.storeModel
+      .findOne({ slug, status: 'active' })
+      .populate('seller', 'name email role sellerInfo.approvalStatus');
     if (!store) {
+      throw new NotFoundException('Store not found');
+    }
+    // Hide the store if its seller isn't approved (treat as not found publicly).
+    const sellerStatus = (store.seller as any)?.sellerInfo?.approvalStatus;
+    const sellerRole = (store.seller as any)?.role;
+    if (sellerStatus !== 'approved' && sellerRole !== 'admin' && sellerRole !== 'superadmin') {
       throw new NotFoundException('Store not found');
     }
     return { success: true, store };
   }
 
   async getAllStores(filters?: { city?: string; page?: number; limit?: number }) {
-    const query: Record<string, unknown> = { status: 'active' };
+    const query: Record<string, unknown> = {
+      status: 'active',
+      seller: { $in: await this.getApprovedSellerIds() },
+    };
     if (filters?.city) {
       const safe = String(filters.city).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
       query['address.city'] = { $regex: safe, $options: 'i' };
@@ -76,7 +103,10 @@ export class StoresService {
   }
 
   async getNearbyStores(filters?: { city?: string; limit?: number }) {
-    const query: Record<string, unknown> = { status: 'active' };
+    const query: Record<string, unknown> = {
+      status: 'active',
+      seller: { $in: await this.getApprovedSellerIds() },
+    };
     if (filters?.city) {
       const safe = String(filters.city).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
       query['address.city'] = { $regex: safe, $options: 'i' };

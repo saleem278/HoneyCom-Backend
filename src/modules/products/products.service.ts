@@ -8,6 +8,7 @@ import { ISettings } from '../../models/Settings.model';
 import { IPriceHistory } from '../../models/PriceHistory.model';
 import { IProductView } from '../../models/ProductView.model';
 import { IOrder } from '../../models/Order.model';
+import { IUser } from '../../models/User.model';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { MobileService } from '../mobile/mobile.service';
 import { EmailService } from '../../services/email.service';
@@ -24,6 +25,7 @@ export class ProductsService {
     @InjectModel('PriceHistory') private priceHistoryModel: Model<IPriceHistory>,
     @InjectModel('ProductView') private productViewModel: Model<IProductView>,
     @InjectModel('Order') private orderModel: Model<IOrder>,
+    @InjectModel('User') private userModel: Model<IUser>,
     private exchangeRateService: ExchangeRateService,
     private mobileService: MobileService,
     private emailService: EmailService,
@@ -35,6 +37,22 @@ export class ProductsService {
    */
   private static escapeRegex(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /** _ids of sellers whose account is approved (admins/superadmins are always
+   *  allowed to sell). Used to gate public product/store listings so a
+   *  pending/rejected seller's catalogue never reaches the storefront. */
+  private async getApprovedSellerIds(): Promise<Types.ObjectId[]> {
+    const sellers = await this.userModel
+      .find({
+        $or: [
+          { role: { $in: ['admin', 'superadmin'] } },
+          { role: 'seller', 'sellerInfo.approvalStatus': 'approved' },
+        ],
+      })
+      .select('_id')
+      .lean();
+    return sellers.map((s: any) => s._id);
   }
 
   async findAll(query: any, userRole?: string, userId?: string, currency: string = 'INR') {
@@ -71,11 +89,19 @@ export class ProductsService {
           filter.status = query.status;
         }
       } else {
-        // Regular users only see approved products
+        // Regular users only see approved products — AND only from sellers whose
+        // account is approved. Without the seller gate, an approved product owned
+        // by a pending/rejected seller would still appear on the storefront.
         filter.status = 'approved';
-        // Allow browsing a specific seller's storefront
+        const approvedSellerIds = await this.getApprovedSellerIds();
         if (query.seller && String(query.seller).match(/^[0-9a-fA-F]{24}$/)) {
-          filter.seller = query.seller;
+          // Browsing a specific seller's storefront — only if that seller is approved.
+          const requested = String(query.seller);
+          filter.seller = approvedSellerIds.some((id) => id.toString() === requested)
+            ? requested
+            : new Types.ObjectId(); // no match → returns nothing
+        } else {
+          filter.seller = { $in: approvedSellerIds };
         }
       }
 
