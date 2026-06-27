@@ -503,6 +503,14 @@ export class UsersService {
       throw new NotFoundException('Product not found');
     }
 
+    // Only allow approved products into the wishlist. getWishlist() filters to
+    // status:'approved', so storing a pending/rejected/inactive id would make
+    // the item silently never appear (badge desync) and let orphan ids consume
+    // the 200-item slice. Mirror cart/addToCart's availability guard.
+    if ((product as any).status !== 'approved') {
+      throw new BadRequestException('This product is not available to add to your wishlist');
+    }
+
     const wishlist = (user as any).wishlist || [];
     if (wishlist.includes(productId)) {
       throw new BadRequestException('Product already in wishlist');

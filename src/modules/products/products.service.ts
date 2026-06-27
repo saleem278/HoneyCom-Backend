@@ -157,12 +157,26 @@ export class ProductsService {
       }
 
       if (query.minPrice || query.maxPrice) {
+        // The stored `price` field is in the platform base currency, but the
+        // shopper enters minPrice/maxPrice in their DISPLAY currency (the
+        // storefront shows converted prices). Convert the incoming bounds back
+        // to base currency before building the Mongo filter, otherwise a
+        // non-INR shopper's range is compared against raw INR prices and the
+        // filter returns the wrong set.
+        const requestCurrency = (currency || 'INR').toUpperCase() as 'USD' | 'EUR' | 'GBP' | 'INR' | 'CAD' | 'AUD' | 'JPY';
+        const baseCur = this.exchangeRateService.getBaseCurrency();
+        const toBase = (v: number): number =>
+          requestCurrency === baseCur
+            ? v
+            : this.exchangeRateService.convertBetweenCurrencies(v, requestCurrency, baseCur);
         filter.price = {};
         if (query.minPrice) {
-          filter.price.$gte = parseFloat(query.minPrice);
+          const min = parseFloat(query.minPrice);
+          if (Number.isFinite(min)) filter.price.$gte = toBase(min);
         }
         if (query.maxPrice) {
-          filter.price.$lte = parseFloat(query.maxPrice);
+          const max = parseFloat(query.maxPrice);
+          if (Number.isFinite(max)) filter.price.$lte = toBase(max);
         }
       }
 
@@ -180,25 +194,48 @@ export class ProductsService {
       // Malicious patterns like "(a+)+" cause exponential backtracking in MongoDB.
       if (query.search) {
         const safeSearch = ProductsService.escapeRegex(String(query.search).slice(0, 200));
-        filter.$or = [
-          { name: { $regex: safeSearch, $options: 'i' } },
-          { description: { $regex: safeSearch, $options: 'i' } },
+        const rx = { $regex: safeSearch, $options: 'i' };
+        const searchOr: any[] = [
+          { name: rx },
+          { description: rx },
+          // SKU and tags are first-class product fields the admin UI promises to
+          // search ("by name, SKU, or seller…"). Include them directly.
+          { sku: rx },
+          { tags: rx },
         ];
+        // Resolve matching brand ids and seller ids so a brand-name or
+        // seller-name query returns their products (mirrors how orders.findAll
+        // resolves customers by email/name to ids).
+        try {
+          const BrandModel = this.productModel.db.model('Brand');
+          const [brandDocs, sellerDocs] = await Promise.all([
+            BrandModel.find({ name: rx }).select('_id').lean(),
+            this.userModel.find({ name: rx, role: 'seller' }).select('_id').lean(),
+          ]);
+          const brandIds = (brandDocs as any[]).map((b) => b._id);
+          const sellerIds = (sellerDocs as any[]).map((s) => s._id);
+          if (brandIds.length) searchOr.push({ brand: { $in: brandIds } });
+          if (sellerIds.length) searchOr.push({ seller: { $in: sellerIds } });
+        } catch {
+          // brand/seller resolution is best-effort — fall back to text fields
+        }
+        filter.$or = searchOr;
       }
 
       // Map the public `sort` param to a Mongo sort spec. Defaults to newest.
-      // Note: 'popular' approximates by numReviews then rating; 'discount'
-      // can't be sorted in Mongo without a computed field, so we sort by
-      // rating as a reasonable proxy and rely on the discount badge in the UI.
+      // Note: 'popular' approximates by numReviews then rating. 'discount' is
+      // handled separately below via an aggregation that computes the real
+      // markdown percentage — it is NOT in this map (Mongo's .sort() cannot
+      // order by a computed field). The default (no/unknown sort) is newest.
       const sortMap: Record<string, Record<string, 1 | -1>> = {
         price_asc: { price: 1 },
         price_desc: { price: -1 },
         rating: { rating: -1, numReviews: -1 },
         newest: { createdAt: -1 },
         popular: { numReviews: -1, rating: -1 },
-        discount: { rating: -1 },
       };
       const sortSpec = sortMap[query.sort as string] || { createdAt: -1 };
+      const sortByDiscount = query.sort === 'discount';
 
       // Brand filter (by id or slug)
       if (query.brand) {
@@ -213,30 +250,57 @@ export class ProductsService {
         }
       }
 
-      // Use regular populate but handle errors gracefully
-      const products = await this.productModel
-        .find(filter)
-        .populate({
-          path: 'category',
-          select: 'name slug',
-          strictPopulate: false,
-        })
-        .populate({
-          path: 'brand',
-          select: 'name slug logo',
-          strictPopulate: false,
-        })
-        .populate({
+      const populateSpec: any[] = [
+        { path: 'category', select: 'name slug', strictPopulate: false },
+        { path: 'brand', select: 'name slug logo', strictPopulate: false },
+        {
           path: 'seller',
           select: 'name email',
           strictPopulate: false,
           // Only populate valid sellers
           match: { name: { $exists: true, $ne: null }, email: { $exists: true, $ne: null } },
-        })
-        .skip(skip)
-        .limit(limit)
-        .sort(sortSpec)
-        .lean();
+        },
+      ];
+
+      let products: any[];
+      if (sortByDiscount) {
+        // 'Best Discount' — order by the actual markdown percentage
+        // ((compareAtPrice - price) / compareAtPrice). Mongo's .sort() can't
+        // order by a computed field, so compute it in an aggregation, sort,
+        // paginate, then apply the same populate config to the lean docs.
+        const aggregated = await this.productModel.aggregate([
+          { $match: filter },
+          {
+            $addFields: {
+              discountPct: {
+                $cond: [
+                  { $gt: [{ $ifNull: ['$compareAtPrice', 0] }, '$price'] },
+                  {
+                    $divide: [
+                      { $subtract: ['$compareAtPrice', '$price'] },
+                      '$compareAtPrice',
+                    ],
+                  },
+                  0,
+                ],
+              },
+            },
+          },
+          { $sort: { discountPct: -1, createdAt: -1 } },
+          { $skip: skip },
+          { $limit: limit },
+        ]);
+        products = await this.productModel.populate(aggregated, populateSpec);
+      } else {
+        // Use regular populate but handle errors gracefully
+        products = await this.productModel
+          .find(filter)
+          .populate(populateSpec)
+          .skip(skip)
+          .limit(limit)
+          .sort(sortSpec)
+          .lean();
+      }
 
       const total = await this.productModel.countDocuments(filter);
 

@@ -727,11 +727,51 @@ export class SellerService {
     const customerIds = customerData.map(c => c._id);
     const customers = await this.userModel.find({ _id: { $in: customerIds } }).select('name email');
 
+    // SDA: 'repeat vs new' and the customer's TRUE first-purchase date must be
+    // derived from their LIFETIME order history with this seller, not the
+    // selected reporting window. A customer who bought 5x last year and once in
+    // this window would otherwise show orderCount=1 -> 'New' with an in-window
+    // firstOrderDate. Compute a separate aggregation scoped only by customer +
+    // this seller's products + delivered status (NO createdAt range).
+    const lifetimeData = await this.orderModel.aggregate([
+      {
+        $match: {
+          customer: { $in: customerIds },
+          'items.product': { $in: productIds },
+          status: 'delivered',
+        },
+      },
+      { $unwind: '$items' },
+      { $match: { 'items.product': { $in: productIds } } },
+      {
+        $group: {
+          _id: '$customer',
+          orderIds: { $addToSet: '$_id' },
+          firstOrderDate: { $min: '$createdAt' },
+        },
+      },
+      {
+        $project: {
+          firstOrderDate: 1,
+          orderCount: { $size: '$orderIds' },
+        },
+      },
+    ]);
+    const lifetimeMap = new Map(
+      lifetimeData.map((l: any) => [l._id.toString(), l]),
+    );
+
     const customersMap = new Map(customers.map(c => [c._id.toString(), c]));
     const insights = customerData.map((c) => {
       const aov = c.orderCount > 0 ? c.totalSpent / c.orderCount : 0;
-      // SDA-08: repeat customer if they have more than one order
-      const isRepeat = c.orderCount > 1;
+      const lifetime = lifetimeMap.get(c._id.toString());
+      const lifetimeOrderCount = lifetime?.orderCount ?? c.orderCount;
+      // SDA-08: repeat customer if they have more than one LIFETIME order with
+      // this seller (independent of the reporting window).
+      const isRepeat = lifetimeOrderCount > 1;
+      // SDA: true first-purchase date (lifetime), falling back to the windowed
+      // value if no lifetime row was found.
+      const firstOrderDate = lifetime?.firstOrderDate ?? c.firstOrderDate;
       // SDA-08: spend tier for segmentation
       const spendTier = c.totalSpent >= 10000 ? 'platinum' : c.totalSpent >= 5000 ? 'gold' : c.totalSpent >= 1000 ? 'silver' : 'bronze';
       return {
@@ -740,7 +780,7 @@ export class SellerService {
         totalSpent: c.totalSpent,
         orderCount: c.orderCount,
         lastOrderDate: c.lastOrderDate,
-        firstOrderDate: c.firstOrderDate,
+        firstOrderDate,
         averageOrderValue: aov,
         isRepeat,
         spendTier,

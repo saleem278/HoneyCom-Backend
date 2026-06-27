@@ -503,6 +503,20 @@ export class CmsController {
     return this.cmsService.getSeoDefaults();
   }
 
+  // Public read of the global SEO defaults so the storefront root layout can
+  // merge CMS-managed siteName/metaTitle/metaDescription/keywords/ogImage/
+  // twitterHandle into the <head>. The defaults payload contains only
+  // non-sensitive presentation fields (no recipients/secrets), so it is safe to
+  // expose unauthenticated. Without this, editing SEO defaults in the CMS
+  // changed nothing a crawler or social card ever saw.
+  @Get('seo/public')
+  @Public()
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get global SEO defaults for storefront <head> (public)' })
+  async getPublicSeoDefaults() {
+    return this.cmsService.getSeoDefaults();
+  }
+
   @Put('seo/defaults')
   @ApiOperation({ summary: 'Update global SEO defaults' })
   async updateSeoDefaults(@Body() body: Record<string, any>) {

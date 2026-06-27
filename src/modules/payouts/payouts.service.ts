@@ -29,6 +29,14 @@ export class PayoutsService {
     private emailService: EmailService,
   ) {}
 
+  /**
+   * Escape a user-supplied string so it's safe to embed in a RegExp.
+   * Prevents ReDoS (e.g. "(a+)+") and regex-metacharacter breakage.
+   */
+  private static escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   // ---------------------------------------------------------------------------
   // Balance (PAY-06 split; PAY-08 exclude refunds; PAY-03 exclude cancelled)
   // ---------------------------------------------------------------------------
@@ -259,7 +267,10 @@ export class PayoutsService {
     // PAY-11: seller search (admin only — match by name or email)
     let sellerIdFilter: mongoose.Types.ObjectId[] | undefined;
     if (role === 'admin' && search && search.trim()) {
-      const regex = new RegExp(search.trim(), 'i');
+      // Escape + length-cap the user input before building the RegExp (ReDoS /
+      // metacharacter safety).
+      const safe = PayoutsService.escapeRegex(search.trim().slice(0, 200));
+      const regex = new RegExp(safe, 'i');
       const sellers = await this.userModel
         .find({ $or: [{ name: regex }, { email: regex }], role: 'seller' })
         .select('_id')

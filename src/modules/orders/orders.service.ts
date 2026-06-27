@@ -57,6 +57,30 @@ export class OrdersService {
   }
 
   /**
+   * Escape a user-supplied string so it's safe to embed in a RegExp.
+   * Without this, a search like "(a+)+" causes exponential backtracking (ReDoS)
+   * and regex metacharacters in an order number / customer name break the search.
+   */
+  private static escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * Parse a date-range bound. A bare 'YYYY-MM-DD' end date parses to midnight
+   * UTC, which would drop everything created later that day — so for an end
+   * bound with no explicit time component we snap to end-of-day. Start bounds
+   * are taken as-is (midnight is the correct inclusive lower bound).
+   */
+  private static parseRangeBound(value: string, isEnd: boolean): Date {
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+    const d = new Date(value);
+    if (isEnd && dateOnly) {
+      d.setHours(23, 59, 59, 999);
+    }
+    return d;
+  }
+
+  /**
    * Fire-and-forget: email the order's customer an order-status update.
    * SMTP is not transactional — never let a mail failure surface to the caller.
    */
@@ -842,14 +866,56 @@ export class OrdersService {
       // its extraCharge is included in what the customer is charged. The slot's
       // fee is folded into `shipping` so it surfaces in the order's shipping
       // line and matches the checkout summary.
+      //
+      // The slot is re-validated server-side here (don't trust the id the client
+      // picked at page load): it must still be active, its cutoff must not have
+      // passed, and it must not be at capacity. Otherwise a customer could book a
+      // deactivated/past-cutoff/full slot that can never be fulfilled.
       if (orderData.deliverySlotId) {
         const slot = await this.deliverySlotModel.findById(orderData.deliverySlotId).session(session);
-        if (slot) {
-          deliverySlotId = slot._id;
-          deliverySlotLabel = slot.label;
-          const extraCharge = Number((slot as any).extraCharge) || 0;
-          if (extraCharge > 0) shipping += extraCharge;
+        if (!slot) {
+          throw new BadRequestException('Selected delivery slot is no longer available');
         }
+        if (!(slot as any).isActive) {
+          throw new BadRequestException('Selected delivery slot is no longer available');
+        }
+
+        // Cutoff check, mirroring DeliverySlotsService.findAvailable: a slot is
+        // bookable for today only before its cutoffTime; if today's cutoff has
+        // passed it must run on a future available day (i.e. not today-only).
+        const now = new Date();
+        const currentDay = now.getDay();
+        const hh = String(now.getHours()).padStart(2, '0');
+        const mm = String(now.getMinutes()).padStart(2, '0');
+        const currentTime = `${hh}:${mm}`;
+        const daysAvailable: number[] = (slot as any).daysAvailable || [];
+        const availableToday = daysAvailable.includes(currentDay) && currentTime < (slot as any).cutoffTime;
+        const tomorrowDay = (currentDay + 1) % 7;
+        const availableTomorrow = daysAvailable.includes(tomorrowDay);
+        // daysAvailable empty ⇒ no day restriction (treat as always available).
+        const noDayRestriction = daysAvailable.length === 0;
+        if (!noDayRestriction && !availableToday && !availableTomorrow) {
+          throw new BadRequestException('Selected delivery slot is past its cutoff time');
+        }
+
+        // Capacity check: maxOrders caps how many live orders may book the slot.
+        const maxOrders = Number((slot as any).maxOrders) || 0;
+        if (maxOrders > 0) {
+          const booked = await this.orderModel
+            .countDocuments({
+              deliverySlot: slot._id,
+              status: { $nin: ['cancelled', 'refunded'] },
+            })
+            .session(session);
+          if (booked >= maxOrders) {
+            throw new BadRequestException('Selected delivery slot is fully booked');
+          }
+        }
+
+        deliverySlotId = slot._id;
+        deliverySlotLabel = slot.label;
+        const extraCharge = Number((slot as any).extraCharge) || 0;
+        if (extraCharge > 0) shipping += extraCharge;
       }
 
       // Pre-loyalty total. Loyalty points (if redeemed) are applied on top of
@@ -909,6 +975,26 @@ export class OrdersService {
       }
 
       total = Math.max(0, totalBeforeLoyalty - loyaltyDiscount);
+
+      // Stale-price guard: the server re-reads live prices above, so the
+      // authoritative total may differ from what the customer saw if a price
+      // changed since add-to-cart. When the client sends the total it expects to
+      // pay (expectedTotal, in the order's DISPLAY currency), reject mismatches
+      // beyond a small tolerance so the customer re-confirms instead of being
+      // silently charged a different amount. Backward-compatible: clients that
+      // don't send expectedTotal are unaffected.
+      if (orderData.expectedTotal !== undefined && orderData.expectedTotal !== null) {
+        const expected = Number(orderData.expectedTotal);
+        if (Number.isFinite(expected)) {
+          const displayTotal = Number((total * exchangeRate).toFixed(2));
+          // Tolerance: 1 unit of the display currency, to absorb rounding drift.
+          if (Math.abs(displayTotal - expected) > 1) {
+            throw new BadRequestException(
+              'Prices have changed since you added these items. Please review your cart and try again.',
+            );
+          }
+        }
+      }
 
       const orderCount = await this.orderModel.countDocuments();
       const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
@@ -1187,11 +1273,16 @@ export class OrdersService {
     }
     if (startDate || endDate) {
       filter.createdAt = {};
-      if (startDate) filter.createdAt.$gte = new Date(startDate);
-      if (endDate) filter.createdAt.$lte = new Date(endDate);
+      if (startDate) filter.createdAt.$gte = OrdersService.parseRangeBound(startDate, false);
+      // A bare 'YYYY-MM-DD' end date must include the whole final day, otherwise
+      // every order created after 00:00 on the end day is silently dropped.
+      if (endDate) filter.createdAt.$lte = OrdersService.parseRangeBound(endDate, true);
     }
     if (search?.trim()) {
-      const rx = new RegExp(search.trim(), 'i');
+      // Escape + length-cap the user input before building the RegExp (ReDoS /
+      // metacharacter safety).
+      const safe = OrdersService.escapeRegex(search.trim().slice(0, 200));
+      const rx = new RegExp(safe, 'i');
       // Search on orderNumber; customer email search requires a sub-query
       const customerIds = await this.userModel
         .find({ $or: [{ email: rx }, { name: rx }] })

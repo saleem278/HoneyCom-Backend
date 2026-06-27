@@ -384,11 +384,18 @@ export class AdminService {
     status?: string,
     sort?: string,
   ) {
-    const skip = (page - 1) * limit;
+    // Clamp the limit so a client can't request ?limit=999999 and force a
+    // full-table scan/serialization (matches getSellers' Math.min cap).
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const safePage = Math.max(1, page);
+    const skip = (safePage - 1) * safeLimit;
     const filter: Record<string, any> = {};
 
     if (search?.trim()) {
-      const rx = new RegExp(search.trim(), 'i');
+      // Escape regex metacharacters + length-cap before building the RegExp
+      // (ReDoS / metachar safety), consistent with the rest of the codebase.
+      const safeSearch = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
+      const rx = new RegExp(safeSearch, 'i');
       filter.$or = [{ name: rx }, { email: rx }, { phone: rx }];
     }
     if (role && role !== 'all') filter.role = role;
@@ -403,7 +410,7 @@ export class AdminService {
         .select('-password')
         .sort(sortField)
         .skip(skip)
-        .limit(limit)
+        .limit(safeLimit)
         .lean(),
       this.userModel.countDocuments(filter),
     ]);
@@ -412,10 +419,10 @@ export class AdminService {
       success: true,
       users,
       pagination: {
-        page,
-        limit,
+        page: safePage,
+        limit: safeLimit,
         total,
-        pages: Math.ceil(total / limit),
+        pages: Math.ceil(total / safeLimit),
       },
     };
   }
@@ -1080,6 +1087,15 @@ export class AdminService {
     const topSellers = await this.orderModel.aggregate([
       { $match: { ...matchQuery, status: 'delivered' } },
       { $unwind: '$items' },
+      // Refund-aware: drop fully refunded/returned line items so the admin
+      // leaderboard reconciles with the seller's own sales report
+      // (seller.service.getSalesReport uses the same filter).
+      {
+        $match: {
+          'items.refundStatus': { $ne: 'completed' },
+          'items.returnStatus': { $ne: 'completed' },
+        },
+      },
       {
         $lookup: {
           from: 'products',
@@ -1122,6 +1138,14 @@ export class AdminService {
     const categoryPerformance = await this.orderModel.aggregate([
       { $match: { ...matchQuery, status: 'delivered' } },
       { $unwind: '$items' },
+      // Refund-aware: drop fully refunded/returned line items, consistent with
+      // topSellers above and the seller-facing reports.
+      {
+        $match: {
+          'items.refundStatus': { $ne: 'completed' },
+          'items.returnStatus': { $ne: 'completed' },
+        },
+      },
       {
         $lookup: {
           from: 'products',
@@ -1219,19 +1243,33 @@ export class AdminService {
 
   async getFinancialReport(startDate?: Date, endDate?: Date, currency: string = 'INR') {
     const rate = this.exchangeRateService.getExchangeRate(currency.toUpperCase() as Currency);
+    // ONE consistent refund model (mirrors seller.service.getSalesReport):
+    //  - grossRevenue counts BOTH delivered AND refunded orders' full totals.
+    //    processRefund flips a FULLY-refunded order's status delivered->refunded,
+    //    so a refunded order is no longer in the 'delivered' bucket. Including
+    //    status:'refunded' here puts its full total back into gross so it can be
+    //    cleanly netted out below (instead of being silently absent, which used
+    //    to make the subtraction double-count the loss).
+    //  - totalRefunds sums the ACTUAL money refunded (order.refundedAmount),
+    //    which processRefund stamps on BOTH full refunds (refundedAmount==total)
+    //    and partial refunds (refundedAmount<total, order stays 'delivered').
+    //    Partial refunds were previously never subtracted at all.
+    //  - netRevenue = gross - totalRefunds.
     const deliveredQuery: any = { status: 'delivered' };
-    const refundedQuery: any = { status: 'refunded' };
+    const grossQuery: any = { status: { $in: ['delivered', 'refunded'] } };
+    const refundQuery: any = { refundedAmount: { $gt: 0 } };
     if (startDate || endDate) {
       const dateRange: any = {};
       if (startDate) dateRange.$gte = startDate;
       if (endDate) dateRange.$lte = endDate;
       deliveredQuery.createdAt = dateRange;
-      refundedQuery.createdAt = dateRange;
+      grossQuery.createdAt = dateRange;
+      refundQuery.createdAt = dateRange;
     }
 
-    // Revenue breakdown (delivered orders only)
+    // Revenue breakdown (delivered + refunded orders' full totals — see model note)
     const revenueBreakdown = await this.orderModel.aggregate([
-      { $match: deliveredQuery },
+      { $match: grossQuery },
       {
         $group: {
           _id: null,
@@ -1245,21 +1283,23 @@ export class AdminService {
       },
     ]);
 
-    // Refund aggregation — sum refunded orders in the same window
+    // Refund aggregation — sum the actual refunded money (refundedAmount) across
+    // BOTH partial refunds (status still 'delivered') and full refunds
+    // (status 'refunded'). refundCount counts orders that carry any refund.
     const refundBreakdown = await this.orderModel.aggregate([
-      { $match: refundedQuery },
+      { $match: refundQuery },
       {
         $group: {
           _id: null,
-          totalRefunds: { $sum: '$total' },
+          totalRefunds: { $sum: { $ifNull: ['$refundedAmount', 0] } },
           refundCount: { $sum: 1 },
         },
       },
     ]);
 
-    // Monthly revenue (delivered)
+    // Monthly revenue (delivered + refunded, consistent with gross above)
     const monthlyRevenue = await this.orderModel.aggregate([
-      { $match: deliveredQuery },
+      { $match: grossQuery },
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } },
@@ -1270,9 +1310,9 @@ export class AdminService {
       { $sort: { _id: 1 } },
     ]);
 
-    // Payment method breakdown (delivered)
+    // Payment method breakdown (delivered + refunded, consistent with gross above)
     const paymentMethodBreakdown = await this.orderModel.aggregate([
-      { $match: deliveredQuery },
+      { $match: grossQuery },
       {
         $group: {
           _id: '$paymentMethod',

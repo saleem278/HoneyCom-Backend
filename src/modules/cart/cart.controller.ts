@@ -62,6 +62,21 @@ export class CartController {
     return this.cartService.updateCartItem(req.user.id, itemId, body.quantity, currency);
   }
 
+  // NOTE: This explicit coupon-removal route MUST be declared BEFORE
+  // @Delete(':itemId') — Nest matches routes in declaration order and the
+  // greedy :itemId param would otherwise capture 'coupon' as an itemId,
+  // turning DELETE /cart/coupon into a silent no-op.
+  @Delete('coupon')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Remove applied coupon' })
+  @ApiResponse({ status: 200, description: 'Coupon removed successfully' })
+  async removeCoupon(
+    @Request() req: AuthedRequest,
+    @Currency() currency: string,
+  ) {
+    return this.cartService.removeCoupon(req.user.id, currency);
+  }
+
   @Delete(':itemId')
   @Throttle({ default: { limit: 30, ttl: 60000 } })
   @ApiOperation({ summary: 'Remove item from cart' })

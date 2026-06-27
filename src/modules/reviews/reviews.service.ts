@@ -21,6 +21,14 @@ export class ReviewsService {
     private emailService: EmailService,
   ) {}
 
+  /**
+   * Escape a user-supplied string so it's safe to embed in a $regex.
+   * Prevents ReDoS (e.g. "(a+)+") and regex-metacharacter breakage.
+   */
+  private static escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   async create(userId: string, productId: string, reviewData: any) {
     // Respect the admin-controlled global toggle. When products.reviewsEnabled
     // is explicitly false, reviews must not be accepted. A missing setting is
@@ -288,8 +296,11 @@ export class ReviewsService {
     // Server-side text search on comment (case-insensitive).
     // User/product name search requires a two-step lookup (resolve ids first)
     // which we skip here for simplicity; the comment search covers the primary use-case.
+    // Escape + length-cap the user input before building the $regex (ReDoS /
+    // metacharacter safety).
     if (search && search.trim()) {
-      filter.comment = { $regex: search.trim(), $options: 'i' };
+      const safe = ReviewsService.escapeRegex(search.trim().slice(0, 200));
+      filter.comment = { $regex: safe, $options: 'i' };
     }
 
     const sortMap: Record<string, Record<string, 1 | -1>> = {

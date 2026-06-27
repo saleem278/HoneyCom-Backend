@@ -154,7 +154,11 @@ export class CartService {
     const { taxRate, taxMethod, shippingFlat, freeShippingAbove } = await this.getCartSettings();
     // Branch on taxMethod: 'percentage' multiplies the subtotal; 'fixed' is a flat charge.
     const taxBase = taxMethod === 'fixed' ? taxRate : subtotalBase * taxRate;
-    const shippingBase = subtotalBase > freeShippingAbove ? 0 : subtotalBase > 0 ? shippingFlat : 0;
+    // Free shipping at subtotal >= threshold, to match orders.service which
+    // gives free shipping at subtotal == freeShippingAbove (it charges only
+    // when subtotal < freeShippingAbove). Using `>=` here keeps the displayed
+    // checkout total consistent with the amount actually charged at the boundary.
+    const shippingBase = subtotalBase >= freeShippingAbove ? 0 : subtotalBase > 0 ? shippingFlat : 0;
     const discountBase = cart.couponDiscount || 0;
     const totalBase = Math.max(0, subtotalBase + taxBase + shippingBase - discountBase);
 
@@ -331,6 +335,19 @@ export class CartService {
       success: true,
       message: 'Cart cleared',
     };
+  }
+
+  async removeCoupon(userId: string, currency: string = 'INR') {
+    const cart = await this.cartModel.findOne({ user: userId });
+    if (!cart) {
+      throw new NotFoundException('Cart not found');
+    }
+
+    cart.couponCode = undefined;
+    cart.couponDiscount = 0;
+    await cart.save();
+
+    return this.getCart(userId, currency);
   }
 
   async applyCoupon(userId: string, code: string, currency: string = 'INR') {

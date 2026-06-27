@@ -25,6 +25,14 @@ export class DisputesService {
   ) {}
 
   /**
+   * Escape a user-supplied string so it's safe to embed in a RegExp.
+   * Prevents ReDoS (e.g. "(a+)+") and regex-metacharacter breakage.
+   */
+  private static escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
    * Fire-and-forget in-app notifications for a dispute event. Creates a
    * Notification row for the seller (when known) and for every admin/superadmin,
    * mirroring the email recipients so disputes surface in the recipient's bell
@@ -238,8 +246,19 @@ export class DisputesService {
       query.type = filters.type;
     }
     if (filters?.search?.trim()) {
-      const rx = new RegExp(filters.search.trim(), 'i');
-      query.$or = [{ 'orderNumber': rx }, { description: rx }];
+      // Escape + length-cap the user input before building the RegExp (ReDoS /
+      // metacharacter safety).
+      const safe = DisputesService.escapeRegex(String(filters.search).trim().slice(0, 200));
+      const rx = new RegExp(safe, 'i');
+      // Dispute has no `orderNumber` field — it stores `order` as an ObjectId
+      // ref. Resolve matching order ids first, then search by `order` + the
+      // dispute's own `description` text.
+      const orderIds = await this.orderModel
+        .find({ orderNumber: rx })
+        .select('_id')
+        .lean()
+        .then((docs) => docs.map((d) => d._id));
+      query.$or = [{ order: { $in: orderIds } }, { description: rx }];
     }
 
     const [disputes, total] = await Promise.all([
