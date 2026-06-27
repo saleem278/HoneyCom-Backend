@@ -1629,62 +1629,68 @@ export class SeedService {
       this.logger.warn('Addresses not found, creating orders without shipping addresses');
     }
 
+    // Snapshot each line item the way the real order-create path does: seller +
+    // commission split derived from the product, and totals computed from the
+    // actual line-item prices (the old hardcoded $ figures contradicted the INR
+    // item prices in the same document). Order settings mirror seedSettings.
+    const COMMISSION_RATE = 0.10; // platform.commissionRate
+    const TAX_RATE = 0.18;        // order.taxRate
+    const SHIPPING_FLAT = 99;     // order.shippingFlat
+    const FREE_SHIP_ABOVE = 499;  // order.freeShippingAbove
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
+    const buildItem = (product: any, quantity: number) => {
+      const lineTotal = (product.price ?? 0) * quantity;
+      const commissionAmount = round2(lineTotal * COMMISSION_RATE);
+      return {
+        product: product._id,
+        name: product.name,
+        quantity,
+        price: product.price,
+        image: product.images?.[0],
+        seller: product.seller,                 // ownership snapshot
+        commissionRate: COMMISSION_RATE,
+        commissionAmount,
+        sellerEarning: round2(lineTotal - commissionAmount),
+      };
+    };
+
+    const buildOrder = (base: any, items: any[]) => {
+      const subtotal = round2(items.reduce((s, it) => s + it.price * it.quantity, 0));
+      const tax = round2(subtotal * TAX_RATE);
+      const shipping = subtotal >= FREE_SHIP_ABOVE ? 0 : SHIPPING_FLAT;
+      const discount = 0;
+      const total = round2(subtotal + tax + shipping - discount);
+      return { ...base, items, subtotal, tax, shipping, discount, total };
+    };
+
     const orders = [
-      {
-        orderNumber: 'ORD-001',
-        customer: customer1._id,
-        items: [
-          {
-            product: products[0]._id,
-            name: products[0].name,
-            quantity: 2,
-            price: products[0].price,
-            image: products[0].images[0],
-          },
-          {
-            product: products[2]._id,
-            name: products[2].name,
-            quantity: 1,
-            price: products[2].price,
-            image: products[2].images[0],
-          },
-        ],
-        shippingAddress: address1 || customer1._id, // Fallback to customer ID if no address
-        paymentMethod: 'razorpay', // must match Order schema enum (razorpay/paypal/cash_on_delivery)
-        paymentStatus: 'paid',
-        subtotal: 77.97,
-        tax: 7.80,
-        shipping: 10,
-        discount: 0,
-        total: 95.77,
-        status: 'delivered',
-        trackingNumber: 'TRACK123456',
-        carrier: 'UPS',
-      },
-      {
-        orderNumber: 'ORD-002',
-        customer: customer2._id,
-        items: [
-          {
-            product: products[1]._id,
-            name: products[1].name,
-            quantity: 1,
-            price: products[1].price,
-            image: products[1].images[0],
-          },
-        ],
-        shippingAddress: address2 || customer2._id, // Fallback to customer ID if no address
-        paymentMethod: 'paypal',
-        paymentStatus: 'paid',
-        subtotal: 29.99,
-        tax: 3.00,
-        shipping: 10,
-        discount: 0,
-        total: 42.99,
-        status: 'processing', // Changed from 'shipped' to 'processing'
-        trackingNumber: 'TRACK789012',
-        carrier: 'FedEx',
-      },
+      buildOrder(
+        {
+          orderNumber: 'ORD-001',
+          customer: customer1._id,
+          shippingAddress: address1 || customer1._id,
+          paymentMethod: 'razorpay',
+          paymentStatus: 'paid',
+          status: 'delivered',
+          trackingNumber: 'TRACK123456',
+          carrier: 'UPS',
+        },
+        [buildItem(products[0], 2), buildItem(products[2], 1)],
+      ),
+      buildOrder(
+        {
+          orderNumber: 'ORD-002',
+          customer: customer2._id,
+          shippingAddress: address2 || customer2._id,
+          paymentMethod: 'paypal',
+          paymentStatus: 'paid',
+          status: 'processing',
+          trackingNumber: 'TRACK789012',
+          carrier: 'FedEx',
+        },
+        [buildItem(products[1], 1)],
+      ),
     ];
 
     const createdOrders = await orderModel.insertMany(orders);
@@ -1705,47 +1711,73 @@ export class SeedService {
     const customer1 = users.find(u => u.email === 'customer1@dayam.in');
     const customer2 = users.find(u => u.email === 'customer2@dayam.in');
 
+    // Only products in a DELIVERED order for that customer can be verified
+    // purchases. Per seedOrders: ORD-001 (customer1, DELIVERED) contains
+    // products[0] + products[2]; ORD-002 (customer2, PROCESSING) contains
+    // products[1] (NOT delivered → not a verified purchase). Reviews are written
+    // product-agnostic (no stale honey copy) and only set verifiedPurchase where
+    // the delivered-order invariant actually holds.
     const reviews = [
       {
         product: products[0]._id,
         user: customer1._id,
         rating: 5,
-        comment: 'Excellent product! Arrived well-packaged and exactly as described. Highly recommend!',
-        verifiedPurchase: true,
+        comment: 'Excellent product! Arrived well-packaged and exactly as described. Highly recommend.',
+        verifiedPurchase: true, // customer1 received products[0] in delivered ORD-001
         helpful: 12,
         status: 'approved',
       },
       {
-        product: products[0]._id,
-        user: customer2._id,
+        product: products[2]._id,
+        user: customer1._id,
         rating: 4,
-        comment: 'Good honey, but a bit pricey. Still worth it for the quality.',
-        verifiedPurchase: true,
+        comment: 'Good value for the price and the quality holds up. Would buy again.',
+        verifiedPurchase: true, // customer1 received products[2] in delivered ORD-001
         helpful: 5,
         status: 'approved',
       },
       {
         product: products[1]._id,
-        user: customer1._id,
-        rating: 5,
-        comment: 'The acacia honey is perfect! Light and sweet, exactly as described.',
-        verifiedPurchase: true,
-        helpful: 8,
-        status: 'approved',
-      },
-      {
-        product: products[2]._id,
         user: customer2._id,
-        rating: 4,
-        comment: 'Lovely lavender flavor. Great for tea!',
-        verifiedPurchase: true,
-        helpful: 3,
+        rating: 5,
+        comment: 'Exactly what I was looking for — fast delivery and great quality.',
+        verifiedPurchase: false, // products[1] is in ORD-002 which is only 'processing'
+        helpful: 8,
         status: 'approved',
       },
     ];
 
     const createdReviews = await reviewModel.insertMany(reviews);
-    this.logger.log(`✅ Created ${createdReviews.length} reviews`);
+
+    // insertMany does NOT fire ReviewSchema.post('save'), so the denormalised
+    // product.rating / numReviews would stay at the hardcoded seedProducts
+    // values and disagree with the real review docs. Recompute them from the
+    // actual approved reviews so the catalogue numbers match reality, and zero
+    // out products that have no reviews (instead of fictional 312-count cards).
+    const ProductModule = await import('../../models/Product.model');
+    // Product is already registered earlier in the seed run — reuse it to avoid
+    // Mongoose's OverwriteModelError from re-registering the same model name.
+    const productModel = this.connection.models.Product
+      || this.connection.model('Product', ProductModule.ProductSchema);
+    const agg = await reviewModel.aggregate([
+      { $match: { status: 'approved' } },
+      { $group: { _id: '$product', avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+    ]);
+    const byProduct = new Map(agg.map((a: any) => [String(a._id), a]));
+    await Promise.all(products.map((p: any) => {
+      const stats = byProduct.get(String(p._id));
+      return productModel.updateOne(
+        { _id: p._id },
+        {
+          $set: {
+            rating: stats ? Math.round(stats.avg * 10) / 10 : 0,
+            numReviews: stats ? stats.count : 0,
+          },
+        },
+      );
+    }));
+
+    this.logger.log(`✅ Created ${createdReviews.length} reviews + recomputed product ratings`);
     return createdReviews;
   }
 
@@ -2135,20 +2167,26 @@ export class SeedService {
       return;
     }
 
-    // Use the order model to find a real order
+    // Each dispute must reference an order that ACTUALLY belongs to its
+    // customer, and its seller must come from that order's line items (not a
+    // hardcoded seller). Pairing a dispute.customer with another customer's
+    // order is a cross-entity orphan / auth-confusion leak.
     const orderModule = await import('../../models/Order.model');
     const orderModel = this.connection.model('Order', orderModule.OrderSchema);
-    const order = await orderModel.findOne({ customer: customer1._id });
-    if (!order) {
-      this.logger.warn('Skipping disputes — no orders found for customer1');
+    const order1 = await orderModel.findOne({ customer: customer1._id });
+    const order2 = await orderModel.findOne({ customer: customer2._id });
+    if (!order1) {
+      this.logger.warn('Skipping disputes — no order found for customer1');
       return;
     }
+    // Derive the disputed seller from the order's own line items.
+    const sellerOf = (o: any) => (o?.items?.[0]?.seller) ?? seller._id;
 
-    await disputeModel.insertMany([
+    const disputes: any[] = [
       {
-        order: order._id,
+        order: order1._id,
         customer: customer1._id,
-        seller: seller._id,
+        seller: sellerOf(order1),
         type: 'quality',
         reason: 'Product quality issue',
         description: 'The product received is different from what was shown in the listing. The color is completely different and the build quality is poor.',
@@ -2156,18 +2194,9 @@ export class SeedService {
         attachments: [],
       },
       {
-        order: order._id,
-        customer: customer2._id,
-        seller: seller._id,
-        type: 'delivery',
-        reason: 'Late delivery',
-        description: 'Order was supposed to arrive within 3 days but it has been 10 days. No tracking update since the order was shipped.',
-        status: 'in_review',
-        attachments: [],
-      },
-      {
-        order: order._id,
+        order: order1._id,
         customer: customer1._id,
+        seller: sellerOf(order1),
         type: 'refund',
         reason: 'Item not as described',
         description: 'Requested a refund but seller has not responded in 5 days.',
@@ -2178,8 +2207,24 @@ export class SeedService {
         resolvedAt: new Date(),
         attachments: [],
       },
-    ]);
-    this.logger.log('✅ Created 3 disputes');
+    ];
+
+    // Only add customer2's dispute if customer2 actually has an order.
+    if (order2) {
+      disputes.push({
+        order: order2._id,
+        customer: customer2._id,
+        seller: sellerOf(order2),
+        type: 'delivery',
+        reason: 'Late delivery',
+        description: 'Order was supposed to arrive within 3 days but it has been 10 days. No tracking update since the order was shipped.',
+        status: 'in_review',
+        attachments: [],
+      });
+    }
+
+    await disputeModel.insertMany(disputes);
+    this.logger.log(`✅ Created ${disputes.length} disputes`);
   }
 
   private async seedSettings() {
