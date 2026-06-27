@@ -403,6 +403,27 @@ export class ProductsService {
     }
   }
 
+  /** Enforce the admin-configured products.maxImagesPerProduct cap server-side
+   *  (the seller form caps the uploader client-side, but the API must enforce it
+   *  too so a direct request can't exceed the limit). Missing/invalid setting
+   *  falls back to a sane default of 8. */
+  private async assertImageCountWithinLimit(images: unknown[]): Promise<void> {
+    if (!Array.isArray(images)) return;
+    let max = 8;
+    try {
+      const setting = await this.settingsModel
+        .findOne({ key: 'products.maxImagesPerProduct' })
+        .lean();
+      const v = Number((setting as any)?.value);
+      if (Number.isFinite(v) && v > 0) max = v;
+    } catch {
+      /* fall back to default */
+    }
+    if (images.length > max) {
+      throw new BadRequestException(`A product can have at most ${max} images.`);
+    }
+  }
+
   // ── SP-01: Real Image Upload ──────────────────────────────────────────────────
 
   /** Upload a product image buffer to Cloudinary. Returns the CDN URL. */
@@ -461,6 +482,7 @@ export class ProductsService {
     // Validate image URLs to prevent SSRF attacks
     if (createProductDto.images) {
       this.validateImageUrls(createProductDto.images);
+      await this.assertImageCountWithinLimit(createProductDto.images);
     }
 
     // SECURITY: build the document from an explicit field whitelist (mirrors
@@ -597,6 +619,7 @@ export class ProductsService {
     // Validate image URLs before persisting to prevent SSRF
     if (filteredUpdateData.images) {
       this.validateImageUrls(filteredUpdateData.images);
+      await this.assertImageCountWithinLimit(filteredUpdateData.images);
     }
 
     const oldPrice = product.price;
