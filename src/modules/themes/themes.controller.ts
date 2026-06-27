@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ThemesService } from './themes.service';
 import { CreateThemeDto } from './dto/create-theme.dto';
@@ -23,13 +23,19 @@ export class ThemesController {
     return { ...result, themes: result.themes.filter((t: any) => t.isActive) };
   }
 
-  /** Public — effective theme for a logged-out guest (role default guest).
-   *  MUST be declared before the `:id` param route below or it gets shadowed. */
+  /** Public — effective theme for a logged-out visitor, optionally for a
+   *  specific portal (?role=seller|admin|contentEditor|customer). A logged-out
+   *  seller on /seller/login should see the seller role-default theme, not the
+   *  storefront guest theme. MUST be declared before the `:id` param route. */
   @Get('guest')
   @Public()
-  @ApiOperation({ summary: 'Get effective theme for a guest (public)' })
-  async getGuestTheme() {
-    const resolved = await this.themesService.getGuestTheme();
+  @ApiOperation({ summary: 'Get effective theme for a guest / portal (public)' })
+  async getGuestTheme(@Query('role') role?: string) {
+    const allowed = ['guest', 'customer', 'seller', 'admin', 'contentEditor'] as const;
+    const r = (allowed as readonly string[]).includes(role ?? '')
+      ? (role as (typeof allowed)[number])
+      : 'guest';
+    const resolved = await this.themesService.getGuestTheme(r);
     return { success: true, ...resolved };
   }
 

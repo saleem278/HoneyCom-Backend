@@ -82,14 +82,22 @@ export class ThemesService {
     return { theme: null, isDark: false, source: 'none' };
   }
 
-  /** Public — effective theme for a logged-out guest. Resolves the
-   *  theme.roleDefaults.guest, then system default, then first active. */
-  async getGuestTheme(): Promise<{ theme: any; isDark: boolean; source: string; canChange: boolean }> {
+  /** Public — effective theme for a logged-out visitor. Resolves the role
+   *  default for the requested portal (e.g. a logged-out seller on
+   *  /seller/login should see the SELLER role-default theme, not the guest
+   *  storefront theme), then the guest default, then system default, then
+   *  first active. `role` defaults to 'guest' (the storefront). */
+  async getGuestTheme(
+    role: 'guest' | 'customer' | 'seller' | 'admin' | 'contentEditor' = 'guest',
+  ): Promise<{ theme: any; isDark: boolean; source: string; canChange: boolean }> {
     const themeSettings = await this._getThemeSettings();
 
-    const guestDefaultId = themeSettings.defaults?.['guest'];
-    if (guestDefaultId) {
-      const theme = await this.themeModel.findById(guestDefaultId).lean();
+    // Try the requested portal's role default first, then fall back to guest.
+    const candidateRoles = role === 'guest' ? ['guest'] : [role, 'guest'];
+    for (const r of candidateRoles) {
+      const id = themeSettings.defaults?.[r];
+      if (!id) continue;
+      const theme = await this.themeModel.findById(id).lean();
       if (theme && (theme as any).isActive) {
         return { theme, isDark: false, source: 'roleDefault', canChange: false };
       }
