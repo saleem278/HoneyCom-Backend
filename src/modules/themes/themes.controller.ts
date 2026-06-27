@@ -110,6 +110,19 @@ export class ThemesController {
     return this.themesService.remove(id);
   }
 
+  /** Admin — read a specific user's stored theme preference (so the per-user
+   *  theme control can reflect the real current override on mount). The
+   *  two-segment 'user/:userId' path does not collide with the single-segment
+   *  ':id' GET route. */
+  @Get('user/:userId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin', 'superadmin')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get stored theme preference for a specific user (admin)' })
+  async getUserPref(@Param('userId') userId: string) {
+    return this.themesService.getUserThemePref(userId);
+  }
+
   /** Admin — set per-user theme preference */
   @Put('user/:userId')
   @UseGuards(JwtAuthGuard, RolesGuard)

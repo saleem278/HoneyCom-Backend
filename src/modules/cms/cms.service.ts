@@ -434,11 +434,73 @@ export class CmsService {
     return { success: true, media };
   }
 
-  async deleteMedia(id: string) {
-    const media = await this.mediaModel.findByIdAndDelete(id);
+  /**
+   * Count where a media asset's URL is referenced so deleting it can't
+   * silently break live content. Scans Blog.featuredImage + Blog.content,
+   * Page.content, Widget.content, and the SEO defaults ogImage.
+   */
+  private async findMediaUsage(
+    fileUrl: string,
+  ): Promise<{ total: number; breakdown: Record<string, number> }> {
+    if (!fileUrl) {
+      return { total: 0, breakdown: {} };
+    }
+    // Match the URL anywhere inside HTML content too (escape regex metachars).
+    const escaped = fileUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rx = new RegExp(escaped);
+
+    const seoDefaults = await this.settingsModel.findOne({ key: CmsService.SEO_DEFAULTS_KEY }).lean();
+    const ogImage = (seoDefaults?.value as Record<string, any> | undefined)?.ogImage;
+
+    const [blogCount, pageCount, widgetCount] = await Promise.all([
+      this.blogModel.countDocuments({ $or: [{ featuredImage: fileUrl }, { content: rx }] }),
+      this.pageModel.countDocuments({ content: rx }),
+      this.widgetModel.countDocuments({ content: rx }),
+    ]);
+    const seoCount = ogImage && ogImage === fileUrl ? 1 : 0;
+
+    const breakdown: Record<string, number> = {};
+    if (blogCount) breakdown.blogPosts = blogCount;
+    if (pageCount) breakdown.pages = pageCount;
+    if (widgetCount) breakdown.widgets = widgetCount;
+    if (seoCount) breakdown.seoDefaults = seoCount;
+
+    return { total: blogCount + pageCount + widgetCount + seoCount, breakdown };
+  }
+
+  /**
+   * Public usage check so the UI can surface "used in N places" before the
+   * user confirms a delete.
+   */
+  async getMediaUsage(id: string) {
+    const media = await this.mediaModel.findById(id).lean();
     if (!media) {
       throw new NotFoundException('Media not found');
     }
+    const usage = await this.findMediaUsage((media as any).fileUrl);
+    return { success: true, ...usage };
+  }
+
+  async deleteMedia(id: string) {
+    const media = await this.mediaModel.findById(id);
+    if (!media) {
+      throw new NotFoundException('Media not found');
+    }
+
+    // Block deletion when the asset is still referenced — deleting it would
+    // leave broken images in live pages/posts/widgets/SEO. Caller must remove
+    // the references first (mirrors deleteBlogCategory's in-use guard).
+    const usage = await this.findMediaUsage((media as any).fileUrl);
+    if (usage.total > 0) {
+      const where = Object.entries(usage.breakdown)
+        .map(([k, v]) => `${v} ${k}`)
+        .join(', ');
+      throw new BadRequestException(
+        `Cannot delete media. It is referenced in ${usage.total} place(s)${where ? ` (${where})` : ''}. Remove those references first.`,
+      );
+    }
+
+    await this.mediaModel.findByIdAndDelete(id);
     return { success: true, message: 'Media deleted successfully' };
   }
 
@@ -446,12 +508,31 @@ export class CmsService {
     if (!Array.isArray(ids) || ids.length === 0) {
       throw new BadRequestException('A non-empty array of media IDs is required');
     }
-    const result = await this.mediaModel.deleteMany({ _id: { $in: ids } });
-    return {
-      success: true,
-      deleted: result.deletedCount ?? 0,
-      message: `${result.deletedCount ?? 0} media item(s) deleted successfully`,
-    };
+
+    // Only delete assets that aren't referenced anywhere; skip (don't silently
+    // orphan content for) the ones still in use and report them back.
+    const docs = await this.mediaModel.find({ _id: { $in: ids } }).lean();
+    const deletableIds: string[] = [];
+    const skipped: Array<{ id: string; fileName?: string; usage: number }> = [];
+    for (const doc of docs) {
+      const usage = await this.findMediaUsage((doc as any).fileUrl);
+      if (usage.total > 0) {
+        skipped.push({ id: String((doc as any)._id), fileName: (doc as any).fileName, usage: usage.total });
+      } else {
+        deletableIds.push(String((doc as any)._id));
+      }
+    }
+
+    const result = deletableIds.length
+      ? await this.mediaModel.deleteMany({ _id: { $in: deletableIds } })
+      : { deletedCount: 0 };
+
+    const deleted = result.deletedCount ?? 0;
+    const message = skipped.length
+      ? `${deleted} media item(s) deleted; ${skipped.length} skipped because they are still in use`
+      : `${deleted} media item(s) deleted successfully`;
+
+    return { success: true, deleted, skipped, message };
   }
 
   // ========== MENUS ==========
@@ -813,9 +894,15 @@ export class CmsService {
   // ========== SITEMAP ==========
   async generateSitemap() {
     const baseUrl = this.configService.get<string>('FRONTEND_URL')?.split(',')[0] || 'http://localhost:3000';
-    
-    const pages = await this.pageModel.find({ status: 'published' }).select('slug updatedAt').limit(1000).lean();
-    const posts = await this.blogModel.find({ status: 'published' }).select('slug updatedAt').limit(1000).lean();
+
+    // Only emit URLs that resolve to a real public route, otherwise the
+    // sitemap advertises 404s to crawlers:
+    //  - Blog posts: the public detail route is /blog/[id] (keyed by _id, see
+    //    frontend app/blog/[id]/page.tsx), NOT by slug — so emit the _id URL.
+    //  - CMS Pages: there is currently NO public storefront route for pages
+    //    (no app/[slug]/page.tsx), so they are intentionally excluded until
+    //    such a route exists. Re-add page URLs here once it does.
+    const posts = await this.blogModel.find({ status: 'published' }).select('_id updatedAt').limit(1000).lean();
 
     const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -825,14 +912,8 @@ export class CmsService {
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
-${pages.map((page: any) => `  <url>
-    <loc>${baseUrl}/${page.slug}</loc>
-    <lastmod>${new Date(page.updatedAt).toISOString().split('T')[0]}</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
-  </url>`).join('\n')}
 ${posts.map((post: any) => `  <url>
-    <loc>${baseUrl}/blog/${post.slug}</loc>
+    <loc>${baseUrl}/blog/${post._id}</loc>
     <lastmod>${new Date(post.updatedAt).toISOString().split('T')[0]}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
@@ -910,6 +991,17 @@ Sitemap: ${baseUrl}/sitemap.xml`;
       metaTitle: content.metaTitle,
       metaDescription: content.metaDescription,
       keywords: content.keywords,
+      // Snapshot blog-only fields too so a restore reproduces the full post.
+      // Pages don't have these (they stay undefined and are ignored on restore).
+      ...(contentType === 'blog'
+        ? {
+            excerpt: content.excerpt,
+            featuredImage: content.featuredImage,
+            category: content.category,
+            tags: content.tags,
+            status: content.status,
+          }
+        : {}),
       createdBy: userId,
     });
 
@@ -942,14 +1034,25 @@ Sitemap: ${baseUrl}/sitemap.xml`;
         keywords: version.keywords,
       });
     } else {
-      await this.blogModel.findByIdAndUpdate(version.contentId, {
+      // Restore the full blog field set — older versions may predate the
+      // blog-only snapshot columns, so only overwrite a field when the
+      // version actually captured it (avoid blanking live data on legacy rows).
+      const blogUpdate: Record<string, unknown> = {
         title: version.title,
         content: version.content,
         slug: version.slug,
         metaTitle: version.metaTitle,
         metaDescription: version.metaDescription,
         keywords: version.keywords,
-      });
+      };
+      if (version.excerpt !== undefined) blogUpdate.excerpt = version.excerpt;
+      if (version.featuredImage !== undefined) blogUpdate.featuredImage = version.featuredImage;
+      if (version.category !== undefined && version.category !== null) {
+        blogUpdate.category = version.category;
+      }
+      if (version.tags !== undefined) blogUpdate.tags = version.tags;
+      if (version.status !== undefined) blogUpdate.status = version.status;
+      await this.blogModel.findByIdAndUpdate(version.contentId, blogUpdate);
     }
 
     // Create a new version from the restored content

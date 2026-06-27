@@ -7,6 +7,7 @@ import { User, IUser } from '../../models/User.model';
 import { assertOrderTransition } from '../orders/order-status';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { EmailService } from '../../services/email.service';
+import { computeSellerNetEarnings } from '../payouts/seller-earnings.helper';
 
 @Injectable()
 export class SellerService {
@@ -82,6 +83,12 @@ export class SellerService {
 
     const earningsSummary = earningsAgg[0] || { totalRevenue: 0, totalNetEarnings: 0, totalCommission: 0 };
 
+    // SDA: "Lifetime Net Earnings" must be refund-aware and equal the Payouts
+    // balance's totalEarnings. The aggregation above is gross-of-refund, so use
+    // the shared computeSellerNetEarnings (same logic as PayoutsService.
+    // computeBalance) for the net figure rather than earningsSummary.totalNetEarnings.
+    const { totalEarnings: refundAwareNetEarnings } = await computeSellerNetEarnings(this.orderModel, productIds as any);
+
     return {
       success: true,
       dashboard: {
@@ -91,7 +98,8 @@ export class SellerService {
         deliveredOrders,
         openOrders,
         totalRevenue: earningsSummary.totalRevenue,
-        totalNetEarnings: earningsSummary.totalNetEarnings,
+        // SDA: refund-aware net earnings, reconciles with Payouts balance
+        totalNetEarnings: refundAwareNetEarnings,
         totalCommission: earningsSummary.totalCommission,
         // SDA-10: server-aggregated low-stock fields
         lowStockCount,
@@ -239,9 +247,28 @@ export class SellerService {
 
     const total = await this.orderModel.countDocuments(filter);
 
+    // SO-2/SO-8: strip each order's items down to THIS seller's own line items
+    // (mirrors getOrderById). A multi-seller order previously leaked other
+    // sellers' product lines and prices here, and made the client-side earnings
+    // sum count items the seller never sold. We also surface isMultiSeller so
+    // the UI can warn before the seller hits a failing per-order action.
+    const productIdSet = new Set(productIds.map((pid: any) => pid.toString()));
+    const scopedOrders = (orders as any[]).map((order: any) => {
+      const allItems = (order.items as any[]) ?? [];
+      const ownItems = allItems.filter((item: any) => {
+        const pid = item.product?._id?.toString() ?? item.product?.toString();
+        return pid && productIdSet.has(pid);
+      });
+      const isMultiSeller = allItems.some((item: any) => {
+        const pid = item.product?._id?.toString() ?? item.product?.toString();
+        return pid && !productIdSet.has(pid);
+      });
+      return { ...order, items: ownItems, isMultiSeller };
+    });
+
     return {
       success: true,
-      orders,
+      orders: scopedOrders,
       pagination: {
         page,
         limit,
@@ -419,10 +446,22 @@ export class SellerService {
     // products, then $unwind so each line item becomes its own document, then
     // re-filter to drop other sellers' line items. From here we can sum
     // accurately on the seller's items only.
+    //
+    // SDA: drop fully refunded/returned line items (same items.refundStatus/
+    // returnStatus filter as PayoutsService.computeBalance) so the report's net
+    // earnings are refund-aware and reconcile with the withdrawable balance.
+    // Order-level partial refunds (refundedAmount with no per-item status) are
+    // subtracted from totalNetEarnings below, scoped to the report date range.
     const sellerItemsPipeline = [
       { $match: { ...matchQuery, status: 'delivered' } },
       { $unwind: '$items' },
-      { $match: { 'items.product': { $in: productIds } } },
+      {
+        $match: {
+          'items.product': { $in: productIds },
+          'items.refundStatus': { $ne: 'completed' },
+          'items.returnStatus': { $ne: 'completed' },
+        },
+      },
       {
         $addFields: {
           itemRevenue: { $multiply: ['$items.price', '$items.quantity'] },
@@ -505,12 +544,72 @@ export class SellerService {
       },
     ]);
 
+    // SDA: subtract the seller's proportional share of order-level partial
+    // refunds (refundedAmount stamped on the order, no per-item refundStatus) so
+    // totalNetEarnings is refund-aware — mirrors PayoutsService.computeBalance,
+    // but scoped to this report's date range/delivered orders.
+    const refundAgg = await this.orderModel.aggregate([
+      {
+        $match: {
+          ...matchQuery,
+          status: 'delivered',
+          refundedAmount: { $gt: 0 },
+        },
+      },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$_id',
+          refundedAmount: { $first: '$refundedAmount' },
+          orderTotal: { $first: '$total' },
+          sellerEarning: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $in: ['$items.product', productIds] },
+                    { $ne: ['$items.refundStatus', 'completed'] },
+                    { $ne: ['$items.returnStatus', 'completed'] },
+                  ],
+                },
+                { $ifNull: ['$items.sellerEarning', { $multiply: ['$items.price', '$items.quantity'] }] },
+                0,
+              ],
+            },
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalRefundShare: {
+            $sum: {
+              $min: [
+                '$sellerEarning',
+                {
+                  $cond: [
+                    { $gt: ['$orderTotal', 0] },
+                    { $multiply: ['$refundedAmount', { $divide: ['$sellerEarning', '$orderTotal'] }] },
+                    0,
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    ]);
+    const totalRefundShare = refundAgg[0]?.totalRefundShare ?? 0;
+
+    const totalsResult = totals[0] || { totalRevenue: 0, totalNetEarnings: 0, totalCommission: 0, totalOrders: 0, totalItems: 0, averageOrderValue: 0 };
+    totalsResult.totalNetEarnings = Math.max(0, (totalsResult.totalNetEarnings ?? 0) - totalRefundShare);
+
     return {
       success: true,
       report: {
         dailySales,
         monthlySales,
-        totals: totals[0] || { totalRevenue: 0, totalNetEarnings: 0, totalCommission: 0, totalOrders: 0, totalItems: 0, averageOrderValue: 0 },
+        totals: totalsResult,
       },
     };
   }

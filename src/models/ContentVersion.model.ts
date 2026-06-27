@@ -10,6 +10,14 @@ export interface IContentVersion extends Document {
   metaTitle?: string;
   metaDescription?: string;
   keywords?: string[];
+  // Blog-only fields. Without these a restore of a blog version silently
+  // wiped the excerpt, featured image, category and tags. Snapshot + restore
+  // them so a restore reproduces the full post (see cms.service.ts).
+  excerpt?: string;
+  featuredImage?: string;
+  category?: mongoose.Types.ObjectId;
+  tags?: string[];
+  status?: string;
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
 }
@@ -50,6 +58,24 @@ const ContentVersionSchema: Schema = new Schema(
     keywords: {
       type: [String],
       default: [],
+    },
+    // Blog-only snapshot fields (no-ops for page versions).
+    excerpt: {
+      type: String,
+    },
+    featuredImage: {
+      type: String,
+    },
+    category: {
+      type: Schema.Types.ObjectId,
+      ref: 'BlogCategory',
+    },
+    tags: {
+      type: [String],
+      default: [],
+    },
+    status: {
+      type: String,
     },
     createdBy: {
       type: Schema.Types.ObjectId,

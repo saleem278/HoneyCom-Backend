@@ -15,6 +15,7 @@ import { INotification } from '../../models/Notification.model';
 import { RequestPayoutDto } from './dto/request-payout.dto';
 import { SavePayoutMethodDto } from './dto/payout-method.dto';
 import { EmailService } from '../../services/email.service';
+import { computeSellerNetEarnings } from './seller-earnings.helper';
 
 @Injectable()
 export class PayoutsService {
@@ -37,91 +38,10 @@ export class PayoutsService {
     const products = await this.productModel.find({ seller: sellerObjectId }).select('_id');
     const productIds = products.map(p => p._id);
 
-    const earningsAgg = await this.orderModel.aggregate([
-      { $match: { 'items.product': { $in: productIds }, status: 'delivered' } },
-      { $unwind: '$items' },
-      {
-        $match: {
-          'items.product': { $in: productIds },
-          'items.refundStatus': { $ne: 'completed' },
-          'items.returnStatus': { $ne: 'completed' },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalNetEarnings: {
-            $sum: { $ifNull: ['$items.sellerEarning', { $multiply: ['$items.price', '$items.quantity'] }] },
-          },
-        },
-      },
-    ]);
-    const grossEarnings = earningsAgg[0]?.totalNetEarnings ?? 0;
-
-    // PAY-08 (partial refunds): an admin partial refund (and a full refund on a
-    // multi-item order) leaves the order status as 'delivered' and only stamps
-    // the order-level `refundedAmount`, with no per-item refundStatus. So the
-    // earnings aggregation above still counts the full sellerEarning. Subtract
-    // the seller's proportional share of each delivered order's refundedAmount
-    // so partial refunds actually reduce the withdrawable balance.
-    const refundAgg = await this.orderModel.aggregate([
-      {
-        $match: {
-          'items.product': { $in: productIds },
-          status: 'delivered',
-          refundedAmount: { $gt: 0 },
-        },
-      },
-      // Per-order: seller's net earning in this order, and the order's total
-      // earning (all sellers) so we can attribute refundedAmount proportionally.
-      { $unwind: '$items' },
-      {
-        $group: {
-          _id: '$_id',
-          refundedAmount: { $first: '$refundedAmount' },
-          orderTotal: { $first: '$total' },
-          sellerEarning: {
-            $sum: {
-              $cond: [
-                {
-                  $and: [
-                    { $in: ['$items.product', productIds] },
-                    { $ne: ['$items.refundStatus', 'completed'] },
-                    { $ne: ['$items.returnStatus', 'completed'] },
-                  ],
-                },
-                { $ifNull: ['$items.sellerEarning', { $multiply: ['$items.price', '$items.quantity'] }] },
-                0,
-              ],
-            },
-          },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalRefundShare: {
-            $sum: {
-              // Attribute the order's refundedAmount to this seller in proportion
-              // to their share of the order total, capped at the seller's earning
-              // so a refund never pushes the seller's contribution below zero.
-              $min: [
-                '$sellerEarning',
-                {
-                  $cond: [
-                    { $gt: ['$orderTotal', 0] },
-                    { $multiply: ['$refundedAmount', { $divide: ['$sellerEarning', '$orderTotal'] }] },
-                    0,
-                  ],
-                },
-              ],
-            },
-          },
-        },
-      },
-    ]);
-    const totalRefundShare = refundAgg[0]?.totalRefundShare ?? 0;
-    const totalEarnings = Math.max(0, grossEarnings - totalRefundShare);
+    // PAY-08: refund-aware net earnings. Shared with the seller dashboard and
+    // sales report (seller.service.ts) via computeSellerNetEarnings so all three
+    // surfaces report the same net figure.
+    const { totalEarnings } = await computeSellerNetEarnings(this.orderModel, productIds);
 
     const payoutAgg = await this.payoutModel.aggregate([
       { $match: { seller: sellerObjectId, status: { $in: ['pending', 'approved', 'paid'] } } },
@@ -253,7 +173,42 @@ export class PayoutsService {
     }
 
     const payout = await this.payoutModel.create({ seller: sellerId, amount: dto.amount, notes: dto.notes, ...bankDetails });
+
+    // PAY-02: notify admins of the new payout request so it doesn't sit
+    // unseen. Fire-and-forget — a notification failure must not fail the request.
+    void this.notifyAdminsOfPayoutRequest(sellerId, payout._id?.toString() ?? '', dto.amount, payout.currency);
+
     return { success: true, payout };
+  }
+
+  /** PAY-02: In-app notify all admins/superadmins that a seller requested a payout. */
+  private async notifyAdminsOfPayoutRequest(
+    sellerId: string,
+    payoutId: string,
+    amount: number,
+    currency?: string,
+  ): Promise<void> {
+    try {
+      const [seller, admins] = await Promise.all([
+        this.userModel.findById(sellerId).select('name email').lean(),
+        this.userModel.find({ role: { $in: ['admin', 'superadmin'] } }).select('_id').lean(),
+      ]);
+      if (admins.length === 0) return;
+      const sellerLabel = seller?.name || seller?.email || 'A seller';
+      const title = 'New Payout Request';
+      const message = `${sellerLabel} requested a payout of ${currency ?? ''} ${amount}.`.trim();
+      await this.notificationModel.insertMany(
+        admins.map(a => ({
+          user: a._id,
+          title,
+          message,
+          type: 'system',
+          data: { payoutId, sellerId, amount, kind: 'payout_request' },
+        })),
+      );
+    } catch {
+      // notification failure must not break the payout request
+    }
   }
 
   // ---------------------------------------------------------------------------

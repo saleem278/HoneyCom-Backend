@@ -146,6 +146,24 @@ export class ThemesService {
     return { success: true, message: 'Theme preference updated' };
   }
 
+  /** Admin: read a specific user's stored theme preference flags so the
+   *  admin UI can seed its controls with the real current override instead of
+   *  defaulting everyone to 'inherit'/none (which clobbers existing
+   *  assignments on save). Returns the raw stored values. */
+  async getUserThemePref(targetUserId: string) {
+    const user = await this.userModel
+      .findById(targetUserId)
+      .select('themePreference')
+      .lean();
+    if (!user) throw new NotFoundException('User not found');
+    const pref = (user as any).themePreference ?? {};
+    return {
+      success: true,
+      canChangeTheme: pref.canChangeTheme ?? 'inherit',
+      assignedThemeId: pref.assignedThemeId ? String(pref.assignedThemeId) : null,
+    };
+  }
+
   /** Admin: set per-user theme preference flags */
   async setUserThemePref(targetUserId: string, data: {
     canChangeTheme?: 'inherit' | boolean;

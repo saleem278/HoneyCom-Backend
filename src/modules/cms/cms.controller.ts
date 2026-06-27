@@ -163,6 +163,12 @@ export class CmsController {
     return this.cmsService.getMediaById(id);
   }
 
+  @Get('media/:id/usage')
+  @ApiOperation({ summary: 'Count where a media asset is referenced (pages/posts/widgets/SEO)' })
+  async getMediaUsage(@Param('id') id: string) {
+    return this.cmsService.getMediaUsage(id);
+  }
+
   @Post('media')
   @UseInterceptors(
     FileInterceptor('file', {

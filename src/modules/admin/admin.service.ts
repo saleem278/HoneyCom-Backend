@@ -711,6 +711,17 @@ export class AdminService {
     const seller = await this.userModel.findById(sellerId);
     if (!seller) throw new NotFoundException('Seller not found');
     if (seller.role !== 'seller') throw new BadRequestException('User is not a seller');
+    // Requesting info flips approvalStatus to 'info_requested', which the
+    // storefront gate (getApprovedSellerIds) treats as not-approved — so doing
+    // this to an ALREADY-APPROVED seller would silently de-list every one of
+    // their live products. Info requests are an onboarding/review affordance;
+    // refuse them once the seller is live so their catalogue stays up.
+    if (seller.sellerInfo?.approvalStatus === 'approved') {
+      throw new BadRequestException(
+        'Seller is already approved. Requesting info would de-list their live products. ' +
+          'Suspend the seller instead if you need to take their store offline.',
+      );
+    }
     if (!seller.sellerInfo) seller.sellerInfo = {};
     seller.sellerInfo.approvalStatus = 'info_requested';
     (seller.sellerInfo as any).reviewNotes = message;

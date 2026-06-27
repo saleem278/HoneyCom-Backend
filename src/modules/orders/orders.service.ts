@@ -44,6 +44,17 @@ export class OrdersService {
   ) {}
 
   /**
+   * Does this role get the admin view of the data? Superadmin is a superset of
+   * admin (mirrors RolesGuard, which lets superadmin pass every role check), so
+   * every data-scoping check that grants the admin view must accept superadmin
+   * too. A literal `role === 'admin'` here would silently scope superadmins down
+   * to "their own" orders (of which they have none), hiding all data from them.
+   */
+  private isAdminRole(role?: string): boolean {
+    return role === 'admin' || role === 'superadmin';
+  }
+
+  /**
    * Fire-and-forget: email the order's customer an order-status update.
    * SMTP is not transactional — never let a mail failure surface to the caller.
    */
@@ -444,6 +455,15 @@ export class OrdersService {
         const itemTotal = effectivePrice * item.quantity;
         subtotal += itemTotal;
 
+        // COUPON-FUNDING POLICY: commission and sellerEarning are computed from
+        // the gross line total (price * qty) and DELIBERATELY ignore any
+        // order-level coupon / referral / loyalty discount applied later below.
+        // i.e. discounts are PLATFORM-FUNDED: the seller still earns on the full
+        // pre-discount price, and the platform absorbs the discount out of its
+        // commission/margin. Reviewers must NOT treat sellerEarning as a
+        // post-discount figure. If the business later wants seller-funded
+        // coupons, the discount must be allocated proportionally across these
+        // line items here and subtracted from each sellerEarning.
         const commissionAmount = Number((itemTotal * commissionRate).toFixed(2));
         const sellerEarning = Number((itemTotal - commissionAmount).toFixed(2));
 
@@ -1106,7 +1126,7 @@ export class OrdersService {
       // Sellers see orders that contain at least one of their products.
       // Snapshot the seller ID onto each order line item so this join is cheap.
       filter['items.seller'] = userId;
-    } else if (userRole !== 'admin') {
+    } else if (!this.isAdminRole(userRole)) {
       filter.customer = userId;
     }
     if (status) {
@@ -1171,8 +1191,8 @@ export class OrdersService {
     // strip other sellers' line items from the response below.
     let sellerProductIds: Set<string> | null = null;
 
-    if (userRole === 'admin') {
-      // Admin can view any order — no further check needed.
+    if (this.isAdminRole(userRole)) {
+      // Admin / superadmin can view any order — no further check needed.
     } else if (userRole === 'seller') {
       // Sellers may only view orders that contain at least one of their products.
       const sellerProducts = await this.productModel
@@ -1339,7 +1359,7 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
-    if (userRole !== 'admin' && order.customer?.toString() !== userId) {
+    if (!this.isAdminRole(userRole) && order.customer?.toString() !== userId) {
       throw new BadRequestException('Not authorized');
     }
 
@@ -1407,63 +1427,148 @@ export class OrdersService {
       throw new BadRequestException(`Return window of ${returnWindowDays} days has expired for this order.`);
     }
 
-    // Validate the status transition FIRST so we don't initiate a refund and
-    // then fail to update the order (refund without status update is worse than
-    // the transition error surfacing cleanly before any money moves).
-    assertOrderTransition(order.status, 'refunded');
+    // A return can only be requested once — don't let a second request restock
+    // again or re-open an already-processed return.
+    if (order.returnStatus) {
+      throw new BadRequestException('A return has already been requested for this order.');
+    }
 
-    // Process refund based on payment method, routed through the shared
-    // issueRefund helper so refundedAmount is respected and we can never
-    // double-refund.
-    // Razorpay (razorpayPaymentId present) supports automatic refunds.
-    // For PayPal and cash_on_delivery, skip automatic refund —
-    // those methods require manual admin action via the admin panel.
-    if (order.paymentMethod === 'razorpay') {
-      if (!(order as any).razorpayPaymentId) {
-        throw new BadRequestException(
-          'Cannot automatically refund this order: payment ID is missing. Please contact support.',
-        );
+    // PARTIAL RETURNS: when the client specifies which items to return, refund
+    // and restock ONLY those line items — never the whole order. `returnData.items`
+    // is [{ productId, quantity? }]; an omitted/empty list means a full return.
+    // We resolve the request against the order's actual line items so a caller
+    // can't restock products that aren't on the order or inflate quantities.
+    const requestedItems: Array<{ productId?: string; quantity?: number }> =
+      Array.isArray(returnData?.items) ? returnData.items : [];
+    const isPartialReturn = requestedItems.length > 0;
+
+    // Build the concrete list of line items being returned + the refundable
+    // amount they represent. For a full return this is every line item.
+    const returnedLines: Array<{ product: any; quantity: number; amount: number }> = [];
+    if (isPartialReturn) {
+      const requestedQtyByProduct = new Map<string, number>();
+      for (const r of requestedItems) {
+        const pid = r?.productId ? String(r.productId) : '';
+        if (!pid) continue;
+        const qty = Number(r?.quantity);
+        requestedQtyByProduct.set(pid, Number.isFinite(qty) && qty > 0 ? qty : NaN);
+      }
+      for (const item of order.items as any[]) {
+        const pid = item.product?.toString();
+        if (!pid || !requestedQtyByProduct.has(pid)) continue;
+        const requestedQty = requestedQtyByProduct.get(pid)!;
+        // Missing/invalid quantity means "all of this line".
+        const qty = Number.isFinite(requestedQty)
+          ? Math.min(requestedQty, item.quantity)
+          : item.quantity;
+        if (qty <= 0) continue;
+        const unitPrice = Number(item.price) || 0;
+        returnedLines.push({
+          product: item.product,
+          quantity: qty,
+          amount: Number((unitPrice * qty).toFixed(2)),
+        });
+      }
+      if (returnedLines.length === 0) {
+        throw new BadRequestException('None of the requested items belong to this order.');
+      }
+    } else {
+      for (const item of order.items as any[]) {
+        returnedLines.push({
+          product: item.product,
+          quantity: item.quantity,
+          amount: Number(((Number(item.price) || 0) * item.quantity).toFixed(2)),
+        });
+      }
+    }
+
+    // Total being returned. Cap the refund at this amount for partial returns so
+    // a partial return never refunds (or restocks) more than the selected items.
+    const returnedAmount = Number(
+      returnedLines.reduce((sum, l) => sum + l.amount, 0).toFixed(2),
+    );
+    const isFullReturn =
+      !isPartialReturn ||
+      returnedLines.length === (order.items as any[]).length &&
+        (order.items as any[]).every((item: any) => {
+          const line = returnedLines.find((l) => l.product?.toString() === item.product?.toString());
+          return line && line.quantity >= item.quantity;
+        });
+
+    const isAutoRefundable =
+      order.paymentMethod === 'razorpay' && !!(order as any).razorpayPaymentId;
+
+    if (isAutoRefundable) {
+      // AUTO-REFUNDABLE (paid Razorpay): the money can move now. Only flip the
+      // order to the terminal 'refunded' state when the WHOLE order is being
+      // returned; a partial return refunds the selected amount but leaves the
+      // order 'delivered' so the remaining items still count as fulfilled.
+      if (isFullReturn) {
+        // Validate the terminal transition BEFORE money moves so a refund is
+        // never issued against an order we then can't transition.
+        assertOrderTransition(order.status, 'refunded');
       }
       try {
-        // Full remaining balance (undefined amount). issueRefund flips
-        // paymentStatus to 'refunded' once fully refunded.
-        await this.issueRefund(order, undefined, 'Customer return request');
+        // issueRefund respects refundedAmount and flips paymentStatus to
+        // 'refunded' once cumulatively fully refunded.
+        await this.issueRefund(
+          order,
+          isFullReturn ? undefined : returnedAmount,
+          'Customer return request',
+        );
       } catch (refundError: any) {
         this.logger.warn(`Failed to process refund for return on order ${order._id}: ${refundError.message}`);
       }
-    } else if (order.paymentMethod === 'paypal' || order.paymentMethod === 'cash_on_delivery') {
-      // Non-Razorpay payments require manual admin refund processing.
-      this.logger.log(`Return for order ${order._id} (${order.paymentMethod}): awaiting manual admin refund.`);
-    }
 
-    // Replenish product inventory for all returned items
-    try {
-      await Promise.all(
-        order.items.map((item: any) =>
-          this.productModel.updateOne(
-            { _id: item.product },
-            { $inc: { inventory: item.quantity } },
+      // Restock ONLY the returned line items.
+      try {
+        await Promise.all(
+          returnedLines.map((l) =>
+            this.productModel.updateOne(
+              { _id: l.product },
+              { $inc: { inventory: l.quantity } },
+            ),
           ),
-        ),
+        );
+      } catch (inventoryError: any) {
+        this.logger.warn(`Failed to replenish inventory on return for order ${order._id}: ${inventoryError.message}`);
+      }
+
+      if (isFullReturn) {
+        order.status = 'refunded';
+        order.returnStatus = 'approved';
+      } else {
+        // Partial return on a still-fulfilled order: record the return request
+        // for audit but keep the order 'delivered'.
+        order.returnStatus = 'requested';
+      }
+      order.returnRequestedAt = new Date();
+      await order.save();
+
+      this.notifyCustomerRefund(order._id, returnedAmount, 'Customer return request');
+    } else {
+      // NON-AUTO-REFUNDABLE (COD / PayPal, or a Razorpay order with no captured
+      // payment id): NO money has moved and none can move automatically. Do NOT
+      // jump to the terminal 'refunded' status — that would irreversibly strip
+      // the order from the seller's earnings before any refund is actually paid.
+      // Instead record the return request and leave the order 'delivered' +
+      // paymentStatus untouched so an admin must approve and run the refund
+      // (which flips status/earnings only once money truly moves). Inventory is
+      // also NOT restocked here — the goods haven't been confirmed returned yet.
+      order.returnStatus = 'requested';
+      order.returnRequestedAt = new Date();
+      await order.save();
+
+      this.logger.log(
+        `Return requested for order ${order._id} (${order.paymentMethod}): awaiting admin approval + manual refund.`,
       );
-    } catch (inventoryError: any) {
-      this.logger.warn(`Failed to replenish inventory on return for order ${order._id}: ${inventoryError.message}`);
     }
-
-    // Update order status. For non-Razorpay payments, paymentStatus stays
-    // 'pending' until an admin manually processes the refund (issueRefund only
-    // flips it for paid Razorpay orders).
-    // assertOrderTransition already called above — skip duplicate call.
-    order.status = 'refunded';
-    await order.save();
-
-    // Confirm the return/refund to the customer. For non-Razorpay payments the
-    // money moves once an admin processes it, but the return itself is accepted.
-    this.notifyCustomerRefund(order._id, order.total, 'Customer return request');
 
     return {
       success: true,
-      message: 'Return request submitted successfully',
+      message: order.returnStatus === 'approved'
+        ? 'Return processed and refund issued.'
+        : 'Return request submitted successfully. It will be reviewed by our team.',
       order: this.convertOrderCurrency(order),
     };
   }
@@ -1476,7 +1581,7 @@ export class OrdersService {
 
     // Authorization check: admin can access any order; owning customer can access
     // their own order; sellers can access orders containing their line items (SO-4).
-    if (userRole !== 'admin') {
+    if (!this.isAdminRole(userRole)) {
       if (userRole === 'seller') {
         const sellerProducts = await this.productModel.find({ seller: userId }).select('_id').limit(10000).lean();
         const sellerProductIds = new Set(sellerProducts.map((p: any) => p._id.toString()));
@@ -1555,23 +1660,27 @@ export class OrdersService {
     }
 
     // Authorization check
-    if (userRole !== 'admin' && userRole !== 'seller') {
+    if (!this.isAdminRole(userRole) && userRole !== 'seller') {
       const customerId = this.extractCustomerId(order.customer);
-      
+
       if (customerId !== userId) {
         throw new BadRequestException('Not authorized');
       }
     }
 
-    // For sellers, verify they own products in this order
+    // For sellers, verify they own products in this order, and remember which
+    // line items are theirs so we can strip the rest from the invoice below.
+    let sellerInvoiceProductIds: Set<string> | null = null;
     if (userRole === 'seller') {
       const products = await this.productModel.find({ seller: userId }).select('_id').lean();
       const productIds = products.map((p: any) => p._id.toString());
+      sellerInvoiceProductIds = new Set(productIds);
       const orderHasSellerProducts = (order.items as any[]).some((item: any) => {
         const itemProductId = typeof item.product === 'object' && item.product !== null
           ? item.product._id?.toString()
           : item.product?.toString();
-        return productIds.includes(itemProductId);
+        const sellerId = item.seller?.toString();
+        return productIds.includes(itemProductId) || (sellerId && sellerId === userId);
       });
 
       if (!orderHasSellerProducts) {
@@ -1582,6 +1691,40 @@ export class OrdersService {
     // Convert currency first
     const convertedOrder = this.convertOrderCurrency(order);
 
+    // For a seller, a multi-seller invoice must NOT leak other sellers' line
+    // items, prices, the whole-order total, or the customer's phone number.
+    // Strip items to the seller's own lines (mirrors findOne's productIdSet
+    // filtering) and recompute subtotal/total from those lines only. Tax,
+    // shipping, and order-level discount are platform/order-wide and can't be
+    // cleanly attributed to one seller, so they are zeroed on the seller copy
+    // and the total is just the seller's own item subtotal.
+    let invoiceItems = convertedOrder.items;
+    let invoiceSubtotal = convertedOrder.subtotal;
+    let invoiceTax = convertedOrder.tax;
+    let invoiceShipping = convertedOrder.shipping;
+    let invoiceDiscount = convertedOrder.discount;
+    let invoiceTotal = convertedOrder.total;
+    if (userRole === 'seller' && sellerInvoiceProductIds && Array.isArray(convertedOrder.items)) {
+      invoiceItems = (convertedOrder.items as any[]).filter((item: any) => {
+        const pid = item.seller?.toString()
+          ?? item.product?._id?.toString()
+          ?? item.product?.toString();
+        return pid && sellerInvoiceProductIds!.has(pid);
+      });
+      invoiceSubtotal = Number(
+        (invoiceItems as any[]).reduce(
+          (sum: number, it: any) => sum + (Number(it.price) || 0) * (Number(it.quantity) || 0),
+          0,
+        ).toFixed(2),
+      );
+      invoiceTax = 0;
+      invoiceShipping = 0;
+      invoiceDiscount = 0;
+      invoiceTotal = invoiceSubtotal;
+    }
+
+    const isSeller = userRole === 'seller';
+
     // Generate invoice data
     const invoice = {
       invoiceNumber: `INV-${convertedOrder.orderNumber}`,
@@ -1590,15 +1733,18 @@ export class OrdersService {
       customer: {
         name: typeof convertedOrder.customer === 'object' ? (convertedOrder.customer as any).name : 'N/A',
         email: typeof convertedOrder.customer === 'object' ? (convertedOrder.customer as any).email : 'N/A',
-        phone: typeof convertedOrder.customer === 'object' ? (convertedOrder.customer as any).phone : 'N/A',
+        // Don't expose the customer's phone number to sellers.
+        phone: isSeller
+          ? 'N/A'
+          : (typeof convertedOrder.customer === 'object' ? (convertedOrder.customer as any).phone : 'N/A'),
       },
       shippingAddress: convertedOrder.shippingAddress,
-      items: convertedOrder.items,
-      subtotal: convertedOrder.subtotal,
-      tax: convertedOrder.tax,
-      shipping: convertedOrder.shipping,
-      discount: convertedOrder.discount,
-      total: convertedOrder.total,
+      items: invoiceItems,
+      subtotal: invoiceSubtotal,
+      tax: invoiceTax,
+      shipping: invoiceShipping,
+      discount: invoiceDiscount,
+      total: invoiceTotal,
       paymentMethod: convertedOrder.paymentMethod,
       paymentStatus: convertedOrder.paymentStatus,
       status: convertedOrder.status,
@@ -1635,7 +1781,7 @@ export class OrdersService {
     }
 
     // Authorization check
-    if (userRole !== 'admin' && userRole !== 'seller') {
+    if (!this.isAdminRole(userRole) && userRole !== 'seller') {
       const customerId = this.extractCustomerId(order.customer);
 
       if (customerId !== userId) {

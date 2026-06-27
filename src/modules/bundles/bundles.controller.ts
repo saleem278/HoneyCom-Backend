@@ -23,6 +23,7 @@ import { BundlesService } from './bundles.service';
 import { CreateBundleDto } from './dto/create-bundle.dto';
 import { UpdateBundleDto } from './dto/update-bundle.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import type { AuthedRequest } from '../../common/types/request.types';
@@ -33,15 +34,17 @@ export class BundlesController {
   constructor(private readonly bundlesService: BundlesService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List bundles (public; admin sees inactive too)' })
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'List bundles (public active; seller sees own incl. inactive; admin sees all)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'seller', required: false, type: String })
-  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Admin only' })
+  @ApiQuery({ name: 'isActive', required: false, type: Boolean, description: 'Seller/admin only' })
   @ApiResponse({ status: 200, description: 'Paginated bundle list' })
   async findAll(@Query() query: any, @Request() req: any) {
     const userRole: string = req?.user?.role;
-    return this.bundlesService.findAll(query, userRole);
+    const userId: string | undefined = req?.user?.id;
+    return this.bundlesService.findAll(query, userRole, userId);
   }
 
   @Get('by-product/:productId')
@@ -52,10 +55,11 @@ export class BundlesController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a single bundle with populated products' })
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiOperation({ summary: 'Get a single bundle (inactive visible only to admin/owning seller)' })
   @ApiResponse({ status: 200, description: 'Bundle details' })
-  async findOne(@Param('id') id: string) {
-    return this.bundlesService.findOne(id);
+  async findOne(@Param('id') id: string, @Request() req: any) {
+    return this.bundlesService.findOne(id, req?.user?.role, req?.user?.id);
   }
 
   @Post()

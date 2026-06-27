@@ -60,22 +60,37 @@ export class BundlesService {
     }
   }
 
-  async findAll(query: any, userRole?: string) {
+  async findAll(query: any, userRole?: string, userId?: string) {
     const page = Math.max(1, parseInt(query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 12));
     const skip = (page - 1) * limit;
 
     const filter: any = {};
 
-    // Public sees only active bundles; admin sees all unless filtered
-    if (userRole !== 'admin') {
+    if (userRole === 'seller') {
+      // A seller's bundle list is scoped to their OWN bundles only — never other
+      // sellers' — and must include their own inactive bundles so they can manage
+      // them. Force the seller filter; ignore any client-supplied ?seller.
+      if (userId) {
+        filter.seller = new Types.ObjectId(userId);
+      }
+      if (query.isActive !== undefined) {
+        filter.isActive = query.isActive === 'true' || query.isActive === true;
+      }
+    } else if (userRole === 'admin') {
+      // Admin sees all bundles unless explicitly filtered by status/seller.
+      if (query.isActive !== undefined) {
+        filter.isActive = query.isActive === 'true' || query.isActive === true;
+      }
+      if (query.seller && String(query.seller).match(/^[0-9a-fA-F]{24}$/)) {
+        filter.seller = query.seller;
+      }
+    } else {
+      // Public/customers see only active bundles.
       filter.isActive = true;
-    } else if (query.isActive !== undefined) {
-      filter.isActive = query.isActive === 'true' || query.isActive === true;
-    }
-
-    if (query.seller && String(query.seller).match(/^[0-9a-fA-F]{24}$/)) {
-      filter.seller = query.seller;
+      if (query.seller && String(query.seller).match(/^[0-9a-fA-F]{24}$/)) {
+        filter.seller = query.seller;
+      }
     }
 
     const [bundles, total] = await Promise.all([
@@ -102,9 +117,9 @@ export class BundlesService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, userRole?: string, userId?: string) {
     const bundle = await this.bundleModel
-      .findOne({ _id: id, isActive: true })
+      .findOne({ _id: id })
       .populate({
         path: 'products',
         select: 'name price images rating status',
@@ -114,6 +129,16 @@ export class BundlesService {
       .lean();
 
     if (!bundle) throw new NotFoundException('Bundle not found');
+
+    // Inactive bundles are visible only to an admin or the owning seller.
+    if (!(bundle as any).isActive) {
+      const sellerId =
+        (bundle as any).seller && ((bundle as any).seller._id ?? (bundle as any).seller).toString();
+      const isOwner = userRole === 'seller' && userId && sellerId === userId.toString();
+      if (userRole !== 'admin' && !isOwner) {
+        throw new NotFoundException('Bundle not found');
+      }
+    }
 
     return { success: true, bundle };
   }

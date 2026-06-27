@@ -41,13 +41,20 @@ export class ProductsService {
 
   /** _ids of sellers whose account is approved (admins/superadmins are always
    *  allowed to sell). Used to gate public product/store listings so a
-   *  pending/rejected seller's catalogue never reaches the storefront. */
+   *  pending/rejected seller's catalogue never reaches the storefront.
+   *  A seller whose account is suspended or deactivated is also excluded so
+   *  their catalogue disappears from the storefront for as long as the account
+   *  is suspended/inactive (restored automatically on reactivation). */
   private async getApprovedSellerIds(): Promise<Types.ObjectId[]> {
     const sellers = await this.userModel
       .find({
         $or: [
           { role: { $in: ['admin', 'superadmin'] } },
-          { role: 'seller', 'sellerInfo.approvalStatus': 'approved' },
+          {
+            role: 'seller',
+            'sellerInfo.approvalStatus': 'approved',
+            status: { $nin: ['suspended', 'inactive'] },
+          },
         ],
       })
       .select('_id')

@@ -62,6 +62,16 @@ export interface IOrder extends Document {
   loyaltyPointsRedeemed?: number;
   total: number;
   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+  /**
+   * Return-request lifecycle, independent of the fulfilment `status`. A customer
+   * return on a non-auto-refundable order (COD/PayPal) sets this to
+   * 'requested' while the order stays 'delivered' — money and the terminal
+   * 'refunded' status are only finalized once an admin processes the refund.
+   * Undefined when no return has been requested.
+   */
+  returnStatus?: 'requested' | 'approved' | 'rejected';
+  /** Timestamp of the most recent return request, for admin triage. */
+  returnRequestedAt?: Date;
   trackingNumber?: string;
   carrier?: string;
   estimatedDelivery?: Date;
@@ -227,6 +237,13 @@ const OrderSchema: Schema = new Schema(
       type: String,
       enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'],
       default: 'pending',
+    },
+    returnStatus: {
+      type: String,
+      enum: ['requested', 'approved', 'rejected'],
+    },
+    returnRequestedAt: {
+      type: Date,
     },
     trackingNumber: {
       type: String,
