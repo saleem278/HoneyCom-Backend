@@ -780,6 +780,13 @@ export class AdminService {
 
     // If seller, get product count and store info (SS-8)
     let storeInfo: { storeId: unknown; storeSlug: string; storeStatus: string } | null = null;
+    // The `orders`/`activity` above are this user's *purchases as a customer*
+    // (customer: userId). For a seller those cards are NOT their store GMV, so
+    // compute real sales metrics from orders that contain this seller's items
+    // and return them in a distinct `sellerMetrics` field.
+    let sellerMetrics:
+      | { totalSales: number; gmv: number; lastSaleDate: Date | null }
+      | null = null;
     if (user.role === 'seller') {
       const productCount = await this.productModel.countDocuments({ seller: userId });
       (activity as any).totalProducts = productCount;
@@ -791,6 +798,43 @@ export class AdminService {
           storeStatus: store.status,
         };
       }
+
+      // Seller sales metrics: orders that contain a line item this seller owns.
+      const sellerObjectId = new mongoose.Types.ObjectId(userId);
+      const [salesCountAgg, lastSale] = await Promise.all([
+        // GMV = sum of this seller's line-item value across DELIVERED orders;
+        // totalSales = count of distinct orders containing this seller's items.
+        this.orderModel.aggregate([
+          { $match: { 'items.seller': sellerObjectId } },
+          {
+            $facet: {
+              orderCount: [{ $count: 'count' }],
+              gmv: [
+                { $match: { status: 'delivered' } },
+                { $unwind: '$items' },
+                { $match: { 'items.seller': sellerObjectId } },
+                {
+                  $group: {
+                    _id: null,
+                    gmv: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+                  },
+                },
+              ],
+            },
+          },
+        ]),
+        this.orderModel
+          .findOne({ 'items.seller': sellerObjectId })
+          .sort({ createdAt: -1 })
+          .select('createdAt')
+          .lean(),
+      ]);
+      const facet = salesCountAgg[0] ?? {};
+      sellerMetrics = {
+        totalSales: facet.orderCount?.[0]?.count ?? 0,
+        gmv: facet.gmv?.[0]?.gmv ?? 0,
+        lastSaleDate: (lastSale as any)?.createdAt ?? null,
+      };
     }
 
     return {
@@ -819,6 +863,9 @@ export class AdminService {
       orders,
       activity,
       storeInfo,
+      // Real store sales for sellers (null for non-sellers). Distinct from
+      // `activity`, which reflects this user's purchases as a customer.
+      sellerMetrics,
     };
   }
 

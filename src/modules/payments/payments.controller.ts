@@ -7,17 +7,20 @@ import {
   RawBodyRequest,
   Req,
   Res,
+  Request,
   Inject,
   forwardRef,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
-import type { Request, Response } from 'express';
+import type { Request as ExpressRequest, Response } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrdersService } from '../orders/orders.service';
+import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('Payments')
 @Controller('payments')
@@ -33,6 +36,16 @@ export class PaymentsController {
   /**
    * Create a Razorpay order. The frontend passes the returned `orderId`
    * and `keyId` to the Razorpay Checkout modal.
+   *
+   * SERVER-AUTHORITATIVE: the Razorpay amount is derived from the persisted
+   * Order.total (looked up by the internal `orderId`), never from a
+   * client-supplied amount. This guarantees the gateway charges exactly what
+   * the server computed for the order — closing the under/over-charge gap where
+   * the client could send any cart total. After creating the gateway order we
+   * stamp `razorpayOrderId` back onto the Order so the webhook can match it.
+   *
+   * A legacy `amount`-only call is still accepted (mobile / older clients) but
+   * is decoupled from any order; web checkout must pass `orderId`.
    */
   @Post('create-order')
   @UseGuards(JwtAuthGuard)
@@ -41,7 +54,26 @@ export class PaymentsController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Create Razorpay order' })
   @ApiResponse({ status: 201, description: 'Razorpay order created' })
-  async createOrder(@Body() body: { amount: number; currency?: string }) {
+  async createOrder(
+    @Request() req: AuthedRequest,
+    @Body() body: { orderId?: string; amount?: number; currency?: string },
+  ) {
+    if (body.orderId) {
+      // Server-authoritative path: derive the amount + currency from the
+      // persisted order, create the gateway order, then link it back.
+      const { amount, currency } = await this.ordersService.getRazorpayAmountForOrder(
+        body.orderId,
+        req.user.id,
+      );
+      const result = await this.paymentsService.createOrder(amount, currency);
+      await this.ordersService.attachRazorpayOrderId(body.orderId, req.user.id, result.orderId);
+      return result;
+    }
+
+    // Legacy amount-only path (kept for backward compatibility).
+    if (typeof body.amount !== 'number') {
+      throw new BadRequestException('Either orderId or amount is required');
+    }
     return this.paymentsService.createOrder(body.amount, body.currency);
   }
 
@@ -84,7 +116,7 @@ export class PaymentsController {
   @ApiOperation({ summary: 'Handle Razorpay webhook events (public endpoint)' })
   @ApiResponse({ status: 200, description: 'Webhook processed' })
   async handleWebhook(
-    @Req() req: RawBodyRequest<Request>,
+    @Req() req: RawBodyRequest<ExpressRequest>,
     @Res({ passthrough: false }) res: Response,
     @Headers('x-razorpay-signature') signature: string,
   ) {

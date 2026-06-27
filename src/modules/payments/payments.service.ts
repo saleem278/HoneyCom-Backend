@@ -142,6 +142,33 @@ export class PaymentsService {
         if (payment.status !== 'captured' && payment.status !== 'authorized') {
           throw new BadRequestException(`Payment not completed. Status: ${payment.status}`);
         }
+
+        // MONEY GUARD: assert the gateway charged exactly what the server
+        // recorded for the linked order. Without this a tampered client could
+        // pay a smaller Razorpay order and still get the order marked paid.
+        // We compare against the persisted Order.total (in paise) for the order
+        // linked to this razorpayOrderId. If no order is linked yet we skip
+        // (post-payment / mobile flow stamps the linkage afterwards and the
+        // order-create path verifies the signature there).
+        if (this.ordersService?.getExpectedPaymentAmount) {
+          const expected = await this.ordersService.getExpectedPaymentAmount(razorpayOrderId);
+          if (expected) {
+            if (Number(payment.amount) !== expected.amountInSmallestUnit) {
+              throw new BadRequestException(
+                `Payment amount mismatch: charged ${payment.amount}, expected ${expected.amountInSmallestUnit}`,
+              );
+            }
+            if (
+              payment.currency &&
+              String(payment.currency).toUpperCase() !== expected.currency
+            ) {
+              throw new BadRequestException(
+                `Payment currency mismatch: charged ${payment.currency}, expected ${expected.currency}`,
+              );
+            }
+          }
+        }
+
         return {
           success: true,
           message: 'Payment confirmed',
@@ -151,6 +178,11 @@ export class PaymentsService {
           currency: payment.currency,
         };
       } catch (error: any) {
+        // Surface our own validation errors (status / amount / currency
+        // mismatch) verbatim rather than re-wrapping them as a generic failure.
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
         const msg = error?.error?.description || error?.message || JSON.stringify(error);
         throw new BadRequestException(`Payment confirmation failed: ${msg}`);
       }

@@ -6,6 +6,7 @@ import {
   Param,
   Body,
   Query,
+  Headers,
   UseGuards,
   Request,
   Res,
@@ -40,10 +41,17 @@ export class OrdersController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Create new order' })
   @ApiResponse({ status: 201, description: 'Order created successfully' })
-  async create(@Request() req: AuthedRequest, @Body() orderData: CreateOrderDto, @Currency() currency: string) {
+  async create(
+    @Request() req: AuthedRequest,
+    @Body() orderData: CreateOrderDto,
+    @Currency() currency: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
     // Override currency from body with header currency (header takes priority)
     orderData.currency = currency;
-    return this.ordersService.create(req.user.id, orderData);
+    // Honor the client's Idempotency-Key so a network retry returns the
+    // already-created order instead of creating a duplicate.
+    return this.ordersService.create(req.user.id, orderData, idempotencyKey);
   }
 
   @Get()

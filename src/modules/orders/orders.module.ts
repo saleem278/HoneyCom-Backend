@@ -12,6 +12,7 @@ import { UserSchema } from '../../models/User.model';
 import { FlashSaleSchema } from '../../models/FlashSale.model';
 import { DeliverySlotSchema } from '../../models/DeliverySlot.model';
 import { LoyaltyTransactionSchema } from '../../models/LoyaltyTransaction.model';
+import { IdempotencyKeySchema } from '../../models/IdempotencyKey.model';
 import { AuthModule } from '../auth/auth.module';
 import { EmailService } from '../../services/email.service';
 import { PdfService } from '../../services/pdf.service';
@@ -31,6 +32,7 @@ import { PaymentsModule } from '../payments/payments.module';
       { name: 'FlashSale', schema: FlashSaleSchema },
       { name: 'DeliverySlot', schema: DeliverySlotSchema },
       { name: 'LoyaltyTransaction', schema: LoyaltyTransactionSchema },
+      { name: 'IdempotencyKey', schema: IdempotencyKeySchema },
     ]),
     AuthModule,
     forwardRef(() => PaymentsModule),

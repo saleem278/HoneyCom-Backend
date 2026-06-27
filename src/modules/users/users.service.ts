@@ -22,7 +22,13 @@ export class UsersService {
   ) {}
 
   async getProfile(userId: string) {
-    const user = await this.userModel.findById(userId);
+    // SECURITY: never leak internal security tokens (reset/verification tokens,
+    // phone OTP and its lockout fields) to the client.
+    const user = await this.userModel
+      .findById(userId)
+      .select(
+        '-resetPasswordToken -resetPasswordExpire -emailVerificationToken -emailVerificationExpire -phoneLoginOtp -phoneLoginOtpExpire -phoneLoginOtpAttempts -phoneLoginOtpLockedUntil',
+      );
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -73,7 +79,11 @@ export class UsersService {
   }
 
   async getAddresses(userId: string) {
-    const addresses = await this.addressModel.find({ user: userId });
+    // Sort deterministically so the default address is always surfaced first
+    // and ordering is stable across requests.
+    const addresses = await this.addressModel
+      .find({ user: userId })
+      .sort({ isDefault: -1, updatedAt: -1 });
     // Map backend fields to frontend format
     const mappedAddresses = addresses.map((addr: any) => ({
       _id: addr._id,
@@ -107,20 +117,50 @@ export class UsersService {
       lastName = addressData.lastName || '';
     }
 
-    const address = await this.addressModel.create({
-      user: userId,
-      type: addressData.type || 'shipping',
-      firstName,
-      lastName,
-      addressLine1: addressData.address || addressData.addressLine1 || '',
-      addressLine2: addressData.addressLine2 || '',
-      city: addressData.city || '',
-      state: addressData.state || '',
-      zipCode: addressData.postalCode || addressData.zipCode || '',
-      country: addressData.country || 'United States',
-      phone: addressData.phone || '',
-      isDefault: addressData.isDefault || false,
-    });
+    const makeDefault = !!addressData.isDefault;
+
+    // Enforce a single default per user: when this address is marked default,
+    // unset isDefault on all of the user's other addresses. Wrap in a
+    // transaction so there is never a window with two (or zero) defaults.
+    const session = await mongoose.startSession();
+    let address: any = null;
+    try {
+      await session.withTransaction(async () => {
+        if (makeDefault) {
+          await this.addressModel.updateMany(
+            { user: userId },
+            { isDefault: false },
+            { session },
+          );
+        }
+
+        const [created] = await this.addressModel.create(
+          [
+            {
+              user: userId,
+              type: addressData.type || 'shipping',
+              firstName,
+              lastName,
+              addressLine1: addressData.address || addressData.addressLine1 || '',
+              addressLine2: addressData.addressLine2 || '',
+              city: addressData.city || '',
+              state: addressData.state || '',
+              zipCode: addressData.postalCode || addressData.zipCode || '',
+              country: addressData.country || 'United States',
+              phone: addressData.phone || '',
+              isDefault: makeDefault,
+            },
+          ],
+          { session },
+        );
+        address = created;
+      });
+    } finally {
+      session.endSession();
+    }
+    if (!address) {
+      throw new BadRequestException('Failed to create address');
+    }
     return {
       success: true,
       address: {
@@ -162,11 +202,30 @@ export class UsersService {
     if (updateData.isDefault !== undefined) backendData.isDefault = updateData.isDefault;
     if (updateData.type) backendData.type = updateData.type;
 
-    const address = await this.addressModel.findOneAndUpdate(
-      { _id: addressId, user: userId },
-      backendData,
-      { new: true, runValidators: true }
-    );
+    // Enforce a single default per user: when this address is being set as
+    // default, unset isDefault on all the user's other addresses. Wrap in a
+    // transaction so there is never a window with two defaults.
+    const session = await mongoose.startSession();
+    let address: any = null;
+    try {
+      await session.withTransaction(async () => {
+        if (backendData.isDefault === true) {
+          await this.addressModel.updateMany(
+            { user: userId, _id: { $ne: addressId } },
+            { isDefault: false },
+            { session },
+          );
+        }
+
+        address = await this.addressModel.findOneAndUpdate(
+          { _id: addressId, user: userId },
+          backendData,
+          { new: true, runValidators: true, session },
+        );
+      });
+    } finally {
+      session.endSession();
+    }
     if (!address) {
       throw new NotFoundException('Address not found');
     }
@@ -188,11 +247,34 @@ export class UsersService {
   }
 
   async deleteAddress(userId: string, addressId: string) {
-    const address = await this.addressModel.findOneAndDelete({
-      _id: addressId,
-      user: userId,
-    });
-    if (!address) {
+    // Wrap in a transaction so that, when the deleted address was the default,
+    // we promote another of the user's addresses to default atomically and
+    // never end up with zero defaults while others exist.
+    const session = await mongoose.startSession();
+    let deleted: any = null;
+    try {
+      await session.withTransaction(async () => {
+        deleted = await this.addressModel.findOneAndDelete(
+          { _id: addressId, user: userId },
+          { session },
+        );
+
+        if (deleted && deleted.isDefault) {
+          // Promote the most recently updated remaining address to default.
+          const next = await this.addressModel
+            .findOne({ user: userId })
+            .sort({ updatedAt: -1 })
+            .session(session);
+          if (next) {
+            next.isDefault = true;
+            await next.save({ session });
+          }
+        }
+      });
+    } finally {
+      session.endSession();
+    }
+    if (!deleted) {
       throw new NotFoundException('Address not found');
     }
     return {

@@ -350,6 +350,18 @@ export class DisputesService {
     };
   }
 
+  // Allowed dispute status transitions. Out-of-order moves (e.g. closed → open,
+  // or jumping straight to closed without resolving) are rejected so the UI
+  // can't drive the dispute into an inconsistent state. Note: 'refund' money
+  // movement must go through resolve(); this map only governs status-only edits.
+  private static readonly ALLOWED_DISPUTE_TRANSITIONS: Record<string, string[]> = {
+    open: ['in_review', 'rejected', 'resolved'],
+    in_review: ['resolved', 'rejected', 'closed'],
+    resolved: ['closed'],
+    rejected: [],
+    closed: [],
+  };
+
   async updateStatus(id: string, userId: string, userRole: string, status: string) {
     const dispute = await this.disputeModel.findById(id);
     if (!dispute) {
@@ -359,6 +371,18 @@ export class DisputesService {
     // Only admin can change status
     if (userRole !== 'admin') {
       throw new ForbiddenException('Only admins can update dispute status');
+    }
+
+    const current = dispute.status;
+    // No-op updates to the same status are allowed; otherwise enforce the
+    // state machine so transitions can't be applied out of order.
+    if (status !== current) {
+      const allowed = DisputesService.ALLOWED_DISPUTE_TRANSITIONS[current] ?? [];
+      if (!allowed.includes(status)) {
+        throw new BadRequestException(
+          `Cannot change dispute status from "${current}" to "${status}".`,
+        );
+      }
     }
 
     dispute.status = status as any;

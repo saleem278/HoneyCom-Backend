@@ -12,6 +12,7 @@ import { IUser } from '../../models/User.model';
 import { IFlashSale } from '../../models/FlashSale.model';
 import { IDeliverySlot } from '../../models/DeliverySlot.model';
 import { ILoyaltyTransaction } from '../../models/LoyaltyTransaction.model';
+import { IIdempotencyKey } from '../../models/IdempotencyKey.model';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
@@ -33,6 +34,7 @@ export class OrdersService {
     @InjectModel('FlashSale') private flashSaleModel: Model<IFlashSale>,
     @InjectModel('DeliverySlot') private deliverySlotModel: Model<IDeliverySlot>,
     @InjectModel('LoyaltyTransaction') private loyaltyTxModel: Model<ILoyaltyTransaction>,
+    @InjectModel('IdempotencyKey') private idempotencyKeyModel: Model<IIdempotencyKey>,
     @InjectConnection() private connection: Connection,
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
@@ -214,14 +216,73 @@ export class OrdersService {
     return orderObj;
   }
 
-  async create(userId: string, orderData: any) {
-    // Wrap the entire order creation in a MongoDB session so inventory
-    // decrements, coupon redemption, address creation, and order insert
-    // are all atomic. If any step fails the session aborts and all writes
-    // are rolled back — no stranded reservations or orphaned coupons.
-    // Note: transactions require a replica set (or Atlas). On standalone
-    // MongoDB (local dev) the session is opened but transactions aren't
-    // enforced — the rollback logic below handles that case manually.
+  async create(userId: string, orderData: any, idempotencyKey?: string) {
+    // SERVER-SIDE IDEMPOTENCY: when the client supplies an Idempotency-Key
+    // header, a network retry must NOT create a second order. We reserve the
+    // key up-front (unique index on key+user+scope); if the key already exists
+    // we return the order it produced the first time. The reservation row is
+    // stamped with the orderId once creation succeeds, and deleted if creation
+    // fails so the client can retry with the same key.
+    const key = (idempotencyKey || '').trim();
+    if (key) {
+      let reservation: IIdempotencyKey | null = null;
+      try {
+        reservation = await this.idempotencyKeyModel.create({
+          key,
+          user: userId,
+          scope: 'order-create',
+        });
+      } catch (err: any) {
+        if (err?.code === 11000) {
+          // Key already used — return the previously-created order. (If the
+          // first request is still in flight / failed without stamping an
+          // orderId, surface a clear conflict instead of a silent duplicate.)
+          const existing = await this.idempotencyKeyModel.findOne({
+            key,
+            user: userId,
+            scope: 'order-create',
+          });
+          if (existing?.orderId) {
+            const prior = await this.orderModel.findById(existing.orderId);
+            if (prior) {
+              return { success: true, order: this.convertOrderCurrency(prior) };
+            }
+          }
+          throw new BadRequestException(
+            'A request with this Idempotency-Key is already being processed. Please retry shortly.',
+          );
+        }
+        throw err;
+      }
+
+      try {
+        const result = await this._create(userId, orderData);
+        // Stamp the created order onto the reservation so retries resolve to it.
+        await this.idempotencyKeyModel.updateOne(
+          { _id: reservation._id },
+          { $set: { orderId: result.order._id } },
+        );
+        return result;
+      } catch (err) {
+        // Creation failed — release the key so the client can retry cleanly.
+        await this.idempotencyKeyModel.deleteOne({ _id: reservation._id }).catch(() => undefined);
+        throw err;
+      }
+    }
+
+    return this._create(userId, orderData);
+  }
+
+  /**
+   * Core order-creation wrapped in a MongoDB session so inventory decrements,
+   * coupon redemption, address creation, and order insert are all atomic. If
+   * any step fails the session aborts and all writes are rolled back — no
+   * stranded reservations or orphaned coupons.
+   * Note: transactions require a replica set (or Atlas). On standalone MongoDB
+   * (local dev) the session is opened but transactions aren't enforced — the
+   * rollback logic below handles that case manually.
+   */
+  private async _create(userId: string, orderData: any) {
     const session = await this.connection.startSession();
 
     try {
@@ -239,12 +300,23 @@ export class OrdersService {
   }
 
   private async _createWithSession(userId: string, orderData: any, session: any) {
-    // Use cart items from orderData if provided, otherwise get from cart
-    let itemsToProcess = orderData.items;
-    let cart: any = null;
+    // ALWAYS load the user's server cart — it is the source of truth for the
+    // coupon/referral codes and their discounts. The previous code only loaded
+    // the cart when the client sent no items, so a checkout that POSTed `items`
+    // (the web flow always does) silently dropped any applied coupon/referral
+    // discount: the customer saw a discounted total in the UI but was charged
+    // the full amount, and the cart was never cleared on success. Loading the
+    // cart unconditionally keeps pricing server-authoritative.
+    const cart: any = await this.cartModel
+      .findOne({ user: userId })
+      .populate('items.product')
+      .session(session);
 
+    // Use cart items from orderData if provided, otherwise fall back to the
+    // server cart. (Line items / quantities are still taken from the request
+    // when present; price/seller are always re-read from the DB below.)
+    let itemsToProcess = orderData.items;
     if (!itemsToProcess || itemsToProcess.length === 0) {
-      cart = await this.cartModel.findOne({ user: userId }).populate('items.product').session(session);
       if (!cart || cart.items.length === 0) {
         throw new BadRequestException('Cart is empty');
       }
@@ -455,9 +527,14 @@ export class OrdersService {
 
     // Branch on taxMethod: 'percentage' multiplies the subtotal; 'fixed' adds a flat charge.
     const tax = taxMethod === 'fixed' ? taxRate : subtotal * taxRate;
-    const shipping = subtotal > 0 && subtotal < freeShippingAbove ? shippingFlat : 0;
+    let shipping = subtotal > 0 && subtotal < freeShippingAbove ? shippingFlat : 0;
     let discount = 0;
     let total = 0;
+    // Delivery slot is resolved inside the try below; its extraCharge (if any)
+    // is folded into `shipping` BEFORE the total is computed so the customer is
+    // charged the fee they were shown.
+    let deliverySlotId: any = undefined;
+    let deliverySlotLabel: string | undefined = undefined;
 
     let order;
     try {
@@ -691,6 +768,20 @@ export class OrdersService {
         if (referralDiscount > 0) discount += referralDiscount;
       }
 
+      // Resolve the delivery slot (if provided) BEFORE computing the total so
+      // its extraCharge is included in what the customer is charged. The slot's
+      // fee is folded into `shipping` so it surfaces in the order's shipping
+      // line and matches the checkout summary.
+      if (orderData.deliverySlotId) {
+        const slot = await this.deliverySlotModel.findById(orderData.deliverySlotId).session(session);
+        if (slot) {
+          deliverySlotId = slot._id;
+          deliverySlotLabel = slot.label;
+          const extraCharge = Number((slot as any).extraCharge) || 0;
+          if (extraCharge > 0) shipping += extraCharge;
+        }
+      }
+
       // Pre-loyalty total. Loyalty points (if redeemed) are applied on top of
       // this so the customer actually pays less for the points they burn.
       const totalBeforeLoyalty = Math.max(0, subtotal + tax + shipping - discount);
@@ -752,17 +843,6 @@ export class OrdersService {
       const orderCount = await this.orderModel.countDocuments();
       const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
       const orderNumber = `ORD-${String(Date.now()).slice(-8)}-${String(orderCount + 1).padStart(4, '0')}-${randomSuffix}`;
-
-      // Resolve delivery slot if provided
-      let deliverySlotId: any = undefined;
-      let deliverySlotLabel: string | undefined = undefined;
-      if (orderData.deliverySlotId) {
-        const slot = await this.deliverySlotModel.findById(orderData.deliverySlotId).session(session);
-        if (slot) {
-          deliverySlotId = slot._id;
-          deliverySlotLabel = slot.label;
-        }
-      }
 
       const [createdOrder] = await this.orderModel.create([{
         orderNumber,
@@ -838,12 +918,19 @@ export class OrdersService {
 
     // Cart-clear policy:
     //  - cash_on_delivery: no async confirmation, safe to clear now.
-    //  - razorpay with razorpayOrderId: defer until the webhook fires
-    //    payment.captured so the user doesn't lose their cart if payment fails.
-    //    updatePaymentStatusByRazorpayOrderId() clears the cart on 'paid'.
+    //  - razorpay PRE-payment (web): payment isn't complete yet. Defer the
+    //    cart-clear until payment is confirmed so the user doesn't lose their
+    //    cart if payment fails. The web flow stamps razorpayOrderId AFTER order
+    //    create (via attachRazorpayOrderId) and the payment-success webhook /
+    //    post-verify clearCart handle the actual clear. We therefore defer for
+    //    ANY razorpay order that wasn't already confirmed inline (no
+    //    razorpayPaymentId in the create body), NOT just ones that arrived with
+    //    a razorpayOrderId.
+    //  - razorpay POST-payment (mobile): create body carries razorpayPaymentId
+    //    (+ verified signature) — payment is already confirmed, so clear now.
     //  - paypal: clear now until PayPal sync confirmation is wired up.
     const deferCartClear =
-      order.paymentMethod === 'razorpay' && !!orderData.razorpayOrderId;
+      order.paymentMethod === 'razorpay' && !orderData.razorpayPaymentId;
 
     // Capture referral code before cart is cleared
     const referralCodeFromCart = cart?.referralCode;
@@ -893,6 +980,110 @@ export class OrdersService {
     return {
       success: true,
       order: this.convertOrderCurrency(order),
+    };
+  }
+
+  /**
+   * Server-authoritative Razorpay amount for an order. Returns the persisted
+   * Order.total (already in the order's stored base currency) plus the order's
+   * currency, so the Razorpay order is created from the amount the server
+   * actually computed — never from a client-supplied cart total. The caller
+   * (payments create-order) must use these values verbatim.
+   *
+   * Throws if the order doesn't exist, doesn't belong to the user, or is no
+   * longer payable (already paid / cancelled / refunded).
+   */
+  async getRazorpayAmountForOrder(
+    orderId: string,
+    userId: string,
+  ): Promise<{ amount: number; currency: string; razorpayOrderId?: string }> {
+    const order = await this.orderModel.findById(orderId).lean();
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    if (this.extractCustomerId(order.customer) !== userId) {
+      throw new BadRequestException('Not authorized');
+    }
+    if (order.paymentStatus === 'paid') {
+      throw new BadRequestException('Order is already paid');
+    }
+    if (order.status === 'cancelled' || order.status === 'refunded') {
+      throw new BadRequestException('Order is no longer payable');
+    }
+    // Order.total is stored in the platform base currency; the customer is
+    // charged in the order's display currency at the FX rate captured when the
+    // order was placed. Apply exchangeRate so the gateway amount matches the
+    // displayed total (for INR/base orders exchangeRate is 1, so this is a
+    // no-op).
+    const rate = Number(order.exchangeRate) || 1;
+    const displayAmount = Number(((Number(order.total) || 0) * rate).toFixed(2));
+    return {
+      amount: displayAmount,
+      currency: order.currency || 'INR',
+      razorpayOrderId: (order as any).razorpayOrderId || undefined,
+    };
+  }
+
+  /**
+   * Persist the Razorpay gateway order id onto our Order so the payment webhook
+   * (which only knows the Razorpay order id) can later match it and flip the
+   * order to paid. Web checkout creates the Razorpay order AFTER the DB order,
+   * then calls this to stamp the linkage. Idempotent — re-stamping the same id
+   * is a no-op; a different id is rejected to avoid hijacking a paid order.
+   */
+  async attachRazorpayOrderId(
+    orderId: string,
+    userId: string,
+    razorpayOrderId: string,
+  ): Promise<{ success: boolean }> {
+    if (!razorpayOrderId) {
+      throw new BadRequestException('razorpayOrderId is required');
+    }
+    const order = await this.orderModel.findById(orderId);
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    if (this.extractCustomerId(order.customer) !== userId) {
+      throw new BadRequestException('Not authorized');
+    }
+    // Once paid we must never re-point the linkage (would let a second gateway
+    // order hijack a settled order). While still unpaid, re-linking to a fresh
+    // gateway order is allowed — e.g. the customer retried payment after the
+    // first attempt failed/was abandoned, producing a new Razorpay order id.
+    if (order.paymentStatus === 'paid') {
+      if (order.razorpayOrderId && order.razorpayOrderId !== razorpayOrderId) {
+        throw new BadRequestException('Order is already paid');
+      }
+      return { success: true };
+    }
+    if (order.razorpayOrderId !== razorpayOrderId) {
+      order.razorpayOrderId = razorpayOrderId;
+      await order.save();
+    }
+    return { success: true };
+  }
+
+  /**
+   * Confirm-time amount guard. Looks up the order linked to the given Razorpay
+   * order id and returns the expected amount (in the smallest currency unit,
+   * i.e. paise) and currency so the payments service can assert the gateway
+   * charged exactly what we recorded. Returns null when no order is linked yet
+   * (e.g. mobile post-payment flow that stamps the order afterwards).
+   */
+  async getExpectedPaymentAmount(
+    razorpayOrderId: string,
+  ): Promise<{ amountInSmallestUnit: number; currency: string } | null> {
+    const order = await this.orderModel.findOne({ razorpayOrderId }).lean();
+    if (!order) return null;
+    // Match the display-currency amount the gateway order was created with
+    // (Order.total is in base currency; apply the captured FX rate). Compute
+    // the smallest-currency-unit amount the SAME way the gateway did
+    // (Math.round(displayAmount * 100)) so the equality check is exact.
+    const rate = Number(order.exchangeRate) || 1;
+    const displayAmount = Number(((Number(order.total) || 0) * rate).toFixed(2));
+    return {
+      amountInSmallestUnit: Math.round(displayAmount * 100),
+      currency: (order.currency || 'INR').toUpperCase(),
     };
   }
 

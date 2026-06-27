@@ -56,7 +56,72 @@ export class PayoutsService {
         },
       },
     ]);
-    const totalEarnings = earningsAgg[0]?.totalNetEarnings ?? 0;
+    const grossEarnings = earningsAgg[0]?.totalNetEarnings ?? 0;
+
+    // PAY-08 (partial refunds): an admin partial refund (and a full refund on a
+    // multi-item order) leaves the order status as 'delivered' and only stamps
+    // the order-level `refundedAmount`, with no per-item refundStatus. So the
+    // earnings aggregation above still counts the full sellerEarning. Subtract
+    // the seller's proportional share of each delivered order's refundedAmount
+    // so partial refunds actually reduce the withdrawable balance.
+    const refundAgg = await this.orderModel.aggregate([
+      {
+        $match: {
+          'items.product': { $in: productIds },
+          status: 'delivered',
+          refundedAmount: { $gt: 0 },
+        },
+      },
+      // Per-order: seller's net earning in this order, and the order's total
+      // earning (all sellers) so we can attribute refundedAmount proportionally.
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$_id',
+          refundedAmount: { $first: '$refundedAmount' },
+          orderTotal: { $first: '$total' },
+          sellerEarning: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $in: ['$items.product', productIds] },
+                    { $ne: ['$items.refundStatus', 'completed'] },
+                    { $ne: ['$items.returnStatus', 'completed'] },
+                  ],
+                },
+                { $ifNull: ['$items.sellerEarning', { $multiply: ['$items.price', '$items.quantity'] }] },
+                0,
+              ],
+            },
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalRefundShare: {
+            $sum: {
+              // Attribute the order's refundedAmount to this seller in proportion
+              // to their share of the order total, capped at the seller's earning
+              // so a refund never pushes the seller's contribution below zero.
+              $min: [
+                '$sellerEarning',
+                {
+                  $cond: [
+                    { $gt: ['$orderTotal', 0] },
+                    { $multiply: ['$refundedAmount', { $divide: ['$sellerEarning', '$orderTotal'] }] },
+                    0,
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      },
+    ]);
+    const totalRefundShare = refundAgg[0]?.totalRefundShare ?? 0;
+    const totalEarnings = Math.max(0, grossEarnings - totalRefundShare);
 
     const payoutAgg = await this.payoutModel.aggregate([
       { $match: { seller: sellerObjectId, status: { $in: ['pending', 'approved', 'paid'] } } },
