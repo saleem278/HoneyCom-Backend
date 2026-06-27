@@ -248,4 +248,152 @@ export const SEED_THEMES: SeedTheme[] = [
       badgeBg: '#3A2A06', badgeText: '#FCD66A',
     },
   },
+
+  // ───────────────────────── EXTRA SELECTABLE PALETTES ─────────────────────────
+  // No roleDefault — these don't change any role's default; they're extra
+  // options users/admins can pick. Diverse hues for variety.
+
+  // Sky Azure — bright blue, friendly & clean
+  {
+    name: 'Sky Azure',
+    description: 'Bright azure blue — open, friendly and trustworthy.',
+    lightTokens: {
+      accent: '#0284C7', accentSoft: '#E0F2FE', onAccent: '#FFFFFF',
+      bg: '#F5FAFE', card: '#FFFFFF', inputBg: '#EAF4FC',
+      text: '#0A1A26', sub: '#33505E', muted: '#7C97A6',
+      border: '#D6E8F4', divider: '#E6F2FA',
+      ...lightSemantic,
+      shimmer: '#E6F2FA', shimmerHighlight: '#F6FBFE',
+      badgeBg: '#E0F2FE', badgeText: '#0369A1',
+    },
+    darkTokens: {
+      accent: '#38BDF8', accentSoft: '#082F44', onAccent: '#041620',
+      bg: '#041620', card: '#0A2230', inputBg: '#0E2E40',
+      text: '#E2F2FB', sub: '#97BCCE', muted: '#5E808E',
+      border: '#143C50', divider: '#0C2A38',
+      ...darkSemantic,
+      shimmer: '#0E2E40', shimmerHighlight: '#15394D',
+      badgeBg: '#082F44', badgeText: '#9DDBF8',
+    },
+  },
+
+  // Forest Pine — deep green, grounded & natural
+  {
+    name: 'Forest Pine',
+    description: 'Deep pine green — calm, grounded and natural.',
+    lightTokens: {
+      accent: '#15803D', accentSoft: '#DCFCE7', onAccent: '#FFFFFF',
+      bg: '#F4FBF6', card: '#FFFFFF', inputBg: '#E9F6EE',
+      text: '#0A2014', sub: '#33513F', muted: '#7B9786',
+      border: '#D6ECDD', divider: '#E6F4EA',
+      ...lightSemantic,
+      shimmer: '#E6F4EA', shimmerHighlight: '#F6FCF8',
+      badgeBg: '#DCFCE7', badgeText: '#166534',
+    },
+    darkTokens: {
+      accent: '#4ADE80', accentSoft: '#06301B', onAccent: '#041A0F',
+      bg: '#041A0F', card: '#0A2818', inputBg: '#0E3520',
+      text: '#E2F6EA', sub: '#97C6AA', muted: '#5E866F',
+      border: '#15442B', divider: '#0C2E1C',
+      ...darkSemantic,
+      shimmer: '#0E3520', shimmerHighlight: '#15412A',
+      badgeBg: '#06301B', badgeText: '#9DEBBB',
+    },
+  },
+
+  // Crimson Ember — bold red, energetic & premium
+  {
+    name: 'Crimson Ember',
+    description: 'Bold crimson red — energetic, premium and attention-grabbing.',
+    lightTokens: {
+      accent: '#DC2626', accentSoft: '#FEE2E2', onAccent: '#FFFFFF',
+      bg: '#FFF7F6', card: '#FFFFFF', inputBg: '#FCECEA',
+      text: '#240B0A', sub: '#5E3433', muted: '#AD807E',
+      border: '#F6DEDC', divider: '#FBEAE8',
+      ...lightSemantic,
+      shimmer: '#FBEAE8', shimmerHighlight: '#FFF7F6',
+      badgeBg: '#FEE2E2', badgeText: '#B91C1C',
+    },
+    darkTokens: {
+      accent: '#F87171', accentSoft: '#3A1010', onAccent: '#1C0606',
+      bg: '#1C0606', card: '#2A0E0D', inputBg: '#371313',
+      text: '#FBE7E6', sub: '#D0A4A2', muted: '#936866',
+      border: '#461A18', divider: '#330F0E',
+      ...darkSemantic,
+      shimmer: '#371313', shimmerHighlight: '#431B1A',
+      badgeBg: '#3A1010', badgeText: '#FDA8A6',
+    },
+  },
+
+  // Sunset Peach — warm coral-peach, soft & inviting
+  {
+    name: 'Sunset Peach',
+    description: 'Soft coral-peach — warm, inviting and approachable.',
+    lightTokens: {
+      accent: '#F43F5E', accentSoft: '#FFE4E9', onAccent: '#FFFFFF',
+      bg: '#FFF6F8', card: '#FFFFFF', inputBg: '#FCEDF0',
+      text: '#240810', sub: '#5E3540', muted: '#AD8089',
+      border: '#F8DCE3', divider: '#FCEAEE',
+      ...lightSemantic,
+      shimmer: '#FCEAEE', shimmerHighlight: '#FFF7F9',
+      badgeBg: '#FFE4E9', badgeText: '#E11D48',
+    },
+    darkTokens: {
+      accent: '#FB7185', accentSoft: '#3A1019', onAccent: '#1C060A',
+      bg: '#1C060A', card: '#2A0E13', inputBg: '#37131A',
+      text: '#FBE6EA', sub: '#D0A0A9', muted: '#93666E',
+      border: '#461822', divider: '#330F16',
+      ...darkSemantic,
+      shimmer: '#37131A', shimmerHighlight: '#431A22',
+      badgeBg: '#3A1019', badgeText: '#FDA8B3',
+    },
+  },
+
+  // Graphite Mono — neutral slate, minimal & professional
+  {
+    name: 'Graphite Mono',
+    description: 'Neutral slate-grey — minimal, professional, distraction-free.',
+    lightTokens: {
+      accent: '#475569', accentSoft: '#E8EDF3', onAccent: '#FFFFFF',
+      bg: '#F7F8FA', card: '#FFFFFF', inputBg: '#EEF1F5',
+      text: '#0E141B', sub: '#3F4853', muted: '#828D9A',
+      border: '#E1E6ED', divider: '#EBEEF3',
+      ...lightSemantic,
+      shimmer: '#EBEEF3', shimmerHighlight: '#F7F9FB',
+      badgeBg: '#E8EDF3', badgeText: '#334155',
+    },
+    darkTokens: {
+      accent: '#94A3B8', accentSoft: '#1A222E', onAccent: '#0A0E14',
+      bg: '#0A0E14', card: '#121822', inputBg: '#18202C',
+      text: '#E8ECF2', sub: '#A2AEBD', muted: '#677281',
+      border: '#232C3A', divider: '#19212C',
+      ...darkSemantic,
+      shimmer: '#18202C', shimmerHighlight: '#212B38',
+      badgeBg: '#1A222E', badgeText: '#C0CAD8',
+    },
+  },
+
+  // Teal Lagoon — cyan-teal, fresh & modern
+  {
+    name: 'Teal Lagoon',
+    description: 'Vivid teal-cyan — fresh, modern and energising.',
+    lightTokens: {
+      accent: '#0D9488', accentSoft: '#CCFBF1', onAccent: '#FFFFFF',
+      bg: '#F3FBFA', card: '#FFFFFF', inputBg: '#E8F6F4',
+      text: '#06201D', sub: '#33544F', muted: '#7B9A95',
+      border: '#D3ECE8', divider: '#E4F4F1',
+      ...lightSemantic,
+      shimmer: '#E4F4F1', shimmerHighlight: '#F5FCFB',
+      badgeBg: '#CCFBF1', badgeText: '#0F766E',
+    },
+    darkTokens: {
+      accent: '#2DD4BF', accentSoft: '#053330', onAccent: '#041A18',
+      bg: '#041A18', card: '#0A2825', inputBg: '#0E3531',
+      text: '#E2F6F3', sub: '#97C6BF', muted: '#5E867F',
+      border: '#15443F', divider: '#0C2E2A',
+      ...darkSemantic,
+      shimmer: '#0E3531', shimmerHighlight: '#15413C',
+      badgeBg: '#053330', badgeText: '#9DEBE2',
+    },
+  },
 ];
