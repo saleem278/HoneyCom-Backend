@@ -165,24 +165,49 @@ export class LoyaltyService {
     };
   }
 
-  /** Deduct points as part of checkout (call after order is created). */
+  /**
+   * Deduct points as part of checkout.
+   *
+   * NOTE: Standalone redemption (the /loyalty/redeem endpoint) only deducts the
+   * points — it cannot atomically apply the resulting discount to an order
+   * total, so the points would be burned without ever lowering what the
+   * customer pays. The authoritative redemption path is now inside
+   * OrdersService.create (pointsToRedeem), which validates and deducts inside
+   * the order-create transaction and records loyaltyDiscount on the order.
+   * This method is therefore only safe to call with an orderId (so the deduction
+   * is tied to a real order); calling it without one is rejected.
+   */
   async redeemPoints(userId: string, pointsToRedeem: number, orderId?: string) {
-    const settings = await this.getSettings();
-    const user = await this.userModel.findById(userId).select('loyaltyPoints').lean();
-    if (!user) throw new NotFoundException('User not found');
+    if (!orderId) {
+      throw new BadRequestException(
+        'Loyalty points can only be redeemed as part of placing an order. ' +
+          'Pass pointsToRedeem when creating the order so the discount is applied to the order total.',
+      );
+    }
 
-    const balance = (user as any).loyaltyPoints ?? 0;
+    const settings = await this.getSettings();
+
     if (pointsToRedeem < settings.minRedemptionPoints)
       throw new BadRequestException(`Minimum redemption is ${settings.minRedemptionPoints} points`);
-    if (pointsToRedeem > balance)
-      throw new BadRequestException('Insufficient loyalty points');
 
     const discount = +(pointsToRedeem * settings.redemptionRate).toFixed(2);
-    const updated = await this.userModel.findByIdAndUpdate(
-      userId,
+
+    // Conditional atomic decrement — only succeeds if the balance is still
+    // >= pointsToRedeem at write time. Closes the TOCTOU window where a
+    // read-then-write could let two concurrent requests both pass a stale
+    // balance check and overdraw the account.
+    const updated = await this.userModel.findOneAndUpdate(
+      { _id: userId, loyaltyPoints: { $gte: pointsToRedeem } },
       { $inc: { loyaltyPoints: -pointsToRedeem } },
       { new: true },
     ).select('loyaltyPoints');
+
+    if (!updated) {
+      // Either the user doesn't exist or has insufficient points right now.
+      const exists = await this.userModel.exists({ _id: userId });
+      if (!exists) throw new NotFoundException('User not found');
+      throw new BadRequestException('Insufficient loyalty points');
+    }
 
     await this.loyaltyTxModel.create({
       user: userId,
@@ -216,16 +241,20 @@ export class LoyaltyService {
   }
 
   async adminDebit(userId: string, points: number, description: string) {
-    const user = await this.userModel.findById(userId).select('loyaltyPoints').lean();
-    if (!user) throw new NotFoundException('User not found');
-    if (((user as any).loyaltyPoints ?? 0) < points)
-      throw new BadRequestException('User has insufficient loyalty points');
-
-    const updated = await this.userModel.findByIdAndUpdate(
-      userId,
+    // Conditional atomic decrement — closes the TOCTOU window between the
+    // balance check and the write. Only debits if the balance is still
+    // sufficient at write time.
+    const updated = await this.userModel.findOneAndUpdate(
+      { _id: userId, loyaltyPoints: { $gte: points } },
       { $inc: { loyaltyPoints: -points } },
       { new: true },
     ).select('loyaltyPoints');
+
+    if (!updated) {
+      const exists = await this.userModel.exists({ _id: userId });
+      if (!exists) throw new NotFoundException('User not found');
+      throw new BadRequestException('User has insufficient loyalty points');
+    }
 
     await this.loyaltyTxModel.create({
       user: userId,

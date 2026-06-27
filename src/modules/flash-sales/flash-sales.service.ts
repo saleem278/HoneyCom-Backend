@@ -57,16 +57,26 @@ export class FlashSalesService {
       query.startTime = { $lte: now };
       query.endTime = { $gt: now };
     }
-    const [flashSales, total] = await Promise.all([
+    // On the public (active) listing, only populate approved products and drop
+    // any sale whose product didn't populate — a sale must never advertise an
+    // unapproved/removed product. Admin listings (active=false) keep the full
+    // population so they can still manage sales for non-approved products.
+    const productPopulate = options.active
+      ? { path: 'product', select: 'name images price category status', match: { status: 'approved' } }
+      : { path: 'product', select: 'name images price category status' };
+    let [flashSales, total] = await Promise.all([
       this.flashSaleModel
         .find(query)
-        .populate('product', 'name images price category')
+        .populate(productPopulate as any)
         .sort({ startTime: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
       this.flashSaleModel.countDocuments(query),
     ]);
+    if (options.active) {
+      flashSales = (flashSales as any[]).filter((fs) => fs.product);
+    }
     return {
       flashSales,
       pagination: { page, limit, total, pages: Math.ceil(total / limit) },
@@ -74,10 +84,28 @@ export class FlashSalesService {
   }
 
   async findOne(id: string): Promise<IFlashSale> {
+    // Public detail endpoint: only surface a sale that is currently live
+    // (active + within its start/end window). Expired, scheduled, or
+    // deactivated sales 404 here so customers can't deep-link to a stale price.
+    const now = new Date();
     const sale = await this.flashSaleModel
-      .findById(id)
-      .populate('product', 'name images price category description');
+      .findOne({
+        _id: id,
+        isActive: true,
+        startTime: { $lte: now },
+        endTime: { $gt: now },
+      })
+      // Only populate the product if it is approved — an unapproved/removed
+      // product populates as null and we reject the sale below.
+      .populate({
+        path: 'product',
+        select: 'name images price category description status',
+        match: { status: 'approved' },
+      });
     if (!sale) throw new NotFoundException('Flash sale not found');
+    // If the product failed the approved-status match it populates as null —
+    // don't expose a flash sale for a product that isn't buyable.
+    if (!(sale as any).product) throw new NotFoundException('Flash sale not found');
     return sale;
   }
 
@@ -113,12 +141,19 @@ export class FlashSalesService {
 
   async getActive(limit = 10): Promise<IFlashSale[]> {
     const now = new Date();
-    return this.flashSaleModel
+    const sales = await this.flashSaleModel
       .find({ isActive: true, startTime: { $lte: now }, endTime: { $gt: now } })
-      .populate('product', 'name images price category rating')
+      // Only populate approved products; a sale whose product is unapproved or
+      // removed populates as null and is filtered out below so it's never shown.
+      .populate({
+        path: 'product',
+        select: 'name images price category rating status',
+        match: { status: 'approved' },
+      })
       .sort({ discountPercent: -1 })
       .limit(limit)
       .lean();
+    return (sales as any[]).filter((fs) => fs.product) as IFlashSale[];
   }
 
   async incrementSold(id: string, qty = 1): Promise<void> {

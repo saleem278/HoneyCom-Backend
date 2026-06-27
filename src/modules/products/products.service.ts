@@ -420,10 +420,41 @@ export class ProductsService {
       this.validateImageUrls(createProductDto.images);
     }
 
-    const product = await this.productModel.create({
-      ...createProductDto,
-      seller: sellerId,
-    });
+    // SECURITY: build the document from an explicit field whitelist (mirrors
+    // update()). A non-admin caller must NEVER be able to self-approve, mark a
+    // product featured, seed rating/numReviews, or assign it to another seller.
+    // Spreading the raw DTO previously let a seller post {status:'approved',
+    // featured:true, rating:5, ...} and have it persisted verbatim.
+    const sellerFields = [
+      'name', 'description', 'sku', 'price', 'compareAtPrice',
+      'category', 'brand', 'images', 'inventory', 'variants', 'weight',
+      'dimensions', 'tags', 'specifications', 'qna', 'priceTiers',
+    ];
+
+    const productData: any = {};
+    for (const key of sellerFields) {
+      if (createProductDto[key] !== undefined) {
+        productData[key] = createProductDto[key];
+      }
+    }
+
+    // The seller is derived above (admin may create on behalf of another seller);
+    // never take it from the spread DTO.
+    productData.seller = sellerId;
+
+    // New products always enter admin review. Only an admin may override the
+    // initial status / featured / rating / reviews of a freshly-created product.
+    if (userRole === 'admin') {
+      if (createProductDto.status !== undefined) productData.status = createProductDto.status;
+      if (createProductDto.featured !== undefined) productData.featured = createProductDto.featured;
+      if (createProductDto.rating !== undefined) productData.rating = createProductDto.rating;
+      if (createProductDto.numReviews !== undefined) productData.numReviews = createProductDto.numReviews;
+    } else {
+      // Force pending — ignore any client-supplied status/featured/rating/reviews.
+      productData.status = 'pending';
+    }
+
+    const product = await this.productModel.create(productData);
 
     await product.populate('category', 'name slug');
     await product.populate('seller', 'name email');

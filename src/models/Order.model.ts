@@ -56,6 +56,10 @@ export interface IOrder extends Document {
   /** Carrier / method label chosen at checkout (e.g. "Standard Delivery"). */
   shippingMethod?: string;
   discount: number;
+  /** Discount applied by redeeming loyalty points at checkout (in base currency). */
+  loyaltyDiscount?: number;
+  /** Loyalty points redeemed on this order (for refund/audit). */
+  loyaltyPointsRedeemed?: number;
   total: number;
   status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
   trackingNumber?: string;
@@ -204,6 +208,16 @@ const OrderSchema: Schema = new Schema(
     discount: {
       type: Number,
       default: 0,
+    },
+    loyaltyDiscount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    loyaltyPointsRedeemed: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     total: {
       type: Number,

@@ -27,6 +27,7 @@ import { AdminReplyDto } from './dto/admin-reply.dto';
 import { ReportReviewDto } from './dto/report-review.dto';
 import { BulkStatusDto } from './dto/bulk-status.dto';
 import { BulkDeleteDto } from './dto/bulk-delete.dto';
+import { CreateReviewDto, CreateProductReviewDto } from './dto/create-review.dto';
 
 @ApiTags('Reviews')
 @Controller('reviews')
@@ -72,7 +73,7 @@ export class ReviewsController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Create review' })
   @ApiResponse({ status: 201, description: 'Review created' })
-  async create(@Request() req: AuthedRequest, @Body() body: { productId: string; rating: number; comment: string }) {
+  async create(@Request() req: AuthedRequest, @Body() body: CreateReviewDto) {
     return this.reviewsService.create(req.user.id, body.productId, body);
   }
 
@@ -85,7 +86,7 @@ export class ReviewsController {
   async createForProduct(
     @Param('productId') productId: string,
     @Request() req: AuthedRequest,
-    @Body() body: { rating: number; comment: string; images?: string[] }
+    @Body() body: CreateProductReviewDto,
   ) {
     return this.reviewsService.create(req.user.id, productId, body);
   }

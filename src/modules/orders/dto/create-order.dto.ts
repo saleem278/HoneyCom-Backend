@@ -1,11 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
+  IsInt,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -38,7 +41,7 @@ export class OrderItemDto {
   @ApiPropertyOptional() @IsOptional() @IsString() productId?: string;
   // `product` may arrive as an id string or a populated object — accept either.
   @ApiPropertyOptional() @IsOptional() product?: unknown;
-  @ApiProperty({ example: 1 }) @IsNumber() @Min(1) quantity: number;
+  @ApiProperty({ example: 1 }) @IsInt() @Min(1) @Max(999) quantity: number;
   @ApiPropertyOptional() @IsOptional() @IsString() name?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() price?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() image?: string;
@@ -57,6 +60,7 @@ export class CreateOrderDto {
   @ApiPropertyOptional({ type: [OrderItemDto] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => OrderItemDto)
   items?: OrderItemDto[];
@@ -106,4 +110,10 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   deliverySlotId?: string;
+
+  @ApiPropertyOptional({ example: 100, description: 'Loyalty points to redeem against this order total' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  pointsToRedeem?: number;
 }

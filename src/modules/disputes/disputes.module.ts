@@ -9,6 +9,7 @@ import { ProductSchema } from '../../models/Product.model';
 import { SettingsSchema } from '../../models/Settings.model';
 import { AuthModule } from '../auth/auth.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { OrdersModule } from '../orders/orders.module';
 import { EmailService } from '../../services/email.service';
 
 @Module({
@@ -22,6 +23,7 @@ import { EmailService } from '../../services/email.service';
     ]),
     AuthModule,
     PaymentsModule,
+    OrdersModule,
   ],
   controllers: [DisputesController],
   providers: [DisputesService, EmailService],

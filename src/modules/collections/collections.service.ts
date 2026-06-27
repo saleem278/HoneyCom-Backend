@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ConflictException } from '@nestjs/common
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ICollection } from '../../models/Collection.model';
+import { IProduct } from '../../models/Product.model';
 import { CreateCollectionDto } from './dto/create-collection.dto';
 import { UpdateCollectionDto } from './dto/update-collection.dto';
 
@@ -9,6 +10,7 @@ import { UpdateCollectionDto } from './dto/update-collection.dto';
 export class CollectionsService {
   constructor(
     @InjectModel('Collection') private collectionModel: Model<ICollection>,
+    @InjectModel('Product') private productModel: Model<IProduct>,
   ) {}
 
   private slugify(name: string): string {
@@ -82,31 +84,48 @@ export class CollectionsService {
     const productLimit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 12));
     const productSkip = (productPage - 1) * productLimit;
 
-    // Try as ObjectId first, then fall back to slug
+    // Try as ObjectId first, then fall back to slug.
+    // Gate on isActive so inactive collections are not exposed publicly.
     let collection: any = null;
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(idOrSlug);
 
     if (isObjectId) {
-      collection = await this.collectionModel.findById(idOrSlug).lean();
+      collection = await this.collectionModel
+        .findOne({ _id: idOrSlug, isActive: true })
+        .lean();
     }
 
     if (!collection) {
-      collection = await this.collectionModel.findOne({ slug: idOrSlug }).lean();
+      collection = await this.collectionModel
+        .findOne({ slug: idOrSlug, isActive: true })
+        .lean();
     }
 
     if (!collection) throw new NotFoundException('Collection not found');
 
-    // Paginate the products array
+    // Restrict to approved products only, then paginate over the gated set so
+    // pagination total/pages reflect what is actually visible.
     const allProductIds: Types.ObjectId[] = collection.products || [];
-    const pagedProductIds = allProductIds.slice(productSkip, productSkip + productLimit);
+    const approvedProductIds: Types.ObjectId[] = (
+      await this.productModel
+        .find({ _id: { $in: allProductIds }, status: 'approved' })
+        .select('_id')
+        .lean()
+    ).map((p: any) => p._id);
 
-    // Populate only the paged slice
+    const approvedTotal = approvedProductIds.length;
+    const pagedProductIds = approvedProductIds.slice(
+      productSkip,
+      productSkip + productLimit,
+    );
+
+    // Populate only the paged slice, gated on status:'approved'
     const populated = await this.collectionModel
       .findById(collection._id)
       .populate({
         path: 'products',
         select: 'name price images rating status',
-        match: { _id: { $in: pagedProductIds } },
+        match: { _id: { $in: pagedProductIds }, status: 'approved' },
       })
       .lean();
 
@@ -116,8 +135,8 @@ export class CollectionsService {
       productsPagination: {
         page: productPage,
         limit: productLimit,
-        total: allProductIds.length,
-        pages: Math.ceil(allProductIds.length / productLimit),
+        total: approvedTotal,
+        pages: Math.ceil(approvedTotal / productLimit),
       },
     };
 

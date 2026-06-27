@@ -20,6 +20,7 @@ import { Throttle } from '@nestjs/throttler';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthedRequest } from '../../common/types/request.types';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @ApiTags('Users')
 @Controller('users')
@@ -40,7 +41,7 @@ export class UsersController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Update user profile' })
   @ApiResponse({ status: 200, description: 'Profile updated successfully' })
-  async updateProfile(@Request() req: AuthedRequest, @Body() updateData: any) {
+  async updateProfile(@Request() req: AuthedRequest, @Body() updateData: UpdateProfileDto) {
     return this.usersService.updateProfile(req.user.id, updateData);
   }
 

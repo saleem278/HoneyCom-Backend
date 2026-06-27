@@ -11,6 +11,7 @@ import { Settings, ISettings } from '../../models/Settings.model';
 import { IUser } from '../../models/User.model';
 import { IFlashSale } from '../../models/FlashSale.model';
 import { IDeliverySlot } from '../../models/DeliverySlot.model';
+import { ILoyaltyTransaction } from '../../models/LoyaltyTransaction.model';
 import { EmailService } from '../../services/email.service';
 import { ExchangeRateService } from '../../services/exchange-rate.service';
 import { PdfService } from '../../services/pdf.service';
@@ -31,6 +32,7 @@ export class OrdersService {
     @InjectModel('User') private userModel: Model<IUser>,
     @InjectModel('FlashSale') private flashSaleModel: Model<IFlashSale>,
     @InjectModel('DeliverySlot') private deliverySlotModel: Model<IDeliverySlot>,
+    @InjectModel('LoyaltyTransaction') private loyaltyTxModel: Model<ILoyaltyTransaction>,
     @InjectConnection() private connection: Connection,
     private emailService: EmailService,
     private exchangeRateService: ExchangeRateService,
@@ -150,6 +152,33 @@ export class OrdersService {
   }
 
   /**
+   * Read loyalty-program settings from the Settings collection. Mirrors
+   * LoyaltyService.getSettings (same keys / category / defaults) so loyalty
+   * redemption can be validated and applied inside the order-create
+   * transaction without a cross-module call. Kept in sync intentionally.
+   */
+  private async getLoyaltySettings(): Promise<{
+    redemptionRate: number;
+    minRedemptionPoints: number;
+    maxRedemptionPercent: number;
+  }> {
+    const docs = await this.settingsModel.find({ category: 'loyalty' }).lean();
+    const map: Record<string, any> = {};
+    for (const doc of docs as any[]) map[doc.key] = doc.value;
+    const redemptionRate = Number(map['loyalty.redemptionRate'] ?? 0.1);
+    const minRedemptionPoints = Number(map['loyalty.minRedemptionPoints'] ?? 100);
+    const maxRedemptionPercent = Number(map['loyalty.maxRedemptionPercent'] ?? 50);
+    return {
+      redemptionRate: Number.isFinite(redemptionRate) && redemptionRate >= 0 ? redemptionRate : 0.1,
+      minRedemptionPoints: Number.isFinite(minRedemptionPoints) && minRedemptionPoints > 0 ? minRedemptionPoints : 100,
+      maxRedemptionPercent:
+        Number.isFinite(maxRedemptionPercent) && maxRedemptionPercent >= 0 && maxRedemptionPercent <= 100
+          ? maxRedemptionPercent
+          : 50,
+    };
+  }
+
+  /**
    * Extract the customer ID string from an order, regardless of whether
    * the `customer` field has been populated to a User object or remains an ObjectId.
    */
@@ -244,7 +273,9 @@ export class OrdersService {
     // Pre-fetch active flash sales for all products in this order in one query.
     // We look up sales whose window covers now and whose stockLimit isn't exhausted
     // (stockLimit=0 means unlimited). We'll use these to substitute salePrice for
-    // product.price on qualifying items.
+    // product.price on qualifying items. The pre-fetch is only a candidate list —
+    // the actual sale-stock reservation below is done with a conditional, atomic
+    // findOneAndUpdate inside the session so concurrent orders cannot oversell.
     const productIds = itemsToProcess.map((i: any) => i.productId || (i.product as any)?._id).filter(Boolean);
     const flashSaleNow = new Date();
     const activeFlashSales = await this.flashSaleModel
@@ -255,14 +286,16 @@ export class OrdersService {
         endTime: { $gt: flashSaleNow },
         $or: [{ stockLimit: 0 }, { $expr: { $lt: ['$soldCount', '$stockLimit'] } }],
       })
+      .session(session)
       .lean();
     // Build a map productId -> flash sale so per-item lookup is O(1).
     const flashSaleByProduct = new Map<string, any>();
     for (const fs of activeFlashSales) {
       flashSaleByProduct.set(fs.product.toString(), fs);
     }
-    // Track which flash sale IDs need soldCount incremented after order creation.
-    const flashSaleIncrements: Array<{ id: string; qty: number }> = [];
+    // Track flash-sale soldCount reservations we made inside the session, so we
+    // can roll them back if a later step in order creation fails.
+    const reservedFlashSales: Array<{ id: string; qty: number }> = [];
 
     // Reserve inventory atomically, item by item. Each `$inc` is conditional on
     // sufficient stock, so concurrent orders cannot oversell. If any reservation
@@ -307,11 +340,33 @@ export class OrdersService {
 
         reserved.push({ productId: product._id, quantity: item.quantity });
 
-        // Apply flash-sale price if an active sale exists for this product.
-        const flashSale = flashSaleByProduct.get(product._id.toString());
-        const effectivePrice = flashSale ? flashSale.salePrice : product.price;
-        if (flashSale) {
-          flashSaleIncrements.push({ id: flashSale._id.toString(), qty: item.quantity });
+        // Apply flash-sale price ONLY if we can atomically reserve flash-sale
+        // stock for this quantity. We conditionally $inc soldCount inside the
+        // session: the filter requires either an unlimited sale (stockLimit 0)
+        // or that soldCount + qty would not exceed stockLimit. If the update
+        // returns null the sale is exhausted/expired right now, so we fall back
+        // to the product's normal price and charge the regular amount.
+        const candidate = flashSaleByProduct.get(product._id.toString());
+        let effectivePrice = product.price;
+        if (candidate) {
+          const reservedFs = await this.flashSaleModel.findOneAndUpdate(
+            {
+              _id: candidate._id,
+              isActive: true,
+              startTime: { $lte: flashSaleNow },
+              endTime: { $gt: flashSaleNow },
+              $or: [
+                { stockLimit: 0 },
+                { $expr: { $lte: [{ $add: ['$soldCount', item.quantity] }, '$stockLimit'] } },
+              ],
+            },
+            { $inc: { soldCount: item.quantity } },
+            { new: true, session },
+          );
+          if (reservedFs) {
+            effectivePrice = candidate.salePrice;
+            reservedFlashSales.push({ id: candidate._id.toString(), qty: item.quantity });
+          }
         }
 
         const itemTotal = effectivePrice * item.quantity;
@@ -343,30 +398,59 @@ export class OrdersService {
       // Roll back any reservations we already made before the failure.
       // The transaction abort handles this on replica sets; this is the
       // manual fallback for standalone dev MongoDB.
-      await Promise.all(
-        reserved.map((r) =>
+      await Promise.all([
+        ...reserved.map((r) =>
           this.productModel.updateOne(
             { _id: r.productId },
             { $inc: { inventory: r.quantity } },
             { session },
           ),
         ),
-      );
+        ...reservedFlashSales.map((fs) =>
+          this.flashSaleModel.updateOne(
+            { _id: fs.id },
+            { $inc: { soldCount: -fs.qty } },
+            { session },
+          ),
+        ),
+      ]);
       throw err;
     }
 
-    // Helper: roll back any inventory reservations made above. Used in catches
-    // below so that downstream failures don't leave stranded reserved stock.
+    // Loyalty redemption applied to this order (deducted atomically inside the
+    // session below, after subtotal/tax/shipping/discount are known). Declared
+    // before restoreReservations so the rollback closure can capture it.
+    let loyaltyDiscount = 0;
+    let loyaltyPointsRedeemed = 0;
+
+    // Helper: roll back any inventory + flash-sale + loyalty reservations made
+    // above. Used in catches below so downstream failures don't leave stranded
+    // reserved stock or burned loyalty points.
     const restoreReservations = async () => {
-      await Promise.all(
-        reserved.map((r) =>
+      await Promise.all([
+        ...reserved.map((r) =>
           this.productModel.updateOne(
             { _id: r.productId },
             { $inc: { inventory: r.quantity } },
             { session },
           ),
         ),
-      );
+        ...reservedFlashSales.map((fs) =>
+          this.flashSaleModel.updateOne(
+            { _id: fs.id },
+            { $inc: { soldCount: -fs.qty } },
+            { session },
+          ),
+        ),
+      ]);
+      // Restore any loyalty points we deducted for this order.
+      if (loyaltyPointsRedeemed > 0) {
+        await this.userModel.updateOne(
+          { _id: userId },
+          { $inc: { loyaltyPoints: loyaltyPointsRedeemed } },
+          { session },
+        );
+      }
     };
 
     // Branch on taxMethod: 'percentage' multiplies the subtotal; 'fixed' adds a flat charge.
@@ -607,7 +691,63 @@ export class OrdersService {
         if (referralDiscount > 0) discount += referralDiscount;
       }
 
-      total = Math.max(0, subtotal + tax + shipping - discount);
+      // Pre-loyalty total. Loyalty points (if redeemed) are applied on top of
+      // this so the customer actually pays less for the points they burn.
+      const totalBeforeLoyalty = Math.max(0, subtotal + tax + shipping - discount);
+
+      // Loyalty redemption — done HERE inside the order-create transaction so the
+      // points are deducted atomically with the order and actually reduce the
+      // total the customer pays (the standalone /loyalty/redeem endpoint could
+      // burn points without ever applying them to an order). The conditional
+      // $inc with a $gte guard closes the TOCTOU window: two concurrent orders
+      // can't both pass a stale balance check and overdraw the account.
+      const requestedPoints = Number(orderData.pointsToRedeem);
+      if (orderData.pointsToRedeem !== undefined && orderData.pointsToRedeem !== null) {
+        if (!Number.isFinite(requestedPoints) || requestedPoints <= 0 || !Number.isInteger(requestedPoints)) {
+          throw new BadRequestException('pointsToRedeem must be a positive integer');
+        }
+        const loyaltySettings = await this.getLoyaltySettings();
+        if (requestedPoints < loyaltySettings.minRedemptionPoints) {
+          throw new BadRequestException(
+            `Minimum redemption is ${loyaltySettings.minRedemptionPoints} points`,
+          );
+        }
+
+        // Rupee value of the requested points, capped at the configured
+        // max-redemption percentage of the (pre-loyalty) order total and at the
+        // total itself so points can never make the order negative.
+        const rawValue = requestedPoints * loyaltySettings.redemptionRate;
+        const maxByPercent = totalBeforeLoyalty * (loyaltySettings.maxRedemptionPercent / 100);
+        loyaltyDiscount = Number(Math.min(rawValue, maxByPercent, totalBeforeLoyalty).toFixed(2));
+
+        // Only the points whose value is actually applied are charged to the
+        // customer's balance (capping may reduce the effective points).
+        loyaltyPointsRedeemed =
+          loyaltyDiscount < rawValue && loyaltySettings.redemptionRate > 0
+            ? Math.ceil(loyaltyDiscount / loyaltySettings.redemptionRate)
+            : requestedPoints;
+
+        if (loyaltyPointsRedeemed > 0) {
+          // Conditional atomic decrement — only succeeds if the balance is still
+          // >= the points we intend to deduct at write time.
+          const deducted = await this.userModel.findOneAndUpdate(
+            { _id: userId, loyaltyPoints: { $gte: loyaltyPointsRedeemed } },
+            { $inc: { loyaltyPoints: -loyaltyPointsRedeemed } },
+            { new: true, session },
+          ).select('loyaltyPoints');
+          if (!deducted) {
+            // Reset so restoreReservations (outer catch) doesn't re-credit points
+            // that were never deducted.
+            loyaltyPointsRedeemed = 0;
+            loyaltyDiscount = 0;
+            throw new BadRequestException('Insufficient loyalty points');
+          }
+        } else {
+          loyaltyDiscount = 0;
+        }
+      }
+
+      total = Math.max(0, totalBeforeLoyalty - loyaltyDiscount);
 
       const orderCount = await this.orderModel.countDocuments();
       const randomSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
@@ -637,6 +777,8 @@ export class OrdersService {
         shipping,
         shippingMethod: orderData.shippingMethod || undefined,
         discount,
+        loyaltyDiscount,
+        loyaltyPointsRedeemed,
         total,
         couponCode: cart?.couponCode,
         razorpayOrderId: orderData.razorpayOrderId,
@@ -646,6 +788,20 @@ export class OrdersService {
         ...(deliverySlotId ? { deliverySlot: deliverySlotId, deliverySlotLabel } : {}),
       }], { session });
       order = createdOrder;
+
+      // Record the loyalty redemption transaction inside the same session so the
+      // ledger stays consistent with the deducted balance and the order.
+      if (loyaltyPointsRedeemed > 0) {
+        const balanceUser = await this.userModel.findById(userId).select('loyaltyPoints').session(session).lean();
+        await this.loyaltyTxModel.create([{
+          user: userId,
+          points: loyaltyPointsRedeemed,
+          type: 'redeem',
+          description: `Redeemed for ₹${loyaltyDiscount} discount on order ${orderNumber}`,
+          orderId: order._id,
+          balanceAfter: (balanceUser as any)?.loyaltyPoints ?? 0,
+        }], { session });
+      }
     } catch (err) {
       // Transaction abort handles rollback on replica sets. The calls below
       // are the manual fallback for standalone dev MongoDB where transactions
@@ -730,19 +886,9 @@ export class OrdersService {
     // Notify the seller(s) of the new order so they can begin fulfilment.
     this.notifySellersOfNewOrder(order);
 
-    // Increment flash-sale soldCount outside the session — these counters
-    // are best-effort analytics. A failure here must not roll back the order.
-    if (flashSaleIncrements.length > 0) {
-      setImmediate(async () => {
-        for (const inc of flashSaleIncrements) {
-          try {
-            await this.flashSaleModel.findByIdAndUpdate(inc.id, { $inc: { soldCount: inc.qty } });
-          } catch (err: any) {
-            this.logger.warn(`Flash sale soldCount increment failed for ${inc.id}: ${err?.message || err}`);
-          }
-        }
-      });
-    }
+    // Flash-sale soldCount is already reserved atomically inside the order
+    // transaction above (reservedFlashSales), so there is no best-effort
+    // post-commit increment here — that would double-count.
 
     return {
       success: true,
@@ -830,6 +976,10 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
+    // For sellers, remember their product ids so we can both authorize AND
+    // strip other sellers' line items from the response below.
+    let sellerProductIds: Set<string> | null = null;
+
     if (userRole === 'admin') {
       // Admin can view any order — no further check needed.
     } else if (userRole === 'seller') {
@@ -838,10 +988,10 @@ export class OrdersService {
         .find({ seller: userId })
         .select('_id')
         .lean();
-      const sellerProductIds = new Set(sellerProducts.map((p: any) => p._id.toString()));
+      sellerProductIds = new Set(sellerProducts.map((p: any) => p._id.toString()));
       const hasSellerItem = (order.items as any[]).some((item: any) => {
         const pid = item.seller?.toString() ?? item.product?.toString();
-        return pid && sellerProductIds.has(pid);
+        return pid && sellerProductIds!.has(pid);
       });
       if (!hasSellerItem) {
         throw new BadRequestException('Not authorized');
@@ -855,6 +1005,16 @@ export class OrdersService {
 
     // Convert order and its item prices first
     const convertedOrder = this.convertOrderCurrency(order);
+
+    // For a seller, strip out line items that don't belong to them. A
+    // multi-seller order must NOT leak other sellers' products, prices, or
+    // earnings. Mirrors seller.service.getOrderById's productIdSet filtering.
+    if (userRole === 'seller' && sellerProductIds && convertedOrder.items) {
+      convertedOrder.items = (convertedOrder.items as any[]).filter((item: any) => {
+        const pid = item.seller?.toString() ?? item.product?._id?.toString() ?? item.product?.toString();
+        return pid && sellerProductIds!.has(pid);
+      });
+    }
 
     // Transform items to match frontend expectations
     if (convertedOrder.items) {
@@ -875,6 +1035,113 @@ export class OrdersService {
     };
   }
 
+  /**
+   * Single entry point for issuing a refund against an order. ALL refund paths
+   * (orders.cancel, orders.requestReturn, disputes.resolve) must route through
+   * here so refunds can never double-pay.
+   *
+   * Behaviour:
+   *  - Reads the order's cumulative `refundedAmount` and computes the remaining
+   *    refundable balance (`total - refundedAmount`).
+   *  - If `amount` is omitted it defaults to the full remaining balance.
+   *  - Rejects non-positive / NaN amounts and amounts above the remaining
+   *    balance, so the order can never be refunded for more than its total.
+   *  - Calls Razorpay (when applicable) for the clamped amount, then increments
+   *    `refundedAmount` by what was actually refunded.
+   *  - Flips `paymentStatus` to 'refunded' ONLY once the order is fully
+   *    refunded; partial refunds leave paymentStatus as-is.
+   *
+   * The caller is responsible for the order-level status transition
+   * (assertOrderTransition + setting order.status) and for persisting via save();
+   * this method mutates the in-memory document and returns the amount refunded.
+   */
+  private async issueRefund(
+    order: IOrder,
+    amount: number | undefined,
+    reason: string,
+  ): Promise<number> {
+    const total = Number(order.total) || 0;
+    const alreadyRefunded = Number(order.refundedAmount) || 0;
+    const remaining = Number((total - alreadyRefunded).toFixed(2));
+
+    if (remaining <= 0 || order.paymentStatus === 'refunded') {
+      throw new BadRequestException('Order has already been fully refunded');
+    }
+
+    // Default to the full remaining balance when no amount is specified.
+    let refundAmount = amount === undefined || amount === null ? remaining : Number(amount);
+
+    if (!Number.isFinite(refundAmount) || refundAmount <= 0) {
+      throw new BadRequestException('Refund amount must be a positive number');
+    }
+    if (refundAmount > remaining + 1e-6) {
+      throw new BadRequestException(
+        `Refund amount (${refundAmount}) exceeds the remaining refundable balance (${remaining})`,
+      );
+    }
+    refundAmount = Number(refundAmount.toFixed(2));
+
+    // Process the gateway refund for Razorpay orders that have actually been
+    // paid. Other payment methods (COD/PayPal) require manual settlement, but we
+    // still record the refundedAmount so the math stays correct.
+    if (order.paymentMethod === 'razorpay' && (order as any).razorpayPaymentId && order.paymentStatus === 'paid') {
+      await this.paymentsService.processRefund((order as any).razorpayPaymentId, refundAmount, reason);
+    }
+
+    const newRefunded = Number((alreadyRefunded + refundAmount).toFixed(2));
+    order.refundedAmount = newRefunded;
+
+    // Only mark the payment fully refunded once the cumulative refund reaches
+    // the order total (within a cent of rounding tolerance).
+    if (newRefunded >= total - 1e-6) {
+      order.paymentStatus = 'refunded';
+    }
+
+    return refundAmount;
+  }
+
+  /**
+   * Public refund entry point for the disputes flow (admin dispute resolution).
+   * Loads the order, enforces the order state machine, routes the money through
+   * the shared issueRefund helper (which respects refundedAmount and can never
+   * double-refund), updates the order status to 'refunded' when fully refunded,
+   * and persists. Returns the amount actually refunded plus the saved order.
+   */
+  async refundOrderForDispute(
+    orderId: string,
+    amount: number | undefined,
+    reason: string,
+  ): Promise<{ refundedAmount: number; order: IOrder }> {
+    const order = await this.orderModel.findById(orderId);
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    // Short-circuit if the order is already fully refunded — never re-refund.
+    if (order.paymentStatus === 'refunded') {
+      throw new BadRequestException('Order has already been refunded');
+    }
+
+    const refunded = await this.issueRefund(order, amount, reason);
+
+    // Flip the order status to 'refunded' only once the order is fully
+    // refunded; partial refunds keep the order in its current fulfilment state.
+    // (issueRefund may have just set paymentStatus to 'refunded'; read it as a
+    // string so TS doesn't narrow it away based on the guard above.)
+    const paymentStatusAfter: string = order.paymentStatus;
+    if (paymentStatusAfter === 'refunded' && order.status !== 'refunded') {
+      assertOrderTransition(order.status, 'refunded');
+      order.status = 'refunded';
+    }
+
+    await order.save();
+
+    // Notify the customer of the refund. Best-effort.
+    this.notifyCustomerRefund(order._id, refunded, reason);
+
+    return { refundedAmount: refunded, order };
+  }
+
   async cancel(id: string, userId: string, userRole: string) {
     const order = await this.orderModel.findById(id);
     if (!order) {
@@ -888,13 +1155,18 @@ export class OrdersService {
     // Validate transition (covers both terminal-state and skip-state attempts).
     assertOrderTransition(order.status, 'cancelled');
 
-    // Process Razorpay refund if it is a paid Razorpay order
-    if (order.paymentMethod === 'razorpay' && (order as any).razorpayPaymentId && order.paymentStatus === 'paid') {
+    // Process refund via the shared helper so refundedAmount is respected and
+    // we can never double-refund. Only attempt for paid Razorpay orders that
+    // aren't already fully refunded; a gateway failure is logged, not fatal.
+    if (
+      order.paymentMethod === 'razorpay' &&
+      (order as any).razorpayPaymentId &&
+      order.paymentStatus === 'paid'
+    ) {
       try {
-        await this.paymentsService.processRefund((order as any).razorpayPaymentId, order.total, 'Order cancellation');
-        order.paymentStatus = 'refunded';
+        await this.issueRefund(order, undefined, 'Order cancellation');
       } catch (refundError: any) {
-        this.logger.warn(`Failed to process Razorpay refund for cancellation on order ${order._id}: ${refundError.message}`);
+        this.logger.warn(`Failed to process refund for cancellation on order ${order._id}: ${refundError.message}`);
       }
     }
 
@@ -949,7 +1221,9 @@ export class OrdersService {
     // the transition error surfacing cleanly before any money moves).
     assertOrderTransition(order.status, 'refunded');
 
-    // Process refund based on payment method.
+    // Process refund based on payment method, routed through the shared
+    // issueRefund helper so refundedAmount is respected and we can never
+    // double-refund.
     // Razorpay (razorpayPaymentId present) supports automatic refunds.
     // For PayPal and cash_on_delivery, skip automatic refund —
     // those methods require manual admin action via the admin panel.
@@ -960,9 +1234,11 @@ export class OrdersService {
         );
       }
       try {
-        await this.paymentsService.processRefund((order as any).razorpayPaymentId, order.total, 'Customer return request');
+        // Full remaining balance (undefined amount). issueRefund flips
+        // paymentStatus to 'refunded' once fully refunded.
+        await this.issueRefund(order, undefined, 'Customer return request');
       } catch (refundError: any) {
-        this.logger.warn(`Failed to process Razorpay refund for return on order ${order._id}: ${refundError.message}`);
+        this.logger.warn(`Failed to process refund for return on order ${order._id}: ${refundError.message}`);
       }
     } else if (order.paymentMethod === 'paypal' || order.paymentMethod === 'cash_on_delivery') {
       // Non-Razorpay payments require manual admin refund processing.
@@ -983,13 +1259,11 @@ export class OrdersService {
       this.logger.warn(`Failed to replenish inventory on return for order ${order._id}: ${inventoryError.message}`);
     }
 
-    // Update order statuses. For non-Razorpay payments, paymentStatus stays
-    // 'pending' until an admin manually processes the refund.
+    // Update order status. For non-Razorpay payments, paymentStatus stays
+    // 'pending' until an admin manually processes the refund (issueRefund only
+    // flips it for paid Razorpay orders).
     // assertOrderTransition already called above — skip duplicate call.
     order.status = 'refunded';
-    if (order.paymentMethod === 'razorpay') {
-      order.paymentStatus = 'refunded';
-    }
     await order.save();
 
     // Confirm the return/refund to the customer. For non-Razorpay payments the
@@ -1172,9 +1446,28 @@ export class OrdersService {
     // Authorization check
     if (userRole !== 'admin' && userRole !== 'seller') {
       const customerId = this.extractCustomerId(order.customer);
-      
+
       if (customerId !== userId) {
         throw new BadRequestException('Not authorized');
+      }
+    }
+
+    // For sellers, verify they own at least one product in this order. Mirrors
+    // generateInvoice — without this any authenticated seller could pull the
+    // shipping label (and the customer's full delivery address) for ANY order.
+    if (userRole === 'seller') {
+      const products = await this.productModel.find({ seller: userId }).select('_id').lean();
+      const productIds = products.map((p: any) => p._id.toString());
+      const orderHasSellerProducts = (order.items as any[]).some((item: any) => {
+        const itemProductId = typeof item.product === 'object' && item.product !== null
+          ? item.product._id?.toString()
+          : item.product?.toString();
+        const sellerId = item.seller?.toString();
+        return productIds.includes(itemProductId) || (sellerId && sellerId === userId);
+      });
+
+      if (!orderHasSellerProducts) {
+        throw new BadRequestException('Not authorized to view this order');
       }
     }
 
@@ -1209,25 +1502,33 @@ export class OrdersService {
         const settingRow = await this.settingsModel.findOne({ key: 'referral.referrerBonusPts' }).lean() as any;
         const bonusPts = settingRow ? (parseInt(settingRow.value, 10) || 100) : 100;
 
-        // Atomic increment so concurrent referral credits can't clobber each
-        // other via read-then-write. `$inc` creates the nested referralStats
-        // fields on first use, so no separate default-initialization is needed.
-        await this.userModel.updateOne(
-          { referralCode },
-          {
-            $inc: {
-              loyaltyPoints: bonusPts,
-              'referralStats.usedCount': 1,
-              'referralStats.bonusEarned': bonusPts,
-            },
-          },
-        );
-
-        // Stamp the referee so they can't reuse another referral code.
-        await this.userModel.updateOne(
+        // Stamp the referee FIRST, atomically, guarded by `referralCodeUsed`
+        // not yet existing. This single update is the precondition that decides
+        // whether the referrer earns the bonus, so a duplicate webhook (or any
+        // concurrent re-run) can stamp at most once and thus credit at most once.
+        const stamp = await this.userModel.updateOne(
           { _id: refereeUserId, referralCodeUsed: { $exists: false } },
           { $set: { referralCodeUsed: referralCode } },
         );
+
+        // Only credit the referrer if WE were the call that stamped the referee.
+        // modifiedCount === 0 means it was already stamped (self-referral guard
+        // upstream, or a prior/duplicate run), so skip to avoid double-crediting.
+        if (stamp.modifiedCount > 0) {
+          // Atomic increment so concurrent referral credits can't clobber each
+          // other via read-then-write. `$inc` creates the nested referralStats
+          // fields on first use, so no separate default-initialization is needed.
+          await this.userModel.updateOne(
+            { referralCode },
+            {
+              $inc: {
+                loyaltyPoints: bonusPts,
+                'referralStats.usedCount': 1,
+                'referralStats.bonusEarned': bonusPts,
+              },
+            },
+          );
+        }
       } catch (refErr: any) {
         this.logger.warn(
           `Referral post-order processing failed for code ${referralCode}: ${refErr?.message || refErr}`,

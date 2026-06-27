@@ -120,8 +120,16 @@ export class StoresService {
     if (!isValidObjectId(id)) {
       throw new NotFoundException('Store not found');
     }
-    const store = await this.storeModel.findOne({ _id: id, status: 'active' }).populate('seller', 'name email');
+    const store = await this.storeModel
+      .findOne({ _id: id, status: 'active' })
+      .populate('seller', 'name email role sellerInfo.approvalStatus');
     if (!store) {
+      throw new NotFoundException('Store not found');
+    }
+    // Hide the store if its seller isn't approved (treat as not found publicly).
+    const sellerStatus = (store.seller as any)?.sellerInfo?.approvalStatus;
+    const sellerRole = (store.seller as any)?.role;
+    if (sellerStatus !== 'approved' && sellerRole !== 'admin' && sellerRole !== 'superadmin') {
       throw new NotFoundException('Store not found');
     }
     return { success: true, store };

@@ -11,10 +11,19 @@ export class CategoriesService {
     @InjectModel('Product') private productModel: Model<IProduct>,
   ) {}
 
-  async findAll(filters?: { featured?: string; status?: string; withCounts?: string }) {
+  async findAll(
+    filters?: { featured?: string; status?: string; withCounts?: string },
+    isAdmin?: boolean,
+  ) {
     const query: Record<string, unknown> = {};
     if (filters?.featured === 'true') query.featured = true;
-    if (filters?.status) query.status = filters.status;
+    // Admin may filter by any status (or see all); public path is locked to active-only
+    // so inactive categories never leak to the storefront.
+    if (isAdmin) {
+      if (filters?.status) query.status = filters.status;
+    } else {
+      query.status = 'active';
+    }
     const categories = await this.categoryModel
       .find(query)
       // displayOrder first (storefront-controlled order), then name as tiebreak
@@ -45,8 +54,11 @@ export class CategoriesService {
     };
   }
 
-  async findOne(id: string) {
-    const category = await this.categoryModel.findById(id);
+  async findOne(id: string, isAdmin?: boolean) {
+    // Public path only resolves active categories; inactive ones 404 instead of leaking.
+    const query: Record<string, unknown> = { _id: id };
+    if (!isAdmin) query.status = 'active';
+    const category = await this.categoryModel.findOne(query);
     if (!category) {
       throw new NotFoundException('Category not found');
     }
@@ -56,8 +68,11 @@ export class CategoriesService {
     };
   }
 
-  async findBySlug(slug: string) {
-    const category = await this.categoryModel.findOne({ slug });
+  async findBySlug(slug: string, isAdmin?: boolean) {
+    // Public path only resolves active categories; inactive ones 404 instead of leaking.
+    const query: Record<string, unknown> = { slug };
+    if (!isAdmin) query.status = 'active';
+    const category = await this.categoryModel.findOne(query);
     if (!category) {
       throw new NotFoundException('Category not found');
     }

@@ -90,7 +90,9 @@ export class ReviewsService {
   }
 
   async findAll(productId?: string) {
-    const filter: any = {};
+    // Only surface approved reviews publicly. Pending/rejected reviews must
+    // never appear in the public-facing list or skew the rating distribution.
+    const filter: any = { status: 'approved' };
     if (productId) {
       filter.product = productId;
     }
@@ -104,7 +106,7 @@ export class ReviewsService {
 
     // Real rating distribution from actual review data
     const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    const approvedReviews = reviews.filter((r) => r.status === 'approved' || r.status === undefined);
+    const approvedReviews = reviews;
     for (const r of approvedReviews) {
       const star = Math.round(r.rating);
       if (star >= 1 && star <= 5) distribution[star]++;
@@ -187,21 +189,23 @@ export class ReviewsService {
   }
 
   async findByUser(userId: string, page = 1, limit = 20) {
-    const skip = (page - 1) * limit;
+    const safeLimit = Math.min(Math.max(1, Number(limit) || 20), 100);
+    const safePage = Math.max(1, Number(page) || 1);
+    const skip = (safePage - 1) * safeLimit;
     const [reviews, total] = await Promise.all([
       this.reviewModel
         .find({ user: userId })
         .populate('product', 'name images slug price')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limit)
+        .limit(safeLimit)
         .lean(),
       this.reviewModel.countDocuments({ user: userId }),
     ]);
     return {
       success: true,
       reviews,
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+      pagination: { page: safePage, limit: safeLimit, total, pages: Math.ceil(total / safeLimit) },
     };
   }
 
@@ -267,7 +271,9 @@ export class ReviewsService {
     };
     const sortClause = sortMap[sort ?? ''] ?? sortMap.newest;
 
-    const skip = (page - 1) * limit;
+    const safeLimit = Math.min(Math.max(1, Number(limit) || 20), 100);
+    const safePage = Math.max(1, Number(page) || 1);
+    const skip = (safePage - 1) * safeLimit;
     const [reviews, total] = await Promise.all([
       this.reviewModel
         .find(filter)
@@ -275,14 +281,14 @@ export class ReviewsService {
         .populate('product', 'name images _id')
         .sort(sortClause)
         .skip(skip)
-        .limit(limit),
+        .limit(safeLimit),
       this.reviewModel.countDocuments(filter),
     ]);
 
     return {
       success: true,
       reviews,
-      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+      pagination: { page: safePage, limit: safeLimit, total, pages: Math.ceil(total / safeLimit) },
     };
   }
 

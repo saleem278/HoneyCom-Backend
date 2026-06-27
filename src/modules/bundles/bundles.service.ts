@@ -44,6 +44,22 @@ export class BundlesService {
     return { originalPrice, discountPercent };
   }
 
+  private async assertSellerOwnsProducts(
+    productIds: string[],
+    userId: string,
+  ): Promise<void> {
+    const ownedCount = await this.productModel.countDocuments({
+      _id: { $in: productIds },
+      seller: new Types.ObjectId(userId),
+    });
+
+    if (ownedCount !== productIds.length) {
+      throw new ForbiddenException(
+        'A bundle may only contain your own products',
+      );
+    }
+  }
+
   async findAll(query: any, userRole?: string) {
     const page = Math.max(1, parseInt(query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(query.limit, 10) || 12));
@@ -88,8 +104,12 @@ export class BundlesService {
 
   async findOne(id: string) {
     const bundle = await this.bundleModel
-      .findById(id)
-      .populate('products', 'name price images rating status')
+      .findOne({ _id: id, isActive: true })
+      .populate({
+        path: 'products',
+        select: 'name price images rating status',
+        match: { status: 'approved' },
+      })
       .populate('seller', 'name email')
       .lean();
 
@@ -110,6 +130,10 @@ export class BundlesService {
   }
 
   async create(dto: CreateBundleDto, userId: string, userRole: string) {
+    if (userRole === 'seller') {
+      await this.assertSellerOwnsProducts(dto.products, userId);
+    }
+
     const { originalPrice, discountPercent } = await this.computeBundlePrices(
       dto.products,
       dto.bundlePrice,
@@ -143,6 +167,11 @@ export class BundlesService {
     // Ownership check: sellers can only update their own bundles
     if (userRole === 'seller' && (!bundle.seller || bundle.seller.toString() !== userId)) {
       throw new ForbiddenException('Not authorized to update this bundle');
+    }
+
+    // Sellers may only swap in products they own
+    if (userRole === 'seller' && dto.products !== undefined) {
+      await this.assertSellerOwnsProducts(dto.products, userId);
     }
 
     const updateData: any = { ...dto };

@@ -6,6 +6,8 @@ import { Order, IOrder } from '../../models/Order.model';
 import { User, IUser } from '../../models/User.model';
 import { Product, IProduct } from '../../models/Product.model';
 import { PaymentsService } from '../payments/payments.service';
+import { OrdersService } from '../orders/orders.service';
+import { ResolveDisputeDto } from './dto/resolve-dispute.dto';
 import { EmailService } from '../../services/email.service';
 
 @Injectable()
@@ -16,6 +18,7 @@ export class DisputesService {
     @InjectModel('User') private userModel: Model<IUser>,
     @InjectModel('Product') private productModel: Model<IProduct>,
     private paymentsService: PaymentsService,
+    private ordersService: OrdersService,
     private emailService: EmailService,
   ) {}
 
@@ -43,12 +46,57 @@ export class DisputesService {
       throw new BadRequestException('A dispute already exists for this order');
     }
 
-    // Get seller from order items
-    const firstItem = order.items[0];
-    if (firstItem && firstItem.product) {
-      const product = await this.productModel.findById(firstItem.product);
-      if (product && product.seller) {
-        disputeData.seller = product.seller;
+    // Resolve the seller from the SPECIFIC item being disputed. Always taking
+    // items[0] mis-assigns the dispute (and refund/notifications) to the wrong
+    // seller on a multi-seller order. The client identifies the disputed line
+    // via productId (preferred) or itemId; we fall back to items[0] only for a
+    // single-seller order where there is no ambiguity.
+    const items = (order.items as any[]) || [];
+    const disputedProductId = disputeData.productId ?? disputeData.product;
+    const disputedItemId = disputeData.itemId;
+
+    let disputedItem: any = null;
+    if (disputedProductId) {
+      disputedItem = items.find((it: any) => {
+        const pid = it.product?._id?.toString?.() ?? it.product?.toString?.();
+        return pid && pid === String(disputedProductId);
+      });
+      if (!disputedItem) {
+        throw new BadRequestException('The disputed product is not part of this order');
+      }
+    } else if (disputedItemId) {
+      disputedItem = items.find((it: any) => it._id?.toString?.() === String(disputedItemId));
+      if (!disputedItem) {
+        throw new BadRequestException('The disputed item is not part of this order');
+      }
+    } else {
+      // No product identified. Only safe to auto-resolve the seller when the
+      // order has a single seller; otherwise require the client to specify one.
+      const sellerIds = new Set(
+        items
+          .map((it: any) => (it.seller ? it.seller.toString() : null))
+          .filter((s: string | null): s is string => !!s),
+      );
+      if (sellerIds.size > 1) {
+        throw new BadRequestException(
+          'This order has items from multiple sellers — specify productId to identify the disputed item',
+        );
+      }
+      disputedItem = items[0] ?? null;
+    }
+
+    if (disputedItem) {
+      // Prefer the seller snapshotted on the line item; fall back to a Product
+      // lookup for legacy rows that predate the item.seller snapshot.
+      if (disputedItem.seller) {
+        disputeData.seller = disputedItem.seller;
+      } else if (disputedItem.product) {
+        const product = await this.productModel.findById(
+          disputedItem.product?._id ?? disputedItem.product,
+        );
+        if (product && product.seller) {
+          disputeData.seller = product.seller;
+        }
       }
     }
 
@@ -183,7 +231,7 @@ export class DisputesService {
     };
   }
 
-  async resolve(id: string, adminId: string, resolutionData: any) {
+  async resolve(id: string, adminId: string, resolutionData: ResolveDisputeDto) {
     // Atomically claim the dispute — only succeeds if it's still open/in_review.
     // This prevents two concurrent admin requests from both processing a refund
     // (double-refund race condition). The $set is committed before the refund
@@ -207,31 +255,60 @@ export class DisputesService {
     // dispute back to 'in_review' so the admin can retry.
     if (resolutionData.resolution === 'refund' || resolutionData.resolution === 'partial_refund') {
       const order = disputed.order as any;
-      const refundAmount = resolutionData.refundAmount || order.total;
+      const orderTotal = Number(order?.total) || 0;
 
-      // Validate refund amount does not exceed original order total
-      if (refundAmount > order.total) {
+      // Short-circuit if the order has already been refunded — never re-refund.
+      if (order?.paymentStatus === 'refunded') {
         await this.disputeModel.findByIdAndUpdate(id, { $set: { status: 'in_review' } });
-        throw new BadRequestException(
-          `Refund amount (${refundAmount}) cannot exceed order total (${order.total})`,
-        );
+        throw new BadRequestException('This order has already been refunded.');
       }
 
-      const razorpayPaymentId = (order as any).razorpayPaymentId;
-      if (razorpayPaymentId) {
-        try {
-          await this.paymentsService.processRefund(razorpayPaymentId, refundAmount, resolutionData.notes);
-        } catch (error: any) {
-          // Roll back the status claim so admin can retry
+      // Lower-bound / NaN / upper-bound guards. The DTO already enforces
+      // refundAmount >= 0.01 when present; here we additionally require a
+      // positive, finite amount within the order total and require an explicit
+      // amount for a partial refund.
+      let refundAmount: number | undefined = resolutionData.refundAmount;
+      if (resolutionData.resolution === 'partial_refund') {
+        if (refundAmount === undefined || refundAmount === null) {
           await this.disputeModel.findByIdAndUpdate(id, { $set: { status: 'in_review' } });
-          throw new BadRequestException(`Razorpay refund failed: ${error.message || error}. Dispute status reset to in_review.`);
+          throw new BadRequestException('refundAmount is required for a partial refund');
+        }
+      }
+      if (refundAmount !== undefined && refundAmount !== null) {
+        if (!Number.isFinite(refundAmount) || refundAmount <= 0) {
+          await this.disputeModel.findByIdAndUpdate(id, { $set: { status: 'in_review' } });
+          throw new BadRequestException('refundAmount must be a positive number');
+        }
+        if (refundAmount > orderTotal) {
+          await this.disputeModel.findByIdAndUpdate(id, { $set: { status: 'in_review' } });
+          throw new BadRequestException(
+            `Refund amount (${refundAmount}) cannot exceed order total (${orderTotal})`,
+          );
         }
       }
 
-      // Mark order as refunded only after successful payment processing
-      order.status = 'refunded';
-      order.paymentStatus = 'refunded';
-      await order.save();
+      // Route the money + refundedAmount bookkeeping + order state machine
+      // through the single shared refund method on OrdersService. It reads
+      // refundedAmount, clamps to the remaining balance, increments
+      // refundedAmount, and only flips status/paymentStatus to 'refunded' once
+      // fully refunded — closing the double-refund hole and the
+      // state-machine-bypass. A full refund passes undefined to refund the
+      // remaining balance.
+      try {
+        // For a full refund refundAmount is undefined → refunds the remaining
+        // balance; for a partial refund it's the validated explicit amount.
+        await this.ordersService.refundOrderForDispute(
+          String(order._id),
+          refundAmount,
+          resolutionData.notes || 'Dispute resolution refund',
+        );
+      } catch (error: any) {
+        // Roll back the status claim so admin can retry.
+        await this.disputeModel.findByIdAndUpdate(id, { $set: { status: 'in_review' } });
+        throw new BadRequestException(
+          `Refund failed: ${error?.message || error}. Dispute status reset to in_review.`,
+        );
+      }
     }
 
     // Finalize the dispute

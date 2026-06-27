@@ -244,6 +244,16 @@ export class CartService {
         JSON.stringify(item.variants) === JSON.stringify(variants || {})
     );
 
+    // Validate the resulting cumulative quantity (existing + incoming) against
+    // available inventory, not just the incoming quantity in isolation.
+    const resultingQuantity =
+      existingItemIndex > -1
+        ? cart.items[existingItemIndex].quantity + quantity
+        : quantity;
+    if (product.inventory < resultingQuantity) {
+      throw new BadRequestException('Insufficient inventory');
+    }
+
     if (existingItemIndex > -1) {
       cart.items[existingItemIndex].quantity += quantity;
     } else {
@@ -277,6 +287,15 @@ export class CartService {
     if (quantity <= 0) {
       cart.items = cart.items.filter((item) => item._id?.toString() !== itemId);
     } else {
+      // Validate the requested quantity against available inventory before
+      // updating the cart item.
+      const product = await this.productModel.findById(item.product);
+      if (!product || product.status !== 'approved') {
+        throw new BadRequestException('Product not available');
+      }
+      if (product.inventory < quantity) {
+        throw new BadRequestException('Insufficient inventory');
+      }
       item.quantity = quantity;
     }
 

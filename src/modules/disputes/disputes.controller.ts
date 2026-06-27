@@ -5,6 +5,7 @@ import { DisputesService } from './disputes.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { ResolveDisputeDto } from './dto/resolve-dispute.dto';
 import type { AuthedRequest } from '../../common/types/request.types';
 
 @ApiTags('Disputes')
@@ -44,7 +45,7 @@ export class DisputesController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiOperation({ summary: 'Resolve a dispute (admin only)' })
   @ApiResponse({ status: 200, description: 'Dispute resolved' })
-  async resolve(@Param('id') id: string, @Request() req: AuthedRequest, @Body() resolutionData: any) {
+  async resolve(@Param('id') id: string, @Request() req: AuthedRequest, @Body() resolutionData: ResolveDisputeDto) {
     return this.disputesService.resolve(id, req.user.id, resolutionData);
   }
 

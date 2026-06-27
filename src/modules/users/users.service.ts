@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import mongoose, { Model } from 'mongoose';
 import { User, IUser } from '../../models/User.model';
@@ -41,6 +41,21 @@ export class UsersService {
     for (const key of Object.keys(updateData)) {
       if (allowedFields.includes(key)) {
         filteredUpdateData[key] = updateData[key as keyof IUser];
+      }
+    }
+
+    // Normalize and enforce email uniqueness before persisting. A duplicate
+    // email would otherwise collide with another account's login identity.
+    if (typeof filteredUpdateData.email === 'string') {
+      const normalizedEmail = filteredUpdateData.email.trim().toLowerCase();
+      filteredUpdateData.email = normalizedEmail;
+
+      const existing = await this.userModel.findOne({
+        email: normalizedEmail,
+        _id: { $ne: userId },
+      });
+      if (existing) {
+        throw new ConflictException('Email is already in use');
       }
     }
 
