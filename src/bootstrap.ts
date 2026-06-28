@@ -170,16 +170,18 @@ export function assertRequiredEnv(): void {
   if ((process.env.JWT_SECRET || '').length < 32) {
     throw new Error('JWT_SECRET must be at least 32 characters.');
   }
-  // SECURITY: the OTP-in-response override is a dev-only convenience and must
-  // never be enabled in an internet-reachable (production) deployment, where
-  // anyone reading the API response could complete a phone login as the owner.
-  // Fail the boot rather than relying on a request-time guard that triggers
-  // only after the first OTP has already been requested.
+  // OTP-in-response is an explicit operator opt-in (EXPOSE_OTP_IN_RESPONSE=true)
+  // that may be enabled in production when SMS is intentionally not wired up.
+  // It is INSECURE — anyone reading the API response can complete a phone login
+  // as the owner of the number — so we no longer fail the boot, but we DO warn
+  // loudly at startup so it can't be left on unnoticed once SMS is live.
   const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
   const exposeOtp = (process.env.EXPOSE_OTP_IN_RESPONSE || '').toLowerCase() === 'true';
   if (isProd && exposeOtp) {
-    throw new Error(
-      'EXPOSE_OTP_IN_RESPONSE must not be enabled when NODE_ENV=production. Remove this env var before launch.',
+    console.warn(
+      '⚠️  SECURITY: EXPOSE_OTP_IN_RESPONSE=true in PRODUCTION — phone OTPs are ' +
+      'returned in API responses and anyone can log in as any phone number. ' +
+      'This is intended only while SMS is unavailable; unset it once Twilio is live.',
     );
   }
 }

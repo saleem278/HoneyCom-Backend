@@ -2,21 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { uploadBufferToCloudinary } from './fileUpload.service';
 
-/**
- * PDF generation (invoices, shipping labels).
- *
- * Files are streamed to a Buffer in memory and uploaded to Cloudinary
- * rather than written to local disk. The earlier disk-write version
- * broke on Render — the filesystem there is ephemeral, so PDFs
- * vanished on every deploy/restart, and frontend links 404'd against
- * honeycom.vercel.app/uploads/pdfs/... because the relative URL was
- * resolved against the frontend origin.
- *
- * Cloudinary URLs are fully-qualified HTTPS, cached by their CDN, and
- * survive backend redeploys. The `resource_type: 'raw'` upload (set
- * in fileUpload.service.uploadBufferToCloudinary) is required for
- * non-image binaries.
- */
 @Injectable()
 export class PdfService {
   private readonly logger = new Logger(PdfService.name);

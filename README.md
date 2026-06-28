@@ -1,6 +1,6 @@
-# HoneyCom — Backend API
+# Dayam — Backend API
 
-NestJS 11 + MongoDB (Mongoose 7) backend serving the HoneyCom e-commerce platform. Single API surface for the Next.js web frontend and the React Native mobile app.
+NestJS 11 + MongoDB (Mongoose 7) backend serving the Dayam e-commerce platform. Single API surface for the Next.js web frontend and the React Native mobile app.
 
 ## Tech Stack
 

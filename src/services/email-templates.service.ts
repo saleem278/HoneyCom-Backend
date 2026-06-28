@@ -243,7 +243,7 @@ export class EmailTemplatesService {
     const b = await this.brand();
     const { primary, primaryAlt } = await this.colors();
     const frontendUrl = this.frontend();
-    const siteName = this.h(b.siteName || 'Our Store');
+    const siteName = this.h(b.siteName || process.env.APP_NAME || 'Our Store');
     const tagline = this.h(b.tagline || '');
     const logoEmoji = this.h(b.logoEmoji || '🛒');
     const supportEmail = this.h(b.supportEmail || '');
@@ -346,7 +346,8 @@ export class EmailTemplatesService {
 
   async getSiteName(): Promise<string> {
     const b = await this.brand();
-    return b.siteName || 'Our Store';
+    // admin setting → env → neutral generic (never a hardcoded brand)
+    return b.siteName || process.env.APP_NAME || 'Our Store';
   }
 
   async getVerificationEmail(token: string): Promise<string> {

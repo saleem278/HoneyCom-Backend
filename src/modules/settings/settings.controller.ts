@@ -169,13 +169,20 @@ export class SettingsController {
   async sendTestEmail(@Request() req: AuthedRequest) {
     const to = req.user?.email;
     if (!to) throw new BadRequestException('Admin account has no email address on record');
+    // Resolve the brand name admin → env → neutral generic (never hardcoded).
+    const branding = await this.settingsService.getByCategory('branding');
+    const siteName =
+      (branding.settings?.['branding.siteName'] as string)?.trim() ||
+      process.env.APP_NAME ||
+      'Our Store';
+    const sentAt = new Date().toISOString();
     await this.emailService.sendEmail({
       to,
-      subject: 'HoneyCom — SMTP test email',
-      html: `<p>This is a test email sent from the <strong>HoneyCom admin panel</strong>.</p>
+      subject: `${siteName} — SMTP test email`,
+      html: `<p>This is a test email sent from the <strong>${siteName} admin panel</strong>.</p>
              <p>If you received this, your SMTP configuration is working correctly.</p>
-             <p style="color:#6b7280;font-size:12px;">Sent at ${new Date().toISOString()}</p>`,
-      text: `HoneyCom SMTP test email — sent at ${new Date().toISOString()}. If you received this, your SMTP configuration is working correctly.`,
+             <p style="color:#6b7280;font-size:12px;">Sent at ${sentAt}</p>`,
+      text: `${siteName} SMTP test email — sent at ${sentAt}. If you received this, your SMTP configuration is working correctly.`,
     });
     return { success: true, message: `Test email sent to ${to}` };
   }

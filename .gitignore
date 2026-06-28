@@ -9,10 +9,11 @@ dist/
 build/
 *.tsbuildinfo
 
-# Environment variables
+# Environment variables — ignore ALL real env files; commit only *.example.
+# (.env.production / .env.sandbox hold live secrets and must never be tracked.)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # IDE
 .vscode/

@@ -38,13 +38,13 @@ export class CreatePageDto {
   @IsISO8601()
   scheduledAt?: string;
 
-  @ApiPropertyOptional({ example: 'About Us | HoneyCom' })
+  @ApiPropertyOptional({ example: 'About Us | Your Store' })
   @IsOptional()
   @IsString()
   @MaxLength(60)
   metaTitle?: string;
 
-  @ApiPropertyOptional({ example: 'Learn more about the HoneyCom team.' })
+  @ApiPropertyOptional({ example: 'Learn more about our team.' })
   @IsOptional()
   @IsString()
   @MaxLength(160)

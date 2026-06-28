@@ -418,7 +418,7 @@ export class SeedService {
     const users = [
       {
         name: 'Super Admin',
-        email: 'superadmin@dayam.in',
+        email: 'superadmin@example.com',
         password: hashedPassword,
         role: 'superadmin',
         status: 'active',
@@ -426,7 +426,7 @@ export class SeedService {
       },
       {
         name: 'Admin User',
-        email: 'admin@dayam.in',
+        email: 'admin@example.com',
         password: hashedPassword,
         role: 'admin',
         status: 'active',
@@ -434,7 +434,7 @@ export class SeedService {
       },
       {
         name: 'Raj Electronics',
-        email: 'seller@dayam.in',
+        email: 'seller@example.com',
         password: hashedPassword,
         role: 'seller',
         status: 'active',
@@ -446,7 +446,7 @@ export class SeedService {
       },
       {
         name: 'Priya Fashion Store',
-        email: 'jane.seller@dayam.in',
+        email: 'jane.seller@example.com',
         password: hashedPassword,
         role: 'seller',
         status: 'active',
@@ -455,7 +455,7 @@ export class SeedService {
       },
       {
         name: 'Ankit Sharma',
-        email: 'customer1@dayam.in',
+        email: 'customer1@example.com',
         password: hashedPassword,
         role: 'customer',
         status: 'active',
@@ -463,7 +463,7 @@ export class SeedService {
       },
       {
         name: 'Meera Patel',
-        email: 'customer2@dayam.in',
+        email: 'customer2@example.com',
         password: hashedPassword,
         role: 'customer',
         status: 'active',
@@ -471,7 +471,7 @@ export class SeedService {
       },
       {
         name: 'Content Editor',
-        email: 'editor@dayam.in',
+        email: 'editor@example.com',
         password: hashedPassword,
         role: 'contentEditor',
         status: 'active',
@@ -714,8 +714,8 @@ export class SeedService {
     const ProductSchema = productModule.ProductSchema;
     const productModel = this.connection.model('Product', ProductSchema);
 
-    const seller1 = users.find(u => u.email === 'seller@dayam.in');
-    const seller2 = users.find(u => u.email === 'jane.seller@dayam.in');
+    const seller1 = users.find(u => u.email === 'seller@example.com');
+    const seller2 = users.find(u => u.email === 'jane.seller@example.com');
 
     // Helper to find category by slug
     const cat = (slug: string) => {
@@ -1370,8 +1370,8 @@ export class SeedService {
     // Register Address model using schema directly
     const addressModel = this.connection.model('Address', AddressSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
-    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
+    const customer1 = users.find(u => u.email === 'customer1@example.com');
+    const customer2 = users.find(u => u.email === 'customer2@example.com');
 
     if (!customer1 || !customer2) {
       this.logger.warn('Customer users not found, skipping address seeding');
@@ -1460,7 +1460,7 @@ export class SeedService {
     // Register PaymentMethod model using schema directly
     const paymentMethodModel = this.connection.model('PaymentMethod', PaymentMethodSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
+    const customer1 = users.find(u => u.email === 'customer1@example.com');
 
     if (!customer1) {
       this.logger.warn('Customer user not found, skipping payment method seeding');
@@ -1583,7 +1583,7 @@ export class SeedService {
     // Register Cart model using schema directly
     const cartModel = this.connection.model('Cart', CartSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
+    const customer1 = users.find(u => u.email === 'customer1@example.com');
 
     const carts = [
       {
@@ -1618,8 +1618,8 @@ export class SeedService {
     // Register Order model using schema directly
     const orderModel = this.connection.model('Order', OrderSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
-    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
+    const customer1 = users.find(u => u.email === 'customer1@example.com');
+    const customer2 = users.find(u => u.email === 'customer2@example.com');
 
     // Get address IDs - use first address for customer1, second for customer2
     const address1 = addresses && addresses.length > 0 ? addresses[0]._id : null;
@@ -1708,8 +1708,8 @@ export class SeedService {
     // Register Review model using schema directly
     const reviewModel = this.connection.model('Review', ReviewSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
-    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
+    const customer1 = users.find(u => u.email === 'customer1@example.com');
+    const customer2 = users.find(u => u.email === 'customer2@example.com');
 
     // Only products in a DELIVERED order for that customer can be verified
     // purchases. Per seedOrders: ORD-001 (customer1, DELIVERED) contains
@@ -1784,7 +1784,10 @@ export class SeedService {
   private async seedCMS(users: any[]) {
     this.logger.log('Seeding CMS content...');
 
-    const editor = users.find(u => u.email === 'editor@dayam.in');
+    // Brand name for demo CMS/blog copy — env → neutral generic (never hardcoded).
+    const brand = process.env.APP_NAME || 'Our Store';
+
+    const editor = users.find(u => u.email === 'editor@example.com');
 
     // Dynamically import BlogCategory schema only - avoid importing the pre-registered model
     const blogCategoryModule = await import('../../models/BlogCategory.model');
@@ -1818,7 +1821,7 @@ export class SeedService {
       {
         name: 'Seller Guide',
         slug: 'seller-guide',
-        description: 'Resources and guides for sellers on Dayam',
+        description: `Resources and guides for sellers on ${brand}`,
       },
     ]);
 
@@ -1837,28 +1840,28 @@ export class SeedService {
       {
         title: 'About Us',
         slug: 'about-us',
-        content: '<h1>About Dayam</h1><p>Dayam is India\'s next-generation multi-seller marketplace connecting millions of buyers with verified sellers across every category — from electronics and fashion to groceries and home decor.</p><p>We believe commerce should be fair, fast, and trustworthy. Every seller on Dayam is KYC-verified, every product is reviewed, and every transaction is protected by our buyer guarantee.</p>',
+        content: `<h1>About ${brand}</h1><p>${brand} is a next-generation multi-seller marketplace connecting millions of buyers with verified sellers across every category — from electronics and fashion to groceries and home decor.</p><p>We believe commerce should be fair, fast, and trustworthy. Every seller on ${brand} is KYC-verified, every product is reviewed, and every transaction is protected by our buyer guarantee.</p>`,
         status: 'published',
-        metaTitle: 'About Dayam - India\'s Trusted Marketplace',
-        metaDescription: 'Learn about Dayam — connecting buyers with verified sellers across India.',
+        metaTitle: `About ${brand} - Trusted Online Marketplace`,
+        metaDescription: `Learn about ${brand} — connecting buyers with verified sellers.`,
         author: editor._id,
       },
       {
         title: 'Privacy Policy',
         slug: 'privacy-policy',
-        content: '<h1>Privacy Policy</h1><p>At Dayam, your privacy is our priority. We collect only the data necessary to provide our services and never sell your personal information to third parties.</p><p>Data we collect: name, email, phone number, shipping addresses, and order history. All payment data is handled by Stripe and never stored on our servers.</p>',
+        content: `<h1>Privacy Policy</h1><p>At ${brand}, your privacy is our priority. We collect only the data necessary to provide our services and never sell your personal information to third parties.</p><p>Data we collect: name, email, phone number, shipping addresses, and order history. All payment data is handled by Stripe and never stored on our servers.</p>`,
         status: 'published',
-        metaTitle: 'Privacy Policy - Dayam',
-        metaDescription: 'Read Dayam\'s privacy policy to understand how we handle your data.',
+        metaTitle: `Privacy Policy - ${brand}`,
+        metaDescription: `Read ${brand}'s privacy policy to understand how we handle your data.`,
         author: editor._id,
       },
       {
         title: 'Terms of Service',
         slug: 'terms-of-service',
-        content: '<h1>Terms of Service</h1><p>By using Dayam, you agree to these terms. Our platform connects buyers with independent sellers. Dayam is not responsible for the quality of third-party seller products beyond our verification process.</p><p>Buyers are protected by our 10-day return policy on eligible items. Sellers must comply with our seller guidelines and maintain minimum ratings.</p>',
+        content: `<h1>Terms of Service</h1><p>By using ${brand}, you agree to these terms. Our platform connects buyers with independent sellers. ${brand} is not responsible for the quality of third-party seller products beyond our verification process.</p><p>Buyers are protected by our 10-day return policy on eligible items. Sellers must comply with our seller guidelines and maintain minimum ratings.</p>`,
         status: 'published',
-        metaTitle: 'Terms of Service - Dayam',
-        metaDescription: 'Read Dayam\'s terms of service.',
+        metaTitle: `Terms of Service - ${brand}`,
+        metaDescription: `Read ${brand}'s terms of service.`,
         author: editor._id,
       },
       {
@@ -1866,8 +1869,8 @@ export class SeedService {
         slug: 'shipping-policy',
         content: '<h1>Shipping Policy</h1><p>Standard delivery: 3-7 business days. Express delivery: 1-2 days (available in select cities). Free shipping on orders above ₹499. Real-time tracking on all orders.</p>',
         status: 'published',
-        metaTitle: 'Shipping Policy - Dayam',
-        metaDescription: 'Learn about Dayam\'s shipping and delivery policy.',
+        metaTitle: `Shipping Policy - ${brand}`,
+        metaDescription: `Learn about ${brand}'s shipping and delivery policy.`,
         author: editor._id,
       },
     ]);
@@ -1875,10 +1878,10 @@ export class SeedService {
     // Blog Posts
     await blogModel.insertMany([
       {
-        title: '10 Tips to Find the Best Deals on Dayam',
-        slug: '10-tips-find-best-deals-honeycom',
+        title: `10 Tips to Find the Best Deals on ${brand}`,
+        slug: '10-tips-find-best-deals',
         excerpt: 'Smart shopping strategies to save more on every order — from using coupons to timing your purchases.',
-        content: '<h1>10 Tips to Find the Best Deals on Dayam</h1><p>Shopping smart starts with knowing where to look and when to buy. Here are 10 proven strategies to get the most value on Dayam.</p><h2>1. Check Deals of the Day</h2><p>Our homepage features time-limited deals with up to 40% off. Check every morning for new offers.</p><h2>2. Use Coupon Codes</h2><p>New users get 10% off with code WELCOME10. Check your profile for personalized coupons.</p><h2>3. Set Price Alerts</h2><p>Add items to your wishlist and we\'ll notify you when prices drop.</p>',
+        content: `<h1>10 Tips to Find the Best Deals on ${brand}</h1><p>Shopping smart starts with knowing where to look and when to buy. Here are 10 proven strategies to get the most value on ${brand}.</p><h2>1. Check Deals of the Day</h2><p>Our homepage features time-limited deals with up to 40% off. Check every morning for new offers.</p><h2>2. Use Coupon Codes</h2><p>New users get 10% off with code WELCOME10. Check your profile for personalized coupons.</p><h2>3. Set Price Alerts</h2><p>Add items to your wishlist and we'll notify you when prices drop.</p>`,
         featuredImage: 'https://images.unsplash.com/photo-1607082348824-0a96f2a4b9da?w=800',
         category: blogCategories[0]._id,
         author: editor._id,
@@ -1902,7 +1905,7 @@ export class SeedService {
         title: 'Monsoon Fashion 2025: Top Trends to Shop Now',
         slug: 'monsoon-fashion-2025-top-trends',
         excerpt: 'Stay stylish this monsoon with our curated guide to the season\'s must-have fashion pieces.',
-        content: '<h1>Monsoon Fashion 2025: Top Trends</h1><p>The monsoon season calls for fashion that is both practical and stylish. Here are the trends dominating 2025.</p><h2>1. Pastel Kurtas</h2><p>Lightweight cotton kurtas in pastel shades are perfect for humid weather. Shop Biba, W, and Fabindia collections on Dayam.</p><h2>2. Waterproof Sneakers</h2><p>Rain-ready footwear has gone fashionable. Nike and Adidas both have excellent waterproof options.</p><h2>3. Linen Co-ords</h2><p>Breathable linen co-ord sets in earthy tones are trending across all age groups this season.</p>',
+        content: `<h1>Monsoon Fashion 2025: Top Trends</h1><p>The monsoon season calls for fashion that is both practical and stylish. Here are the trends dominating 2025.</p><h2>1. Pastel Kurtas</h2><p>Lightweight cotton kurtas in pastel shades are perfect for humid weather. Shop Biba, W, and Fabindia collections on ${brand}.</p><h2>2. Waterproof Sneakers</h2><p>Rain-ready footwear has gone fashionable. Nike and Adidas both have excellent waterproof options.</p><h2>3. Linen Co-ords</h2><p>Breathable linen co-ord sets in earthy tones are trending across all age groups this season.</p>`,
         featuredImage: 'https://images.unsplash.com/photo-1445205170230-053b83016050?w=800',
         category: blogCategories[2]._id,
         author: editor._id,
@@ -1911,14 +1914,14 @@ export class SeedService {
         publishedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
       },
       {
-        title: 'How to Become a Verified Seller on Dayam',
-        slug: 'how-to-become-verified-seller-honeycom',
-        excerpt: 'Step-by-step guide for businesses and entrepreneurs to start selling on Dayam and reach millions of buyers.',
-        content: '<h1>How to Become a Verified Seller on Dayam</h1><p>Joining Dayam as a seller gives you access to millions of active shoppers across India. Here\'s how to get started.</p><h2>Step 1: Register</h2><p>Visit /seller/register and fill in your business details — business name, GSTIN, and bank account for payouts.</p><h2>Step 2: KYC Verification</h2><p>Upload your PAN card, Aadhaar/passport, and business proof. Our team reviews and approves within 24-48 hours.</p><h2>Step 3: List Your Products</h2><p>Use our seller dashboard to add products with images, descriptions, pricing, and inventory. Products go live after admin approval.</p><h2>Step 4: Start Selling</h2><p>Receive orders, process them via your dashboard, and get paid within 7 days of delivery confirmation.</p>',
+        title: `How to Become a Verified Seller on ${brand}`,
+        slug: 'how-to-become-verified-seller',
+        excerpt: `Step-by-step guide for businesses and entrepreneurs to start selling on ${brand} and reach millions of buyers.`,
+        content: `<h1>How to Become a Verified Seller on ${brand}</h1><p>Joining ${brand} as a seller gives you access to millions of active shoppers. Here's how to get started.</p><h2>Step 1: Register</h2><p>Visit /seller/register and fill in your business details — business name, GSTIN, and bank account for payouts.</p><h2>Step 2: KYC Verification</h2><p>Upload your PAN card, Aadhaar/passport, and business proof. Our team reviews and approves within 24-48 hours.</p><h2>Step 3: List Your Products</h2><p>Use our seller dashboard to add products with images, descriptions, pricing, and inventory. Products go live after admin approval.</p><h2>Step 4: Start Selling</h2><p>Receive orders, process them via your dashboard, and get paid within 7 days of delivery confirmation.</p>`,
         featuredImage: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=800',
         category: blogCategories[4]._id,
         author: editor._id,
-        tags: ['seller', 'guide', 'ecommerce', 'business', 'honeycom'],
+        tags: ['seller', 'guide', 'ecommerce', 'business'],
         status: 'published',
         publishedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
       },
@@ -2158,9 +2161,9 @@ export class SeedService {
     const disputeModule = await import('../../models/Dispute.model');
     const disputeModel = this.connection.model('Dispute', disputeModule.DisputeSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
-    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
-    const seller = users.find(u => u.email === 'seller@dayam.in');
+    const customer1 = users.find(u => u.email === 'customer1@example.com');
+    const customer2 = users.find(u => u.email === 'customer2@example.com');
+    const seller = users.find(u => u.email === 'seller@example.com');
 
     if (!customer1 || !customer2 || !seller) {
       this.logger.warn('Skipping disputes — required users not found');
@@ -2235,22 +2238,31 @@ export class SeedService {
     await settingsCollection.deleteMany({});
 
     const now = new Date();
+
+    // Factory branding defaults resolve from env → neutral generic (never a
+    // hardcoded brand). A deployment sets APP_NAME / SUPPORT_EMAIL / etc. and a
+    // fresh seed adopts them; the admin can still edit everything in Settings.
+    const brandName = process.env.APP_NAME || 'Our Store';
+    const brandSupportEmail = process.env.SUPPORT_EMAIL || '';
+    const brandSupportPhone = process.env.SUPPORT_PHONE || '';
+    const brandTagline = process.env.APP_TAGLINE || 'Trusted Online Marketplace';
+
     const settings = [
       // ── Branding ────────────────────────────────────────────────────────────
-      { key: 'branding.siteName', value: 'Dayam', category: 'branding', description: 'Marketplace display name in header, emails, page titles.' },
-      { key: 'branding.tagline', value: "India's Trusted Multi-Seller Marketplace", category: 'branding', description: 'Short tagline in footer and emails.' },
+      { key: 'branding.siteName', value: brandName, category: 'branding', description: 'Marketplace display name in header, emails, page titles.' },
+      { key: 'branding.tagline', value: brandTagline, category: 'branding', description: 'Short tagline in footer and emails.' },
       { key: 'branding.logoEmoji', value: '🛒', category: 'branding', description: 'Logo emoji beside brand name.' },
-      { key: 'branding.supportEmail', value: 'support@dayam.in', category: 'branding', description: 'Support email in footer and emails.' },
-      { key: 'branding.supportPhone', value: '+91 98765 43210', category: 'branding', description: 'Support phone in footer.' },
-      { key: 'branding.address', value: '4th Floor, Tech Park, Sector 18, Gurugram, Haryana – 122001', category: 'branding', description: 'Company address.' },
+      { key: 'branding.supportEmail', value: brandSupportEmail, category: 'branding', description: 'Support email in footer and emails.' },
+      { key: 'branding.supportPhone', value: brandSupportPhone, category: 'branding', description: 'Support phone in footer.' },
+      { key: 'branding.address', value: process.env.COMPANY_ADDRESS || '', category: 'branding', description: 'Company address.' },
       { key: 'branding.primaryColor', value: '#F97316', category: 'branding', description: 'Primary accent color (hex).' },
-      { key: 'branding.currency', value: 'INR', category: 'branding', description: 'Default currency code.' },
-      // Social links
-      { key: 'branding.socialFacebook', value: 'https://facebook.com/dayam', category: 'branding', description: 'Facebook page URL.' },
-      { key: 'branding.socialTwitter', value: 'https://twitter.com/dayam', category: 'branding', description: 'Twitter/X profile URL.' },
-      { key: 'branding.socialInstagram', value: 'https://instagram.com/dayam', category: 'branding', description: 'Instagram profile URL.' },
-      { key: 'branding.socialYoutube', value: 'https://youtube.com/@dayam', category: 'branding', description: 'YouTube channel URL.' },
-      { key: 'branding.socialWhatsapp', value: 'https://wa.me/919876543210', category: 'branding', description: 'WhatsApp chat link.' },
+      { key: 'branding.currency', value: process.env.BASE_CURRENCY || 'INR', category: 'branding', description: 'Default currency code.' },
+      // Social links — empty by default; admin fills these in Settings.
+      { key: 'branding.socialFacebook', value: process.env.SOCIAL_FACEBOOK || '', category: 'branding', description: 'Facebook page URL.' },
+      { key: 'branding.socialTwitter', value: process.env.SOCIAL_TWITTER || '', category: 'branding', description: 'Twitter/X profile URL.' },
+      { key: 'branding.socialInstagram', value: process.env.SOCIAL_INSTAGRAM || '', category: 'branding', description: 'Instagram profile URL.' },
+      { key: 'branding.socialYoutube', value: process.env.SOCIAL_YOUTUBE || '', category: 'branding', description: 'YouTube channel URL.' },
+      { key: 'branding.socialWhatsapp', value: process.env.SOCIAL_WHATSAPP || '', category: 'branding', description: 'WhatsApp chat link.' },
 
       // ── Platform / Monetisation ───────────────────────────────────────────
       { key: 'platform.commissionRate', value: 0.10, category: 'platform', description: 'Platform commission on seller revenue (decimal). 0.10 = 10%. Snapshotted on each order line item at creation time.' },
@@ -2349,7 +2361,7 @@ export class SeedService {
           { label: 'Shipping Info', href: '/shipping' },
           { label: 'FAQ', href: '/faq' },
           { label: 'Contact Us', href: '/contact' },
-          { label: 'Sell on Dayam', href: '/seller/register' },
+          { label: 'Sell with us', href: '/seller/register' },
         ]), category: 'storefront', description: 'Footer "Help" column links. JSON array of {label, href}.'
       },
 
@@ -2412,7 +2424,7 @@ export class SeedService {
         key: 'footer.helpLinks', value: JSON.stringify([
           { label: 'Track My Order', href: '/orders' }, { label: 'Returns & Refunds', href: '/returns' },
           { label: 'Shipping Info', href: '/shipping' }, { label: 'FAQ', href: '/faq' },
-          { label: 'Contact Us', href: '/contact' }, { label: 'Sell on Dayam', href: '/seller/register' },
+          { label: 'Contact Us', href: '/contact' }, { label: 'Sell with us', href: '/seller/register' },
         ]), category: 'footer', description: 'Footer "Help" column links. JSON array of {label, href}.'
       },
       { key: 'footer.securityText', value: 'SSL Secured • PCI DSS Compliant', category: 'footer', description: 'Security badge text in footer bottom bar.' },
@@ -2468,7 +2480,7 @@ export class SeedService {
       },
 
       // ── SEO ────────────────────────────────────────────────────────────────
-      { key: 'seo.metaTitle', value: "Dayam — India's Trusted Marketplace", category: 'seo', description: 'Default page <title>.' },
+      { key: 'seo.metaTitle', value: `${brandName} — Trusted Online Marketplace`, category: 'seo', description: 'Default page <title>.' },
       { key: 'seo.metaDescription', value: 'Shop electronics, fashion, home, beauty and more from 500+ verified sellers. Best prices, fast delivery, easy returns.', category: 'seo', description: 'Default meta description.' },
       { key: 'seo.keywords', value: 'online shopping, marketplace, electronics, fashion, grocery, India', category: 'seo', description: 'Meta keywords (comma-separated).' },
 

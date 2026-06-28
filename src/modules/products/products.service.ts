@@ -435,13 +435,23 @@ export class ProductsService {
    * image URL pointing at an internal network endpoint (e.g. metadata API,
    * private admin panel) that gets fetched by the browser when admins
    * view the product list.
+   *
+   * The brand's own CDN host is NOT hardcoded — deployments add it via the
+   * comma-separated ALLOWED_IMAGE_HOSTS env var (e.g. "cdn.mystore.com").
    */
-  private static readonly ALLOWED_IMAGE_HOSTS = [
+  private static readonly DEFAULT_ALLOWED_IMAGE_HOSTS = [
     'res.cloudinary.com',
     'cloudinary.com',
     'images.unsplash.com',
-    'cdn.dayam.in',
   ];
+
+  private static allowedImageHosts(): string[] {
+    const extra = (process.env.ALLOWED_IMAGE_HOSTS || '')
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean);
+    return [...ProductsService.DEFAULT_ALLOWED_IMAGE_HOSTS, ...extra];
+  }
 
   private validateImageUrls(images: unknown[]): void {
     if (!Array.isArray(images)) return;
@@ -452,7 +462,7 @@ export class ProductsService {
         if (!['https:', 'http:'].includes(protocol)) {
           throw new BadRequestException(`Image URL must use http/https: ${img}`);
         }
-        const allowed = ProductsService.ALLOWED_IMAGE_HOSTS.some(
+        const allowed = ProductsService.allowedImageHosts().some(
           (h) => hostname === h || hostname.endsWith(`.${h}`),
         );
         if (!allowed) {

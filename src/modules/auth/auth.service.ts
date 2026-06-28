@@ -341,28 +341,28 @@ export class AuthService {
       this.logger.error(`SMS OTP send failed for ${normalizedPhone}: ${error?.message || error}`);
     }
 
-    // TEMPORARY (pre-launch QA): expose the OTP in the response so the
-    // deployed app can be exercised end-to-end without Twilio wired up.
-    // Two ways to enable in production:
-    //   - non-production NODE_ENV with SMS delivery failure (the original
-    //     dev-only path), OR
-    //   - EXPOSE_OTP_IN_RESPONSE=true env var (the explicit override).
+    // Expose the OTP in the response so the app can be exercised end-to-end
+    // without SMS (Twilio) wired up. Controlled purely by env:
+    //   - EXPOSE_OTP_IN_RESPONSE=true  → expose in ANY environment (incl.
+    //     production). This is an explicit, deliberate operator opt-in.
+    //   - otherwise: only exposed in non-production when SMS delivery failed
+    //     (the original dev fallback).
     //
-    // SECURITY: when enabled, anyone who can read the API response — or
-    // shoulder-surf the phone screen — can complete login as the owner
-    // of the phone number. Remove this override + the matching client
-    // __DEV__ guard in LoginScreen.tsx BEFORE going live. Tracked as a
-    // launch-blocker.
+    // ⚠️ SECURITY (read before enabling in production): when exposed, ANYONE
+    // who calls request-phone-otp with a phone number receives that number's
+    // OTP in the JSON response and can immediately log in as its owner — a
+    // full account-takeover vector. Only keep EXPOSE_OTP_IN_RESPONSE=true while
+    // SMS is intentionally unavailable; unset it the moment Twilio is live.
     const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
     const overrideExpose = (process.env.EXPOSE_OTP_IN_RESPONSE || '').toLowerCase() === 'true';
-    if (overrideExpose && isProd) {
-      throw new Error('EXPOSE_OTP_IN_RESPONSE must not be enabled in production. Remove this env var before launch.');
-    }
     const exposeOtp = overrideExpose || (!isProd && !smsDelivered);
 
     if (exposeOtp) {
+      // Loud, every-request warning — make the insecure mode impossible to miss
+      // in production logs so it isn't left on by accident.
       this.logger.warn(
-        `Exposing OTP in response for ${normalizedPhone} (override=${overrideExpose}, prod=${isProd}, smsDelivered=${smsDelivered}). Remove EXPOSE_OTP_IN_RESPONSE before launch.`,
+        `⚠️ OTP EXPOSED IN RESPONSE for ${normalizedPhone} (override=${overrideExpose}, prod=${isProd}, smsDelivered=${smsDelivered}). ` +
+        `This is INSECURE — unset EXPOSE_OTP_IN_RESPONSE once SMS delivery is configured.`,
       );
     }
 

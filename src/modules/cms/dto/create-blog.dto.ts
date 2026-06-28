@@ -62,7 +62,7 @@ export class CreateBlogDto {
   @IsISO8601()
   scheduledAt?: string;
 
-  @ApiPropertyOptional({ example: 'Top 10 Selling Tips | HoneyCom' })
+  @ApiPropertyOptional({ example: 'Top 10 Selling Tips | Your Store' })
   @IsOptional()
   @IsString()
   @MaxLength(60)
