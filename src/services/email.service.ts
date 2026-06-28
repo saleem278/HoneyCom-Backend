@@ -5,7 +5,8 @@ import { Model } from 'mongoose';
 import * as nodemailer from 'nodemailer';
 import { ISettings } from '../models/Settings.model';
 import { EmailTemplatesService } from './email-templates.service';
-
+import * as dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -18,9 +19,9 @@ export class EmailService {
   ) {
     this.templates = new EmailTemplatesService(configService, settingsModel);
 
-    const smtpHost     = configService.get<string>('SMTP_HOST') || 'smtp.gmail.com';
-    const smtpPort     = parseInt(configService.get<string>('SMTP_PORT') || '587');
-    const smtpUser     = configService.get<string>('SMTP_USER');
+    const smtpHost = configService.get<string>('SMTP_HOST') || 'smtp.gmail.com';
+    const smtpPort = parseInt(configService.get<string>('SMTP_PORT') || '587');
+    const smtpUser = configService.get<string>('SMTP_USER');
     const smtpPassword = configService.get<string>('SMTP_PASSWORD');
 
     if (smtpUser && smtpPassword) {
@@ -28,13 +29,18 @@ export class EmailService {
         host: smtpHost,
         port: smtpPort,
         secure: smtpPort === 465,
-        auth: { user: smtpUser, pass: smtpPassword },
+        auth: {
+          user: smtpUser,
+          pass: smtpPassword,
+        },
         connectionTimeout: 15000,
         greetingTimeout: 10000,
         socketTimeout: 20000,
         tls: {
           servername: smtpHost,
         },
+        logger: true,
+        debug: true,
       });
       this.transporter.verify((error) => {
         if (error) this.logger.error(`SMTP connection failed: ${error.message}`);
