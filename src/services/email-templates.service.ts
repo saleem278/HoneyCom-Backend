@@ -38,15 +38,19 @@ export class EmailTemplatesService {
   // ── Design tokens (mirrors frontend globals.css) ───────────────────────────
   private static readonly T = {
     // surfaces & text
-    page: '#f9fafb', // --surface-muted (page background)
+    page: '#f3f6fb', // soft marketplace canvas
     surface: '#ffffff', // --surface (card)
+    surfaceTint: '#f8fafc',
     fg: '#111827', // --fg (body text)
     fgStrong: '#374151', // --fg-strong (headings/labels)
     fgMuted: '#4b5563', // --fg-muted (secondary text)
     fgSubtle: '#9ca3af', // --fg-subtle (hints)
     line: '#e5e7eb', // --line (borders)
+    lineStrong: '#cbd5e1',
     // brand footer (matches site footer / announcement bar)
-    footer: '#1a1a2e', // --brand-dark
+    ink: '#101827',
+    inkSoft: '#1f2937',
+    footer: '#101827',
     footerText: '#cbd5e1',
     footerSubtle: '#94a3b8',
     // status accents
@@ -63,9 +67,9 @@ export class EmailTemplatesService {
     infoBg: '#f0f9ff',
     infoFg: '#075985',
     // radii
-    radiusCard: '20px', // --radius-xl
-    radiusBtn: '12px', // --radius-md
-    radiusBox: '12px',
+    radiusCard: '24px',
+    radiusBtn: '14px',
+    radiusBox: '16px',
     // typography
     font: "Inter,-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Helvetica Neue',Arial,sans-serif",
   };
@@ -167,9 +171,9 @@ export class EmailTemplatesService {
   /** Circular gradient icon chip, echoing the storefront logo chip. */
   private iconBadge(emoji: string, primary: string, primaryAlt: string): string {
     return `
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:0 auto 20px;">
-        <tr><td align="center" valign="middle" width="72" height="72"
-          style="width:72px;height:72px;border-radius:18px;background:linear-gradient(135deg,${primary} 0%,${primaryAlt} 100%);text-align:center;font-size:34px;line-height:72px;mso-line-height-rule:exactly;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:0 auto 22px;">
+        <tr><td align="center" valign="middle" width="76" height="76"
+          style="width:76px;height:76px;border-radius:22px;background:linear-gradient(135deg,${primary} 0%,${primaryAlt} 100%);box-shadow:0 16px 38px rgba(249,115,22,0.28);text-align:center;font-size:34px;line-height:76px;mso-line-height-rule:exactly;">
           ${emoji}
         </td></tr>
       </table>`;
@@ -178,7 +182,7 @@ export class EmailTemplatesService {
   /** H2 heading in the design-system style (Inter, -0.025em tracking). */
   private heading(text: string): string {
     const T = EmailTemplatesService.T;
-    return `<h2 style="margin:0 0 8px;color:${T.fg};font-size:26px;font-weight:800;letter-spacing:-0.025em;line-height:1.15;">${text}</h2>`;
+    return `<h2 style="margin:0 0 10px;color:${T.fg};font-size:28px;font-weight:800;letter-spacing:-0.02em;line-height:1.16;">${text}</h2>`;
   }
 
   /** Muted secondary paragraph. */
@@ -186,7 +190,7 @@ export class EmailTemplatesService {
     const T = EmailTemplatesService.T;
     const align = opts.center ? 'text-align:center;' : '';
     const size = opts.size || 16;
-    return `<p style="margin:0;color:${T.fgMuted};font-size:${size}px;line-height:1.6;${align}">${text}</p>`;
+    return `<p style="margin:0;color:${T.fgMuted};font-size:${size}px;line-height:1.68;${align}">${text}</p>`;
   }
 
   /** Primary gradient CTA button (matches the storefront primary button). */
@@ -194,8 +198,8 @@ export class EmailTemplatesService {
     const T = EmailTemplatesService.T;
     return `
       <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin:0 auto;">
-        <tr><td align="center" style="border-radius:${T.radiusBtn};background:linear-gradient(135deg,${primary} 0%,${primaryAlt} 100%);">
-          <a href="${url}" target="_blank" style="display:inline-block;padding:15px 34px;color:#ffffff;text-decoration:none;border-radius:${T.radiusBtn};font-family:${T.font};font-weight:700;font-size:16px;letter-spacing:-0.01em;">${label}</a>
+        <tr><td align="center" style="border-radius:${T.radiusBtn};background:${primary};box-shadow:0 12px 28px rgba(15,23,42,0.18);">
+          <a href="${url}" target="_blank" style="display:inline-block;padding:16px 34px;color:#ffffff;text-decoration:none;border-radius:${T.radiusBtn};font-family:${T.font};font-weight:800;font-size:15px;letter-spacing:0.01em;">${label}</a>
         </td></tr>
       </table>`;
   }
@@ -215,14 +219,14 @@ export class EmailTemplatesService {
       info: { bar: T.info, bg: T.infoBg, fg: T.infoFg },
     }[variant];
     return `
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:0 0 24px;border-radius:${T.radiusBox};background-color:${map.bg};border-left:4px solid ${map.bar};">
-        <tr><td style="padding:18px 20px;color:${map.fg};font-size:14px;line-height:1.65;">${body}</td></tr>
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:0 0 24px;border-radius:${T.radiusBox};background-color:${map.bg};border:1px solid rgba(15,23,42,0.06);border-left:5px solid ${map.bar};">
+        <tr><td style="padding:18px 20px;color:${map.fg};font-size:14px;line-height:1.72;">${body}</td></tr>
       </table>`;
   }
 
   /** Small rounded pill / badge. */
   private pill(text: string, primary: string): string {
-    return `<span style="display:inline-block;padding:5px 14px;background-color:#fff7ed;color:${primary};border-radius:9999px;font-size:13px;font-weight:700;letter-spacing:-0.01em;">${text}</span>`;
+    return `<span style="display:inline-block;padding:7px 14px;background-color:#fff7ed;color:${primary};border:1px solid rgba(249,115,22,0.20);border-radius:9999px;font-size:12px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">${text}</span>`;
   }
 
   /** "Trouble clicking?" raw-link fallback block. */
@@ -230,9 +234,9 @@ export class EmailTemplatesService {
     const T = EmailTemplatesService.T;
     return `
       <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:28px 0 0;border-top:1px solid ${T.line};">
-        <tr><td style="padding-top:24px;">
+        <tr><td style="padding-top:22px;">
           <p style="margin:0 0 8px;color:${T.fgMuted};font-size:13px;line-height:1.6;"><strong>Having trouble with the button?</strong> Copy and paste this link into your browser:</p>
-          <p style="margin:0;word-break:break-all;"><a href="${url}" target="_blank" style="color:${primary};text-decoration:underline;font-size:13px;">${url}</a></p>
+          <p style="margin:0;word-break:break-all;background:${T.surfaceTint};border:1px solid ${T.line};border-radius:12px;padding:12px;"><a href="${url}" target="_blank" style="color:${primary};text-decoration:none;font-size:12px;">${url}</a></p>
         </td></tr>
       </table>`;
   }
@@ -265,50 +269,50 @@ export class EmailTemplatesService {
   ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;">${this.h(preheader)}</div>` : ''}
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:${T.page};">
     <tr>
-      <td align="center" style="padding:32px 16px;">
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width:600px;width:100%;background-color:${T.surface};border:1px solid ${T.line};border-radius:${T.radiusCard};overflow:hidden;">
+      <td align="center" style="padding:28px 14px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="640" style="max-width:640px;width:100%;">
 
-          <!-- Header: light surface with gradient logo chip + brand name -->
+          <!-- Header -->
           <tr>
-            <td style="padding:28px 32px;border-bottom:1px solid ${T.line};">
-              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+            <td style="padding:0 4px 16px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
                 <tr>
-                  <td valign="middle" width="44" height="44" align="center"
-                    style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,${primary} 0%,${primaryAlt} 100%);text-align:center;font-size:22px;line-height:44px;mso-line-height-rule:exactly;">${logoEmoji}</td>
-                  <td valign="middle" style="padding-left:12px;">
-                    <span style="font-size:20px;font-weight:800;letter-spacing:-0.02em;color:${primary};">${siteName}</span>
+                  <td valign="middle" width="48" height="48" align="center"
+                    style="width:48px;height:48px;border-radius:15px;background:linear-gradient(135deg,${primary} 0%,${primaryAlt} 100%);box-shadow:0 12px 30px rgba(249,115,22,0.28);text-align:center;font-size:23px;line-height:48px;mso-line-height-rule:exactly;">${logoEmoji}</td>
+                  <td valign="middle" style="padding-left:13px;">
+                    <p style="margin:0;color:${T.ink};font-size:21px;font-weight:900;letter-spacing:-0.02em;line-height:1.15;">${siteName}</p>
+                    ${tagline ? `<p style="margin:4px 0 0;color:${T.fgMuted};font-size:12px;line-height:1.4;">${tagline}</p>` : ''}
+                  </td>
+                  <td align="right" valign="middle" style="padding-left:12px;">
+                    <a href="${frontendUrl}" target="_blank" style="display:inline-block;padding:9px 14px;border:1px solid ${T.lineStrong};border-radius:999px;color:${T.inkSoft};text-decoration:none;font-size:12px;font-weight:800;">Open store</a>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
 
-          <!-- Content -->
+          <!-- Card -->
           <tr>
-            <td style="padding:36px 32px;">
-              ${content}
+            <td style="background-color:${T.surface};border:1px solid ${T.line};border-radius:${T.radiusCard};overflow:hidden;box-shadow:0 24px 70px rgba(15,23,42,0.10);">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                <tr><td style="height:7px;background:linear-gradient(90deg,${primary} 0%,${primaryAlt} 50%,${T.ink} 100%);font-size:0;line-height:0;">&nbsp;</td></tr>
+                <tr>
+                  <td style="padding:40px 34px 34px;">
+                    ${content}
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
 
-          <!-- Footer: dark navy, matching the storefront footer -->
+          <!-- Footer -->
           <tr>
-            <td style="padding:28px 32px;background-color:${T.footer};">
+            <td style="padding:22px 4px 0;">
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
                 <tr>
-                  <td style="text-align:center;padding-bottom:18px;">
-                    <p style="margin:0;color:#ffffff;font-size:16px;font-weight:800;letter-spacing:-0.02em;">${siteName}</p>
-                    ${tagline ? `<p style="margin:6px 0 0;color:${T.footerSubtle};font-size:13px;">${tagline}</p>` : ''}
-                  </td>
-                </tr>
-                <tr>
-                  <td style="text-align:center;padding-bottom:18px;">
-                    <a href="${frontendUrl}" target="_blank" style="display:inline-block;padding:11px 24px;border:1px solid rgba(255,255,255,0.25);color:#ffffff;text-decoration:none;border-radius:${T.radiusBtn};font-weight:600;font-size:14px;">Visit our store</a>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="text-align:center;border-top:1px solid rgba(255,255,255,0.1);padding-top:18px;">
-                    <p style="margin:0;color:${T.footerSubtle};font-size:12px;line-height:1.6;">
-                      ${supportEmail ? `Questions? Contact us at <a href="mailto:${supportEmail}" style="color:${T.footerText};text-decoration:underline;">${supportEmail}</a><br>` : 'Questions? Just reply to this email and our support team will help.<br>'}
+                  <td style="text-align:center;">
+                    <p style="margin:0;color:${T.fgMuted};font-size:12px;line-height:1.7;">
+                      ${supportEmail ? `Need help? Contact <a href="mailto:${supportEmail}" style="color:${primary};text-decoration:none;font-weight:700;">${supportEmail}</a><br>` : 'Need help? Reply to this email and our support team will help.<br>'}
                       &copy; ${year} ${siteName}. All rights reserved.
                     </p>
                   </td>

@@ -96,12 +96,12 @@ export class SeedService {
     const mod = await import('../../models/EmailTemplate.model');
     const model = this.connection.model('EmailTemplate', mod.EmailTemplateSchema);
     await model.insertMany([
-      { key: 'orderConfirm', name: 'Order Confirmation', subject: 'Order Confirmed #{{orderNumber}} - {{siteName}}', cta: 'Track My Order', intro: 'Thank you for your order! Here is a summary of what you ordered.', isActive: true },
-      { key: 'shipping', name: 'Shipping Update', subject: 'Your order #{{orderNumber}} has shipped! - {{siteName}}', cta: 'Track Shipment', intro: 'Great news! Your order is on its way.', isActive: true },
-      { key: 'verify', name: 'Email Verification', subject: 'Verify your email for {{siteName}}', cta: 'Verify Email', intro: 'Welcome to {{siteName}}! Please verify your email to start shopping.', isActive: true },
-      { key: 'reset', name: 'Password Reset', subject: 'Reset your {{siteName}} password', cta: 'Reset Password', intro: 'We received a request to reset your password.', isActive: true },
-      { key: 'sellerApproved', name: 'Seller Approved', subject: 'Congratulations! Your seller account is approved - {{siteName}}', cta: 'Go to Dashboard', intro: 'Your seller account has been approved. You can now list products.', isActive: true },
-      { key: 'sellerRejected', name: 'Seller Rejected', subject: 'Update on your seller application - {{siteName}}', cta: 'Contact Support', intro: 'Thank you for your interest. Unfortunately we could not approve your application at this time.', isActive: true },
+      { key: 'orderConfirm', name: 'Order Confirmation', subject: 'Order confirmed #{{orderNumber}} - {{siteName}}', cta: 'View order details', intro: 'Your order is confirmed. We have included a clean summary and will keep you posted as it moves.', isActive: true },
+      { key: 'shipping', name: 'Shipping Update', subject: 'Your order #{{orderNumber}} is on the way - {{siteName}}', cta: 'Track shipment', intro: 'Your package has left our fulfilment queue and is moving toward you.', isActive: true },
+      { key: 'verify', name: 'Email Verification', subject: 'Verify your email for {{siteName}}', cta: 'Verify email address', intro: 'Welcome to {{siteName}}. Confirm your email to unlock your account and start shopping.', isActive: true },
+      { key: 'reset', name: 'Password Reset', subject: 'Reset your {{siteName}} password', cta: 'Reset password', intro: 'We received a password reset request. Use the secure link below to choose a new password.', isActive: true },
+      { key: 'sellerApproved', name: 'Seller Approved', subject: 'Your seller account is approved - {{siteName}}', cta: 'Open seller dashboard', intro: 'Your seller account is active. You can now set up your store, list products, and manage orders.', isActive: true },
+      { key: 'sellerRejected', name: 'Seller Rejected', subject: 'Update on your seller application - {{siteName}}', cta: 'Contact support', intro: 'Thank you for applying. We could not approve the application in its current form.', isActive: true },
     ]);
     this.logger.log('✅ Created 6 email templates');
   }
@@ -2564,4 +2564,3 @@ export class SeedService {
     this.logger.log('✅ Wired theme role defaults + override flags');
   }
 }
-

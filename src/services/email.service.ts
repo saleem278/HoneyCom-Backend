@@ -29,10 +29,16 @@ export class EmailService {
         port: smtpPort,
         secure: smtpPort === 465,
         auth: { user: smtpUser, pass: smtpPassword },
+        connectionTimeout: 15000,
+        greetingTimeout: 10000,
+        socketTimeout: 20000,
+        tls: {
+          servername: smtpHost,
+        },
       });
       this.transporter.verify((error) => {
         if (error) this.logger.error(`SMTP connection failed: ${error.message}`);
-        else this.logger.log('SMTP server is ready to send emails');
+        else this.logger.log(`SMTP server is ready to send emails (${smtpHost}:${smtpPort} as ${smtpUser})`);
       });
     } else {
       this.logger.warn('SMTP not configured. Set SMTP_USER and SMTP_PASSWORD.');
@@ -46,11 +52,17 @@ export class EmailService {
       throw new Error('SMTP not configured');
     }
     const fromEmail = this.configService.get<string>('SMTP_FROM') || smtpUser;
-    const info = await this.transporter.sendMail({
-      from: fromEmail, to: options.to, subject: options.subject,
-      html: options.html, text: options.text,
-    });
-    this.logger.log(`Email sent to ${options.to} (messageId=${info.messageId})`);
+    try {
+      const info = await this.transporter.sendMail({
+        from: fromEmail, to: options.to, subject: options.subject,
+        html: options.html, text: options.text,
+      });
+      this.logger.log(`Email sent to ${options.to} (messageId=${info.messageId})`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Email send failed to ${options.to}: ${message}`);
+      throw new Error(`SMTP send failed: ${message}`);
+    }
   }
 
   /** Read brand name from settings for email subjects. */

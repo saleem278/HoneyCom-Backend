@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Query, Request, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Query, Request, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
 import { EmailService } from '../../services/email.service';
@@ -176,14 +176,19 @@ export class SettingsController {
       process.env.APP_NAME ||
       'Our Store';
     const sentAt = new Date().toISOString();
-    await this.emailService.sendEmail({
-      to,
-      subject: `${siteName} — SMTP test email`,
-      html: `<p>This is a test email sent from the <strong>${siteName} admin panel</strong>.</p>
-             <p>If you received this, your SMTP configuration is working correctly.</p>
-             <p style="color:#6b7280;font-size:12px;">Sent at ${sentAt}</p>`,
-      text: `${siteName} SMTP test email — sent at ${sentAt}. If you received this, your SMTP configuration is working correctly.`,
-    });
+    try {
+      await this.emailService.sendEmail({
+        to,
+        subject: `${siteName} — SMTP test email`,
+        html: `<p>This is a test email sent from the <strong>${siteName} admin panel</strong>.</p>
+               <p>If you received this, your SMTP configuration is working correctly.</p>
+               <p style="color:#6b7280;font-size:12px;">Sent at ${sentAt}</p>`,
+        text: `${siteName} SMTP test email — sent at ${sentAt}. If you received this, your SMTP configuration is working correctly.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ServiceUnavailableException(message);
+    }
     return { success: true, message: `Test email sent to ${to}` };
   }
 
