@@ -10,7 +10,7 @@ export class UpdateProfileDto {
   @IsString()
   name?: string;
 
-  @ApiPropertyOptional({ example: 'john@example.com' })
+  @ApiPropertyOptional({ example: 'john@dayam.in' })
   @IsOptional()
   @IsEmail()
   email?: string;
@@ -21,7 +21,7 @@ export class UpdateProfileDto {
   @Matches(/^\+?[1-9]\d{7,14}$/, { message: 'phone must be a valid phone number' })
   phone?: string;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar.png' })
+  @ApiPropertyOptional({ example: 'https://cdn.dayam.in/avatar.png' })
   @IsOptional()
   @IsString()
   avatar?: string;

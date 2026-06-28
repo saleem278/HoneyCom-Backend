@@ -36,7 +36,7 @@ export class CreateBlogDto {
   @MaxLength(500)
   excerpt?: string;
 
-  @ApiPropertyOptional({ example: 'https://example.com/image.jpg' })
+  @ApiPropertyOptional({ example: 'https://dayam.in/image.jpg' })
   @IsOptional()
   @IsString()
   featuredImage?: string;

@@ -418,7 +418,7 @@ export class SeedService {
     const users = [
       {
         name: 'Super Admin',
-        email: 'superadmin@example.com',
+        email: 'superadmin@dayam.in',
         password: hashedPassword,
         role: 'superadmin',
         status: 'active',
@@ -426,7 +426,7 @@ export class SeedService {
       },
       {
         name: 'Admin User',
-        email: 'admin@example.com',
+        email: 'admin@dayam.in',
         password: hashedPassword,
         role: 'admin',
         status: 'active',
@@ -434,7 +434,7 @@ export class SeedService {
       },
       {
         name: 'Raj Electronics',
-        email: 'seller@example.com',
+        email: 'seller@dayam.in',
         password: hashedPassword,
         role: 'seller',
         status: 'active',
@@ -446,7 +446,7 @@ export class SeedService {
       },
       {
         name: 'Priya Fashion Store',
-        email: 'jane.seller@example.com',
+        email: 'jane.seller@dayam.in',
         password: hashedPassword,
         role: 'seller',
         status: 'active',
@@ -455,7 +455,7 @@ export class SeedService {
       },
       {
         name: 'Ankit Sharma',
-        email: 'customer1@example.com',
+        email: 'customer1@dayam.in',
         password: hashedPassword,
         role: 'customer',
         status: 'active',
@@ -463,7 +463,7 @@ export class SeedService {
       },
       {
         name: 'Meera Patel',
-        email: 'customer2@example.com',
+        email: 'customer2@dayam.in',
         password: hashedPassword,
         role: 'customer',
         status: 'active',
@@ -471,7 +471,7 @@ export class SeedService {
       },
       {
         name: 'Content Editor',
-        email: 'editor@example.com',
+        email: 'editor@dayam.in',
         password: hashedPassword,
         role: 'contentEditor',
         status: 'active',
@@ -714,8 +714,8 @@ export class SeedService {
     const ProductSchema = productModule.ProductSchema;
     const productModel = this.connection.model('Product', ProductSchema);
 
-    const seller1 = users.find(u => u.email === 'seller@example.com');
-    const seller2 = users.find(u => u.email === 'jane.seller@example.com');
+    const seller1 = users.find(u => u.email === 'seller@dayam.in');
+    const seller2 = users.find(u => u.email === 'jane.seller@dayam.in');
 
     // Helper to find category by slug
     const cat = (slug: string) => {
@@ -1370,8 +1370,8 @@ export class SeedService {
     // Register Address model using schema directly
     const addressModel = this.connection.model('Address', AddressSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@example.com');
-    const customer2 = users.find(u => u.email === 'customer2@example.com');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
+    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
 
     if (!customer1 || !customer2) {
       this.logger.warn('Customer users not found, skipping address seeding');
@@ -1460,7 +1460,7 @@ export class SeedService {
     // Register PaymentMethod model using schema directly
     const paymentMethodModel = this.connection.model('PaymentMethod', PaymentMethodSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@example.com');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
 
     if (!customer1) {
       this.logger.warn('Customer user not found, skipping payment method seeding');
@@ -1583,7 +1583,7 @@ export class SeedService {
     // Register Cart model using schema directly
     const cartModel = this.connection.model('Cart', CartSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@example.com');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
 
     const carts = [
       {
@@ -1618,8 +1618,8 @@ export class SeedService {
     // Register Order model using schema directly
     const orderModel = this.connection.model('Order', OrderSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@example.com');
-    const customer2 = users.find(u => u.email === 'customer2@example.com');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
+    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
 
     // Get address IDs - use first address for customer1, second for customer2
     const address1 = addresses && addresses.length > 0 ? addresses[0]._id : null;
@@ -1708,8 +1708,8 @@ export class SeedService {
     // Register Review model using schema directly
     const reviewModel = this.connection.model('Review', ReviewSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@example.com');
-    const customer2 = users.find(u => u.email === 'customer2@example.com');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
+    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
 
     // Only products in a DELIVERED order for that customer can be verified
     // purchases. Per seedOrders: ORD-001 (customer1, DELIVERED) contains
@@ -1787,7 +1787,7 @@ export class SeedService {
     // Brand name for demo CMS/blog copy — env → neutral generic (never hardcoded).
     const brand = process.env.APP_NAME || 'Our Store';
 
-    const editor = users.find(u => u.email === 'editor@example.com');
+    const editor = users.find(u => u.email === 'editor@dayam.in');
 
     // Dynamically import BlogCategory schema only - avoid importing the pre-registered model
     const blogCategoryModule = await import('../../models/BlogCategory.model');
@@ -2161,9 +2161,9 @@ export class SeedService {
     const disputeModule = await import('../../models/Dispute.model');
     const disputeModel = this.connection.model('Dispute', disputeModule.DisputeSchema);
 
-    const customer1 = users.find(u => u.email === 'customer1@example.com');
-    const customer2 = users.find(u => u.email === 'customer2@example.com');
-    const seller = users.find(u => u.email === 'seller@example.com');
+    const customer1 = users.find(u => u.email === 'customer1@dayam.in');
+    const customer2 = users.find(u => u.email === 'customer2@dayam.in');
+    const seller = users.find(u => u.email === 'seller@dayam.in');
 
     if (!customer1 || !customer2 || !seller) {
       this.logger.warn('Skipping disputes — required users not found');

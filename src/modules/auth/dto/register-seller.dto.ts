@@ -41,7 +41,7 @@ export class RegisterSellerDto {
   @MinLength(2)
   name: string;
 
-  @ApiProperty({ example: 'jane@example.com' })
+  @ApiProperty({ example: 'jane@dayam.in' })
   @IsEmail()
   email: string;
 
